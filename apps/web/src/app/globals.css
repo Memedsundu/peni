@@ -1,0 +1,125 @@
+@import "tailwindcss";
+
+/* Peni palette: cream paper, espresso ink, copper for peni (a penny is a copper coin). */
+:root {
+  --bg: #faf6ef;
+  --surface: #ffffff;
+  --surface-2: #f3ece1;
+  --ink: #2b1d14;
+  --ink-2: #6b5847;
+  --line: #e6dccd;
+  --copper: #b5651d;
+  --copper-ink: #ffffff;
+  --copper-soft: #f6e6d6;
+  --leaf: #2f6b4f;
+  --leaf-soft: #e1efe7;
+  --berry: #a3333d;
+  --berry-soft: #f7e3e4;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17110d;
+    --surface: #211812;
+    --surface-2: #2b2018;
+    --ink: #f3e9dd;
+    --ink-2: #bba892;
+    --line: #3a2d23;
+    --copper: #e08a3c;
+    --copper-ink: #1a110b;
+    --copper-soft: #3a2616;
+    --leaf: #7fc4a0;
+    --leaf-soft: #1d3329;
+    --berry: #f08a92;
+    --berry-soft: #3b1e21;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17110d;
+  --surface: #211812;
+  --surface-2: #2b2018;
+  --ink: #f3e9dd;
+  --ink-2: #bba892;
+  --line: #3a2d23;
+  --copper: #e08a3c;
+  --copper-ink: #1a110b;
+  --copper-soft: #3a2616;
+  --leaf: #7fc4a0;
+  --leaf-soft: #1d3329;
+  --berry: #f08a92;
+  --berry-soft: #3b1e21;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-line: var(--line);
+  --color-copper: var(--copper);
+  --color-copper-ink: var(--copper-ink);
+  --color-copper-soft: var(--copper-soft);
+  --color-leaf: var(--leaf);
+  --color-leaf-soft: var(--leaf-soft);
+  --color-berry: var(--berry);
+  --color-berry-soft: var(--berry-soft);
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.55rem 1.1rem;
+  font-weight: 600;
+  font-size: 0.925rem;
+  transition: opacity 0.15s, transform 0.05s;
+  cursor: pointer;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-primary { background: var(--copper); color: var(--copper-ink); }
+.btn-ghost { border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+.btn-leaf { background: var(--leaf); color: var(--surface); }
+.btn-berry { border: 1px solid var(--berry); color: var(--berry); background: transparent; }
+
+.input {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  font-size: 1rem;
+}
+.input:focus { outline: 2px solid var(--copper); outline-offset: 1px; }
+
+.coin {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 999px;
+  background: radial-gradient(circle at 35% 35%, #f0b47a, var(--copper) 60%, #7a3f0e);
+  vertical-align: -0.05em;
+}

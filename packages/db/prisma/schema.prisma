@@ -1,0 +1,427 @@
+// Peni — one product, two sides: customers (iOS, Android, web) and cafés (web panel).
+// Money is stored in kuruş (Int). Peni is a whole number; 1 peni = 1 TL at the issuing café.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────── customers
+
+/// A person using the customer app. Not tied to any café — they join cafés through Membership.
+model Customer {
+  id                  String    @id @default(cuid())
+  /// E.164, e.g. +905321234567. Login is phone number + SMS code.
+  phone               String    @unique
+  displayName         String
+  avatarUrl           String?
+  bio                 String?   @db.VarChar(160)
+  /// Profiles are hidden from other members until the customer turns this on (KVKK-friendly default).
+  profileVisible      Boolean   @default(false)
+  createdAt           DateTime  @default(now())
+  deletionRequestedAt DateTime?
+
+  memberships  Membership[]
+  sessions     CustomerSession[]
+  devices      CustomerDevice[]
+  comments     PostComment[]
+  reactions    PostReaction[]
+  rsvps        EventRsvp[]
+}
+
+model PhoneVerification {
+  id         String    @id @default(cuid())
+  phone      String
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([phone, createdAt])
+}
+
+model CustomerSession {
+  id          String    @id @default(cuid())
+  customerId  String
+  /// SHA-256 of the bearer token. The token itself is never stored.
+  tokenHash   String    @unique
+  deviceLabel String?
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  revokedAt   DateTime?
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
+model CustomerDevice {
+  id         String         @id @default(cuid())
+  customerId String
+  platform   DevicePlatform
+  pushToken  String         @unique
+  lastSeenAt DateTime       @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+// ─────────────────────────────────────────────────────────── cafés
+
+enum PosKind {
+  /// Menu, open/closed state and payment come from Shelby.
+  shelby
+  /// No POS integration: menu lives in Peni, staff mark orders paid in the Peni panel.
+  standalone
+}
+
+model Cafe {
+  id                String   @id @default(cuid())
+  slug              String   @unique
+  name              String
+  address           String?
+  district          String?
+  city              String?
+  latitude          Float?
+  longitude         Float?
+  coverImageUrl     String?
+  timeZone          String   @default("Europe/Istanbul")
+  posKind           PosKind  @default(standalone)
+  /// Shelby's Cafe.id when posKind = shelby.
+  shelbyCafeId      String?  @unique
+  /// Barista's "pause app orders" switch for rush hours.
+  appOrderingPaused Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  settings    CafeSettings?
+  staff       StaffMember[]
+  menu        MenuItem[]
+  memberships Membership[]
+  orders      AppOrder[]
+  posts       CafePost[]
+}
+
+/// Mirrors CafePeniSettings in @peni/core.
+model CafeSettings {
+  cafeId                    String   @id
+  peniEnabled               Boolean  @default(true)
+  earnRateBps               Int      @default(500)
+  maxRedeemShareBps         Int      @default(10000)
+  /// When false, only `redeemableProductIds` can be paid with peni.
+  redeemAllProducts         Boolean  @default(true)
+  redeemableProductIds      String[] @default([])
+  dailyGiftLimitPeni        Int      @default(200)
+  giftExpiryHours           Int      @default(24)
+  askidaEnabled             Boolean  @default(true)
+  askidaProductIds          String[] @default([])
+  askidaClaimsPerDay        Int      @default(1)
+  askidaMinMembershipDays   Int      @default(0)
+  askidaMatchBps            Int      @default(0)
+  askidaMatchMonthlyCapPeni Int      @default(0)
+  noShowStrikeLimit         Int      @default(2)
+  updatedAt                 DateTime @updatedAt
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+}
+
+enum StaffRole {
+  owner
+  manager
+  barista
+}
+
+model StaffMember {
+  id           String    @id @default(cuid())
+  cafeId       String
+  name         String
+  email        String
+  role         StaffRole
+  /// Shelby User.id, for cafés that sign in to the Peni panel through Shelby.
+  shelbyUserId String?
+  createdAt    DateTime  @default(now())
+
+  cafe  Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  posts CafePost[]
+
+  @@unique([cafeId, email])
+}
+
+/// Standalone cafés edit this directly; for Shelby cafés it is a read cache of Shelby's menu.
+model MenuItem {
+  id          String  @id @default(cuid())
+  cafeId      String
+  /// Stable product id (Shelby product id for Shelby cafés).
+  productId   String
+  name        String
+  category    String
+  priceKurus  Int
+  available   Boolean @default(true)
+  description String?
+  imageUrl    String?
+  sortOrder   Int     @default(0)
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, productId])
+}
+
+// ─────────────────────────────────────────────────────────── membership & peni
+
+model Membership {
+  id                 String   @id @default(cuid())
+  cafeId             String
+  customerId         String
+  joinedAt           DateTime @default(now())
+  blocked            Boolean  @default(false)
+  preorderEnabled    Boolean  @default(true)
+  consecutiveNoShows Int      @default(0)
+
+  cafe     Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  customer Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orders   AppOrder[]
+
+  @@unique([customerId, cafeId])
+  @@index([cafeId])
+}
+
+enum LedgerKind {
+  earn
+  redeem
+  gift_send
+  gift_accept
+  gift_return
+  askida_donate
+  askida_match
+  askida_till
+  askida_claim
+  adjust
+  reversal
+}
+
+/// Append-only. UPDATE and DELETE are rejected by a trigger (see migrations).
+model LedgerTransaction {
+  id             String     @id @default(cuid())
+  cafeId         String
+  kind           LedgerKind
+  idempotencyKey String     @unique
+  /// At most one reversal per transaction.
+  reversesId     String?    @unique
+  meta           Json       @default("{}")
+  createdAt      DateTime   @default(now())
+
+  entries LedgerEntry[]
+
+  @@index([cafeId, kind, createdAt])
+}
+
+/// Append-only. Entries of one transaction sum to zero.
+model LedgerEntry {
+  id            String @id @default(cuid())
+  transactionId String
+  /// e.g. "member:<membershipId>", "askida:<cafeId>". See @peni/core ledger.ts.
+  account       String
+  delta         Int
+
+  transaction LedgerTransaction @relation(fields: [transactionId], references: [id])
+
+  @@index([account])
+  @@index([transactionId])
+}
+
+/// Running balance per account, updated in the same DB transaction as the entries.
+/// A CHECK constraint keeps member, askı and escrow balances at or above zero.
+model AccountBalance {
+  account   String   @id
+  balance   Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+enum GiftStatus {
+  pending
+  accepted
+  declined
+  expired
+}
+
+model Gift {
+  id                String     @id
+  cafeId            String
+  fromMembershipId  String
+  toMembershipId    String
+  peni              Int
+  message           String?    @db.VarChar(140)
+  status            GiftStatus @default(pending)
+  createdAt         DateTime   @default(now())
+  expiresAt         DateTime
+  resolvedAt        DateTime?
+  sendTransactionId String     @unique
+
+  @@index([toMembershipId, status])
+  @@index([fromMembershipId, createdAt])
+  @@index([status, expiresAt])
+}
+
+// ─────────────────────────────────────────────────────────── app orders
+
+enum FulfillmentStatus {
+  submitted
+  accepted
+  ready
+  collected
+  rejected
+  cancelled
+  no_show
+}
+
+model AppOrder {
+  id                String            @id @default(cuid())
+  cafeId            String
+  membershipId      String
+  /// The order's id in the POS (Shelby Order.id, or standalone_<id>).
+  posOrderId        String?           @unique
+  orderNumber       String?
+  status            FulfillmentStatus @default(submitted)
+  subtotalKurus     Int
+  peniDiscountKurus Int               @default(0)
+  askidaKurus       Int               @default(0)
+  /// What the till charges: subtotal − peni − askı.
+  dueKurus          Int
+  customerNote      String?           @db.VarChar(200)
+  rejectionReason   String?
+  submittedAt       DateTime          @default(now())
+  acceptedAt        DateTime?
+  readyAt           DateTime?
+  closedAt          DateTime?
+
+  cafe       Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  membership Membership     @relation(fields: [membershipId], references: [id])
+  lines      AppOrderLine[]
+
+  @@index([cafeId, status, submittedAt])
+  @@index([membershipId, submittedAt])
+}
+
+model AppOrderLine {
+  id             String  @id @default(cuid())
+  orderId        String
+  productId      String
+  /// Snapshot of the name at order time.
+  name           String
+  unitPriceKurus Int
+  quantity       Int
+  note           String? @db.VarChar(100)
+  /// Paid by the askı pool rather than the customer.
+  fromAskida     Boolean @default(false)
+
+  order AppOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────── community (the penny university side)
+
+enum PostKind {
+  /// Ordinary café update.
+  post
+  /// "Günün sorusu" — a question for members to answer under. Conversation the café can steer.
+  question
+  /// A penny table or a penny talk: a time, a place in the café, a topic.
+  event
+}
+
+/// Only café staff create posts. Members comment, react and RSVP.
+model CafePost {
+  id             String    @id @default(cuid())
+  cafeId         String
+  authorId       String
+  kind           PostKind  @default(post)
+  body           String    @db.VarChar(2000)
+  imageUrls      String[]  @default([])
+  pinned         Boolean   @default(false)
+  eventStartsAt  DateTime?
+  eventCapacity  Int?
+  publishedAt    DateTime  @default(now())
+  hiddenAt       DateTime?
+
+  cafe      Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  author    StaffMember    @relation(fields: [authorId], references: [id])
+  comments  PostComment[]
+  reactions PostReaction[]
+  rsvps     EventRsvp[]
+
+  @@index([cafeId, publishedAt])
+}
+
+model PostComment {
+  id         String    @id @default(cuid())
+  postId     String
+  customerId String
+  body       String    @db.VarChar(500)
+  createdAt  DateTime  @default(now())
+  /// Set by staff, or automatically after enough reports.
+  hiddenAt   DateTime?
+
+  post     CafePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([postId, createdAt])
+}
+
+model PostReaction {
+  postId     String
+  customerId String
+  createdAt  DateTime @default(now())
+
+  post     CafePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([postId, customerId])
+}
+
+model EventRsvp {
+  postId     String
+  customerId String
+  createdAt  DateTime @default(now())
+
+  post     CafePost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([postId, customerId])
+}
+
+enum ReportTarget {
+  post
+  comment
+  profile
+}
+
+enum ReportStatus {
+  open
+  upheld
+  dismissed
+}
+
+model ContentReport {
+  id         String       @id @default(cuid())
+  cafeId     String
+  targetType ReportTarget
+  targetId   String
+  reporterId String
+  reason     String       @db.VarChar(300)
+  status     ReportStatus @default(open)
+  createdAt  DateTime     @default(now())
+  resolvedAt DateTime?
+
+  @@unique([targetType, targetId, reporterId])
+  @@index([cafeId, status])
+}
