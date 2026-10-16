@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { cache } from "react";
-import { AppError } from "@/server/app";
+import { isAppError } from "@/server/app";
 import { SESSION_COOKIE } from "@/server/http";
 import { getApp } from "@/server/runtime";
 import { GiftLanding } from "./gift-landing";
@@ -45,8 +45,9 @@ const readGift = cache(async (id: string): Promise<GiftPreviewDTO | null> => {
   try {
     return await app.giftPreview(id, app.customerForToken(token));
   } catch (error) {
-    if (error instanceof AppError && error.status === 404) return null;
-    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "NOT_FOUND") return null;
+    if (isAppError(error) && (error.status === 404 || error.code === "NOT_FOUND")) return null;
+    // Domain errors (PeniError) carry the code too.
+    if (error instanceof Error && (error as { code?: unknown }).code === "NOT_FOUND") return null;
     throw error;
   }
 });

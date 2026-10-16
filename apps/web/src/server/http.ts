@@ -1,7 +1,7 @@
 import { isPeniError } from "@peni/core";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { AppError, type CustomerRecord, type PeniApp } from "./app";
+import { AppError, isAppError, type CustomerRecord, type PeniApp } from "./app";
 import { getApp } from "./runtime";
 
 export const SESSION_COOKIE = "peni_session";
@@ -16,7 +16,7 @@ const STATUS: Record<string, number> = {
 };
 
 export function errorResponse(error: unknown): NextResponse {
-  if (error instanceof AppError) {
+  if (isAppError(error)) {
     return NextResponse.json({ error: { code: error.code, message: error.message } }, { status: error.status });
   }
   if (isPeniError(error)) {

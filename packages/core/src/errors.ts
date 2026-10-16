@@ -29,6 +29,8 @@ export class PeniError extends Error {
   }
 }
 
+/** Also matches by name, so it survives module reloading in dev (two copies of the class). */
 export function isPeniError(error: unknown): error is PeniError {
-  return error instanceof PeniError;
+  if (error instanceof PeniError) return true;
+  return error instanceof Error && error.name === "PeniError" && typeof (error as Partial<PeniError>).code === "string";
 }

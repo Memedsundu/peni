@@ -32,11 +32,13 @@ export interface LongTableProps {
   className?: string;
 }
 
-const SEAT_FROM: TargetAndTransition = { scale: 0.6 };
-const SEAT_TO: TargetAndTransition = { scale: 1 };
+// The resting state is the same for both paths ({ scale: 1, opacity: 1 }), so the server render
+// (which never knows the motion preference) hydrates without a style mismatch.
+const SEAT_FROM: TargetAndTransition = { scale: 0.6, opacity: 1 };
+const SEAT_TO: TargetAndTransition = { scale: 1, opacity: 1 };
 const SEAT_IN: Transition = spring.seat;
-const FADE_FROM: TargetAndTransition = { opacity: 0 };
-const FADE_TO: TargetAndTransition = { opacity: 1 };
+const FADE_FROM: TargetAndTransition = { scale: 1, opacity: 0 };
+const FADE_TO: TargetAndTransition = { scale: 1, opacity: 1 };
 const FADE: Transition = { duration: 0.15 };
 const STILL: Transition = { duration: 0 };
 

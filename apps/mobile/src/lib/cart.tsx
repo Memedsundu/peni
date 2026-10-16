@@ -97,6 +97,13 @@ export interface Cart extends CartState {
    * names, for "Simit şu an tükendi; sepetine eklemedik."
    */
   reconcile: (menu: readonly MenuItemDTO[]) => string[];
+  /**
+   * Replaces every line at once (reorders from `?sepet=`, "Her zamanki"): the cart then holds
+   * exactly these, clamped and de-duplicated; the ikram, note and peni toggle are reset.
+   */
+  replaceLines: (lines: readonly CartLine[]) => void;
+  /** Draws a new idempotency key without changing the cart (after a failed send, §9.3). */
+  renewKey: () => void;
   /** Empties the cart and draws a new key. Call after a successful send. */
   clear: () => void;
   /** The request body for `api.orders.create`, with the capped peni amount. */
@@ -148,6 +155,17 @@ export function useCart(slug: string): Cart {
         });
         return dropped;
       },
+      replaceLines: (next) =>
+        set(() => {
+          const merged = new Map<string, number>();
+          for (const l of next) merged.set(l.productId, (merged.get(l.productId) ?? 0) + l.quantity);
+          const lines = [...merged]
+            .map(([productId, q]) => ({ productId, quantity: Math.max(0, Math.min(MAX_QTY, Math.floor(q))) }))
+            .filter((l) => l.quantity > 0)
+            .slice(0, MAX_LINES);
+          return { ...emptyCart(), lines };
+        }),
+      renewKey: () => set((c) => ({ ...c, idempotencyKey: newIdempotencyKey() })),
       clear: () => update(slug, () => emptyCart()),
       orderInput: (usePeniAmount) => ({
         cafeSlug: slug,

@@ -28,7 +28,9 @@ export function BottomNav() {
       aria-label="Ana menü"
       inert={hidden}
       initial={false}
-      animate={reduce ? { opacity: hidden ? 0 : 1 } : { y: hidden ? "100%" : "0%" }}
+      // Both properties every time: the server never knows the motion preference, so the first
+      // paint must be identical either way (y 0%, opacity 1) or hydration warns.
+      animate={{ y: hidden && !reduce ? "100%" : "0%", opacity: hidden && reduce ? 0 : 1 }}
       transition={reduce ? { duration: 0.15 } : tween.ui}
       style={{ viewTransitionName: "bottom-nav" }}
       className="fixed inset-x-0 bottom-0 z-40 bg-surface pb-[env(safe-area-inset-bottom)] shadow-floating md:hidden"
