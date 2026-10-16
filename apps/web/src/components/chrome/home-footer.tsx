@@ -3,8 +3,12 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { focusRing } from "@/components/ui/cx";
 
-/** Footer, on "/" only (design-system.md §8.2). */
+/**
+ * Footer, on "/" only (design-system.md §8.2): one line of history and the "Masa kuralları"
+ * link, under a hairline.
+ */
 export function HomeFooter() {
   const pathname = usePathname();
   if (pathname !== "/") return null;
@@ -14,9 +18,9 @@ export function HomeFooter() {
         <p className="text-meta text-ink-2">1554 Tahtakale&apos;den 1652 Londra&apos;ya: bir fincanın etrafında aynı masa.</p>
         <Link
           href="/masa-kurallari"
-          className="group -ml-2 inline-flex min-h-11 shrink-0 items-center gap-1.5 self-start rounded-[10px] px-2 text-button text-ink sm:-mr-2 sm:ml-0 sm:self-auto"
+          className={`group -ml-2 inline-flex min-h-11 shrink-0 items-center gap-1.5 self-start rounded-[10px] px-2 text-button text-ink sm:-mr-2 sm:ml-0 sm:self-auto ${focusRing}`}
         >
-          <span className="underline-offset-4 group-hover:underline">Masa kuralları</span>
+          <span className="decoration-[1.5px] underline-offset-[5px] group-hover:underline">Masa kuralları</span>
           <ArrowRight size={16} absoluteStrokeWidth strokeWidth={1.75} aria-hidden />
         </Link>
       </div>

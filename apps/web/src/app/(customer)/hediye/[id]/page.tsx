@@ -1,21 +1,58 @@
-import { ArrowRight } from "lucide-react";
+import type { GiftPreviewDTO } from "@peni/api";
+import { formatPeni, numberWord } from "@peni/brand/format";
 import type { Metadata } from "next";
-import Link from "next/link";
+import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
+import { cache } from "react";
+import { AppError } from "@/server/app";
+import { SESSION_COOKIE } from "@/server/http";
+import { getApp } from "@/server/runtime";
+import { GiftLanding } from "./gift-landing";
 
-export const metadata: Metadata = { title: "Ismarlama" };
+export const dynamic = "force-dynamic";
 
-/** Placeholder until the gift landing lands (design-system.md §9.7, [G11]); until then it points to the wallet. */
-export default function GiftPage() {
-  return (
-    <div className="mx-auto max-w-[440px]">
-      <h1 className="legend text-ink-2">Ismarlama</h1>
-      <Link
-        href="/cuzdan"
-        className="mt-4 inline-flex h-12 items-center gap-2 rounded-[10px] bg-primary px-5 text-button text-on-primary transition-[scale,background-color] duration-150 ease-out-strong hover:bg-primary-pressed active:scale-[.97] motion-reduce:transition-none motion-reduce:active:scale-100"
-      >
-        Cüzdanına git
-        <ArrowRight size={20} strokeWidth={1.75} aria-hidden />
-      </Link>
-    </div>
-  );
+type Params = Promise<{ id: string }>;
+
+/** Gift landing `/hediye/[id]` (design-system.md §9.7, [G11]). Public; personalised when signed in. */
+export default async function GiftPage({ params }: { params: Params }) {
+  const { id } = await params;
+  const gift = await readGift(id);
+  if (!gift) notFound();
+  return <GiftLanding key={gift.id} gift={gift} />;
+}
+
+export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
+  const { id } = await params;
+  const gift = await readGift(id).catch(() => null);
+  if (!gift) return { title: "Ismarlama" };
+  const what = gift.goods ?? formatPeni(gift.peni);
+  const title = `Seni ${spoken(what)} bekliyor`;
+  const description = `${gift.fromFirstName} sana ${gift.cafeName} için ${what} ısmarladı.`;
+  return {
+    title: "Ismarlama",
+    description,
+    // Link previews must not be cached as the recipient's personal page.
+    robots: { index: false },
+    openGraph: { title, description, type: "website" },
+    twitter: { card: "summary_large_image", title, description },
+  };
+}
+
+/** Shared by the page and its metadata within one request; null when there is no such gift. */
+const readGift = cache(async (id: string): Promise<GiftPreviewDTO | null> => {
+  // Outside the try: cookies() signals dynamic rendering by throwing during prerender.
+  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
+  const app = await getApp();
+  try {
+    return await app.giftPreview(id, app.customerForToken(token));
+  } catch (error) {
+    if (error instanceof AppError && error.status === 404) return null;
+    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "NOT_FOUND") return null;
+    throw error;
+  }
+});
+
+function spoken(goods: string): string {
+  const m = /^(\d+) (.+)$/.exec(goods);
+  return m ? `${numberWord(Number(m[1]))} ${m[2]}` : goods;
 }
