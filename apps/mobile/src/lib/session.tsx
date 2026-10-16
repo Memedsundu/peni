@@ -1,5 +1,5 @@
 import { createPeniClient, type CustomerDTO, type PeniClient } from "@peni/api";
-import * as SecureStore from "expo-secure-store";
+import { storage } from "./storage";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
 const TOKEN = "peni.token";
@@ -27,8 +27,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void (async () => {
-      setToken(await SecureStore.getItemAsync(TOKEN));
-      setStaffKeyState(await SecureStore.getItemAsync(STAFF));
+      setToken(await storage.get(TOKEN));
+      setStaffKeyState(await storage.get(STAFF));
       setReady(true);
     })();
   }, []);
@@ -39,20 +39,20 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const signIn = useCallback(async (t: string, c: CustomerDTO) => {
-    await SecureStore.setItemAsync(TOKEN, t);
+    await storage.set(TOKEN, t);
     setToken(t);
     setCustomer(c);
   }, []);
 
   const signOut = useCallback(async () => {
-    await SecureStore.deleteItemAsync(TOKEN);
+    await storage.remove(TOKEN);
     setToken(null);
     setCustomer(null);
   }, []);
 
   const setStaffKey = useCallback(async (key: string | null) => {
-    if (key) await SecureStore.setItemAsync(STAFF, key);
-    else await SecureStore.deleteItemAsync(STAFF);
+    if (key) await storage.set(STAFF, key);
+    else await storage.remove(STAFF);
     setStaffKeyState(key);
   }, []);
 
