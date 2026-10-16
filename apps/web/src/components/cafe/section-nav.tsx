@@ -21,13 +21,17 @@ function spyLine(): number {
 }
 
 /**
- * Scroll-spy for the café sections (design-system.md §9.3 item 6). IntersectionObserver marks
- * the section crossing the line under the sticky bar; at the very bottom the last one wins.
- * While a click is scrolling the page, the clicked tab holds (no flicker through the middle).
+ * Scroll-spy for the café sections (design-system.md §9.3 item 6). On every scrolled frame the
+ * section whose top has passed the line under the sticky bar is current; at the very bottom the
+ * last one wins. (An IntersectionObserver missed tall sections: their ratio never crosses a
+ * threshold again, so "Askı" stayed lit through the whole Masa feed.)
+ * While a click is scrolling the page, the clicked tab holds, and it lets go only once the
+ * target has landed, then the geometry decides again.
  */
 export function useScrollSpy(ids: readonly CafeSectionId[]) {
   const [active, setActive] = useState<CafeSectionId>(ids[0] ?? "menu");
   const lock = useRef<number | null>(null);
+  const pickRef = useRef<() => void>(() => {});
   const reduce = useReducedMotion();
   const key = ids.join(",");
 
@@ -35,9 +39,11 @@ export function useScrollSpy(ids: readonly CafeSectionId[]) {
     const els = ids.map((id) => document.getElementById(id)).filter((el): el is HTMLElement => el !== null);
     if (els.length === 0) return;
 
+    let line = spyLine();
+    let frame = 0;
     const pick = () => {
+      frame = 0;
       if (lock.current !== null) return;
-      const line = spyLine();
       const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
       if (atBottom) {
         setActive(ids[ids.length - 1]!);
@@ -47,22 +53,22 @@ export function useScrollSpy(ids: readonly CafeSectionId[]) {
       for (const el of els) if (el.getBoundingClientRect().top <= line) current = el.id as CafeSectionId;
       setActive(current);
     };
-
-    // The observer only says "something crossed"; `pick` reads the geometry once per crossing.
-    const io = new IntersectionObserver(pick, {
-      rootMargin: `-${spyLine()}px 0px -40% 0px`,
-      threshold: [0, 1],
-    });
-    els.forEach((el) => io.observe(el));
-    const onScroll = () => {
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
-      if (atBottom) pick();
+    const schedule = () => {
+      if (!frame) frame = window.requestAnimationFrame(pick);
     };
-    window.addEventListener("scroll", onScroll, { passive: true });
+    const onResize = () => {
+      line = spyLine();
+      schedule();
+    };
+    pickRef.current = pick;
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", onResize);
     pick();
     return () => {
-      io.disconnect();
-      window.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", onResize);
+      pickRef.current = () => {};
     };
     // `key` stands for `ids`.
   }, [key]);
@@ -77,9 +83,21 @@ export function useScrollSpy(ids: readonly CafeSectionId[]) {
       const release = () => {
         if (lock.current !== null) window.clearTimeout(lock.current);
         lock.current = null;
+        window.removeEventListener("scrollend", onEnd);
+        pickRef.current();
       };
-      lock.current = window.setTimeout(release, reduce ? 50 : 900);
-      window.addEventListener("scrollend", release, { once: true });
+      // A smooth scroll can report scrollend early (an interrupted step); only a landed target
+      // releases the tab. The timeout is the backstop for browsers without scrollend.
+      const landed = () => {
+        const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+        const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+        return atBottom || Math.abs(target.getBoundingClientRect().top - margin) <= 2;
+      };
+      function onEnd() {
+        if (landed()) release();
+      }
+      lock.current = window.setTimeout(release, reduce ? 50 : 1200);
+      window.addEventListener("scrollend", onEnd);
       target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
       if (opts.focus !== false && section) section.focus({ preventScroll: true });
       try {

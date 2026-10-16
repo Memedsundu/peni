@@ -4,21 +4,19 @@ import { errorCopy } from "@peni/brand/copy";
 import { Coffee } from "lucide-react";
 import { CafeCover } from "@/components/brand";
 import { Banner, Button, EmptyState, Skeleton } from "@/components/ui";
+import { recallCover } from "./cover-memo";
 
 /**
  * Loading (design-system.md §9.3 "Page states"): skeletons with the real geometry for the
- * cover, the masthead lines, the segmented bar and four menu rows. The cover is already the
- * café's own plate (its colourway and device come from the slug), so the card → café morph
- * (A16) lands on it instead of on a grey block.
+ * cover, the masthead lines, the segmented bar and four menu rows. When the visitor came from
+ * a café card, the cover is that café's own plate (remembered on tap, so the colourway is the
+ * one the café chose, G9) and the card → café morph (A16) lands on it. Otherwise it is a plain
+ * static plate: never a colourway guessed from the slug.
  */
 export function CafeSkeleton({ slug }: { slug: string | null }) {
   return (
     <div aria-busy="true" aria-label="Kafe yükleniyor" className="flex flex-col">
-      {slug ? (
-        <CafeCover cafe={{ slug, name: "", coverImageUrl: null }} size="hero" />
-      ) : (
-        <Skeleton radius={14} className="h-40 w-full md:h-[200px]" />
-      )}
+      <KnownCover slug={slug} />
       <div className="mt-6 lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-12">
         <div className="flex flex-col">
           <Skeleton radius={0} className="h-1.5 w-full" />
@@ -73,7 +71,7 @@ export function CafeNotFound() {
 export function CafeLoadError({ slug, message, retrying, onRetry }: { slug: string; message: string; retrying: boolean; onRetry: () => void }) {
   return (
     <div className="flex flex-col gap-6">
-      <CafeCover cafe={{ slug, name: "", coverImageUrl: null }} size="hero" />
+      <KnownCover slug={slug} />
       <Banner
         tone="danger"
         // The button says "Tekrar dene"; the sentence doesn't need to say it too.
@@ -86,4 +84,13 @@ export function CafeLoadError({ slug, message, retrying, onRetry }: { slug: stri
       />
     </div>
   );
+}
+
+/** The café's real plate when a card told us its colourway; otherwise a plain cover skeleton. */
+function KnownCover({ slug }: { slug: string | null }) {
+  const known = slug ? recallCover(slug) : null;
+  if (slug && known?.hue) {
+    return <CafeCover cafe={{ slug, name: "", coverImageUrl: known.coverImageUrl, hue: known.hue }} size="hero" />;
+  }
+  return <Skeleton radius={14} className="h-40 w-full md:h-[200px]" />;
 }

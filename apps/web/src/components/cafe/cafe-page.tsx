@@ -226,11 +226,10 @@ export function CafePage({ slug, initial, entry }: { slug: string; initial: Cafe
     }
     if (katil && signedIn && !cafe.membership) void doJoin();
 
-    try {
-      window.history.replaceState(window.history.state, "", `/k/${slug}${window.location.hash}`);
-    } catch {
-      // The parameters stay in the address bar; harmless, they were handled.
-    }
+    // Through the router, not history.replaceState: Next's router state and cache must forget the
+    // parameters too, or Back (from the fiş) and router.refresh() bring them back and re-apply
+    // them: a cart for an order already sent, or a second latte.
+    router.replace(`/k/${slug}${window.location.hash}`, { scroll: false });
     // Runs once, when the cart and the café are both in hand.
   }, [cart.restored, cafe]);
 

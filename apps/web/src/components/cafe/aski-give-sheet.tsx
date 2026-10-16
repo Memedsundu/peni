@@ -187,7 +187,10 @@ export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetPr
       {empty ? (
         <AskiStateNote icon={CoinGlyph} text={noBalanceText} />
       ) : (
-        <div className="flex flex-col gap-4">
+        // Frozen while sending: the request carries the choice made at the tap, so the chips, the
+        // stepper and above all the name switch (the one consent in this flow) must not change
+        // under it. The sheet's close button stays live.
+        <div className="flex flex-col gap-4" inert={busy} aria-busy={busy}>
           <div className="flex flex-col gap-2.5">
             <p className="text-button text-ink" aria-hidden>
               {askiCopy.giveSheet.what}

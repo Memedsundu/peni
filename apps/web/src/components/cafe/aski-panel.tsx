@@ -55,11 +55,11 @@ export function AskiPanel() {
   /*
    * A8 after one's own donation. The new count and the hang signal land in ONE render (the rail
    * hangs only the items that arrive with its signal); the refetch then replaces this local
-   * picture with the server's, without replaying anything.
+   * picture with the server's, without replaying anything. The override belongs to the exact
+   * `askida` object it was computed from: every refetch replaces that object, so from then on
+   * the server's numbers win (even if someone took the same item and the pool looks "unchanged").
    */
-  const [own, setOwn] = useState<{ base: Pick<AskidaDTO, "balancePeni" | "itemsAvailable">; itemsAvailable: number; donatedPeni: number } | null>(
-    null,
-  );
+  const [own, setOwn] = useState<{ askida: AskidaDTO; itemsAvailable: number; donatedPeni: number } | null>(null);
   const [hangSignal, setHangSignal] = useState<HangSignal>({ n: 0 });
 
   const askida = cafe.askida;
@@ -67,7 +67,7 @@ export function AskiPanel() {
 
   const reference = referenceItem(cafe);
   // Until the refetch lands the server still reports the pool as it was before the donation.
-  const local = own && own.base.balancePeni === askida.balancePeni && own.base.itemsAvailable === askida.itemsAvailable ? own : null;
+  const local = own && own.askida === askida ? own : null;
   // Counted in the reference item; in a cheaper askı item when no whole reference item is left (poolView).
   const view = local ? { itemsAvailable: local.itemsAvailable, referenceItemName: askida.referenceItemName } : poolView(cafe);
   const shown = {
@@ -86,7 +86,7 @@ export function AskiPanel() {
     if (next) {
       const n = (typeof hangSignal === "number" ? hangSignal : hangSignal.n) + 1;
       setOwn({
-        base: { balancePeni: askida.balancePeni, itemsAvailable: askida.itemsAvailable },
+        askida,
         itemsAvailable: next.itemsAvailable,
         donatedPeni: d.peni + d.matchedPeni,
       });
@@ -103,6 +103,20 @@ export function AskiPanel() {
     else requireJoin(() => setGiveOpen(true));
   };
 
+  const actions = (
+    <>
+      <div className="flex gap-2">
+        <Button variant="aski" onClick={() => setTakeOpen(true)} className="min-w-0 flex-1">
+          {askiCopy.take}
+        </Button>
+        <Button variant="secondary" onClick={give} className="min-w-0 flex-1">
+          {askiCopy.give}
+        </Button>
+      </div>
+      {ikram && <AskiIkramNote name={ikram.name} className="mt-3" />}
+    </>
+  );
+
   return (
     // The legend is the Askı section's heading: an h2 beside "Menü" and "Masa" in the page outline.
     <div ref={panelRef} data-aski-panel className="@container rounded-[14px] bg-aski-soft p-4 text-ink md:p-5">
@@ -116,24 +130,18 @@ export function AskiPanel() {
 
       {/*
         Phone: one column. From a 576px panel (@xl): the rail column is exactly 12 slots wide
-        (21rem = 12 × 28px) and the two buttons share that width; the donors sit beside it.
+        (21rem = 12 × 28px). With named donors, the buttons share the rail's width and the donors
+        sit beside it. With none (the default, since naming is opt-in) the buttons take the second
+        column, so the panel reads "what's waiting | what you can do" with no empty half.
       */}
       <div className="mt-3 grid gap-5 @xl:grid-cols-[21rem_minmax(0,1fr)] @xl:gap-x-8">
         <div className="min-w-0">
           <AskiRail count={rail.count} item={rail.item} size="md" hangSignal={hangSignal} />
           <AskiCaption askida={shown} className="mt-3" />
-          <div className="mt-5 flex gap-2">
-            <Button variant="aski" onClick={() => setTakeOpen(true)} className="min-w-0 flex-1">
-              {askiCopy.take}
-            </Button>
-            <Button variant="secondary" onClick={give} className="min-w-0 flex-1">
-              {askiCopy.give}
-            </Button>
-          </div>
-          {ikram && <AskiIkramNote name={ikram.name} className="mt-3" />}
+          {donors.length > 0 && <div className="mt-5">{actions}</div>}
         </div>
 
-        {donors.length > 0 && (
+        {donors.length > 0 ? (
           <ul
             className={cx(
               "flex flex-col gap-2 border-t border-aski-ink/20 pt-4",
@@ -149,6 +157,8 @@ export function AskiPanel() {
               </li>
             ))}
           </ul>
+        ) : (
+          <div className="min-w-0 @xl:self-center">{actions}</div>
         )}
       </div>
 

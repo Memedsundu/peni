@@ -6,6 +6,7 @@ import { Check, CirclePause } from "lucide-react";
 import Link from "next/link";
 import { useId } from "react";
 import { Amount, AskiRail, CafeCover } from "@/components/brand";
+import { rememberCover } from "@/components/cafe/cover-memo";
 import { Chip, cx, focusRing, pressMotion, StatusDot, tappable } from "@/components/ui";
 
 /*
@@ -29,6 +30,8 @@ export function CafeCard({ cafe }: { cafe: CafeSummaryDTO }) {
   return (
     <Link
       href={`/k/${cafe.slug}`}
+      // The café page's skeleton draws this exact plate while it loads (and the morph lands on it).
+      onClick={() => rememberCover(cafe.slug, { hue: cafe.hue ?? null, coverImageUrl: cafe.coverImageUrl })}
       aria-labelledby={titleId}
       aria-describedby={detailsId}
       className={cx(
