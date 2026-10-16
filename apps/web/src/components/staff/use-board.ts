@@ -178,9 +178,14 @@ export function useBumps(slug: string, board: DashboardState): Bumps {
 
   const bump = useCallback(
     (order: OrderDTO, action: BumpAction) => {
+      const id = order.id;
+      // A second tap on a ticket whose bump is still waiting (a double tap at the counter, or a
+      // tap on the copy fading out of its old column) is not a new bump: sending the first one
+      // now would cost it its undo, and the repeat would only come back refused.
+      if (pending.current.has(id)) return;
+      // One undo at a time: the other tickets' waiting bumps go out now.
       flush();
       touch();
-      const id = order.id;
       const staffKey = readStaffKey();
       const token = ++tokens.current;
       setOverrides((prev) => new Map(prev).set(id, { status: statusAfter(action), at: new Date().toISOString(), token }));

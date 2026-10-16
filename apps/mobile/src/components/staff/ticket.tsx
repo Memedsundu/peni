@@ -57,7 +57,7 @@ export const StaffTicket = memo(function StaffTicket({ order, slug, hue, posKind
   const t = useTokens();
   const code = ticketCode(order);
   const name = firstName(order.customerName);
-  const chip = elapsedChip(elapsedMinutes(order, now));
+  const chip = elapsedChip(elapsedMinutes(order, now), order.status === "ready" ? "ready" : "making");
   const notes = ticketNotes(order);
   const primary = primaryAction(order.status, posKind);
   const canReject = order.status === "submitted" || order.status === "accepted";

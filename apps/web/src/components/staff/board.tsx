@@ -3,7 +3,7 @@
 import type { OrderDTO } from "@peni/api";
 import { staffCopy } from "@peni/brand/copy";
 import type { CafeHue } from "@peni/brand/tokens";
-import { AnimatePresence, LayoutGroup, useReducedMotion } from "motion/react";
+import { AnimatePresence, LayoutGroup, useIsPresent, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { useState, type ReactNode, type Ref } from "react";
 import { MD_UP, Segmented, Skeleton, cx, segmentedPanelId, segmentedTabId, useMediaQuery } from "@/components/ui";
@@ -124,14 +124,16 @@ function Column({
 }
 
 const ENTER = { opacity: 1, scale: 1 };
-const EXIT = { opacity: 0, scale: 0.96 };
+const EXIT = { opacity: 0, scale: 0.96, pointerEvents: "none" as const };
 /** Reduced motion: nothing scales or slides; tickets fade in 150ms. */
-const EXIT_REDUCED = { opacity: 0, transition: { duration: 0.15 } };
+const EXIT_REDUCED = { opacity: 0, pointerEvents: "none" as const, transition: { duration: 0.15 } };
 
 /** `ref` reaches the `<li>`: AnimatePresence's popLayout measures and pops the element through it. */
 function BoardItem({ ref, children }: { ref?: Ref<HTMLLIElement>; children: ReactNode }) {
   const [moving, setMoving] = useState(false);
   const reduce = useReducedMotion();
+  // A ticket on its way out (its fade has no layout animation) is as untouchable as one sliding.
+  const present = useIsPresent();
   return (
     <m.li
       ref={ref}
@@ -143,7 +145,7 @@ function BoardItem({ ref, children }: { ref?: Ref<HTMLLIElement>; children: Reac
       onLayoutAnimationStart={() => setMoving(true)}
       onLayoutAnimationComplete={() => setMoving(false)}
       // Taps never land on a moving ticket (A12).
-      style={{ pointerEvents: moving ? "none" : undefined }}
+      style={{ pointerEvents: moving || !present ? "none" : undefined }}
       className="min-w-0"
     >
       {children}

@@ -305,12 +305,21 @@ export const masaCopy = {
 /* ========================================================================================== */
 
 /** Elapsed chip on a staff ticket, from `submittedAt` (from `acceptedAt` once accepted). */
-export function elapsedChip(minutes: number): {
+export function elapsedChip(
+  minutes: number,
+  /** "ready": counted from `readyAt`. The bar is done, so nothing is late: from 10 min the cup is just waiting. */
+  stage: "making" | "ready" = "making",
+): {
   label: string;
   icon: "Clock" | "Timer" | "AlarmClock";
   tone: "neutral" | "warning" | "danger";
 } {
   const m = Math.max(0, Math.floor(minutes));
+  if (stage === "ready") {
+    return m >= 10
+      ? { label: `${formatNumber(m)} dk bekliyor`, icon: "Clock", tone: "warning" }
+      : { label: `${formatNumber(m)} dk`, icon: "Clock", tone: "neutral" };
+  }
   if (m >= 10) return { label: `${formatNumber(m)} dk${SEP}gecikiyor`, icon: "AlarmClock", tone: "danger" };
   if (m >= 5) return { label: `${formatNumber(m)} dk`, icon: "Timer", tone: "warning" };
   return { label: `${formatNumber(m)} dk`, icon: "Clock", tone: "neutral" };

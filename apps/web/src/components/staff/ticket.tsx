@@ -14,6 +14,9 @@ import { canMarkNoShow, elapsedMinutes, firstName, primaryAction, ticketNotes, t
 
 const ELAPSED_ICON = { Clock, Timer, AlarmClock } as const;
 
+/** The quiet secondary: beside the payment line (its padding hangs off the edge), or under it. */
+const SECONDARY = "-ml-3 @[16rem]:-mr-2 @[16rem]:ml-0";
+
 /** A13: the new-ticket bar is fully visible for 10s, then fades over 600ms (no fade when reduced). */
 export const NEW_BAR_MS = 10_000;
 
@@ -36,20 +39,23 @@ export interface StaffTicketProps {
  *
  * 1. "P-004" in `text-ticket` (condensed, D17), the first name in `text-item`, and the elapsed
  *    chip on the right: 0–4 min `Clock` neutral, 5–9 `Timer` warning, ≥10 `AlarmClock`
- *    "12 dk · gecikiyor" danger.
+ *    "12 dk · gecikiyor" danger. A Hazır ticket counts from `readyAt` and is never late — the
+ *    bar is done: `Clock` neutral, from 10 min "12 dk bekliyor" in warning.
  * 2. The lines, "2 × Çay"; an askı line carries the neutral HOOK "ikram" chip — never
  *    turquoise, never beside the customer's name (§17).
  * 3. Notes on `warning-soft` with `StickyNote`.
  * 4. "Kasada ₺55" with the quiet secondary action beside it ("Yetişemiyoruz"; "Gelmedi" only
- *    ≥10 min after `readyAt`), then the 56px ink primary, always last. Shelby boards show
- *    "Kasada kapanacak" on ready tickets instead (D18).
+ *    ≥10 min after `readyAt`), then the 56px ink primary, always last. On a slip narrower than
+ *    16rem (the three-column board on a portrait tablet) the secondary drops under the payment
+ *    line, its label aligned with "Kasada". Shelby boards show "Kasada kapanacak" on ready
+ *    tickets instead of a primary (D18): a flat info line, so it never reads as a dead button.
  */
 export function StaffTicket({ order, slug, hue, posKind, now, arrivedAt, onBump, onReject }: StaffTicketProps) {
   const codeId = useId();
   const nameId = useId();
   const headingId = `${codeId} ${nameId}`;
   const minutes = elapsedMinutes(order, now);
-  const chip = elapsedChip(minutes);
+  const chip = elapsedChip(minutes, order.status === "ready" ? "ready" : "making");
   const notes = ticketNotes(order);
   const primary = primaryAction(order.status, posKind);
   const canReject = order.status === "submitted" || order.status === "accepted";
@@ -110,26 +116,29 @@ export function StaffTicket({ order, slug, hue, posKind, now, arrivedAt, onBump,
           </div>
         )}
 
-        <FisDivider className="mt-4 mb-1" />
-        <div className="flex min-h-11 flex-wrap items-center justify-between gap-x-3">
-          <p className="text-meta text-ink-2">
-            {order.dueKurus > 0 ? (
-              <>
-                {/* "Kasada ₺55": the amount is what the till needs, so it carries the weight. */}
-                {staffCopy.payment(order.dueKurus).replace(formatTL(order.dueKurus), "")}
-                <span className="font-semibold text-ink tabular-nums">{formatTL(order.dueKurus)}</span>
-              </>
-            ) : (
-              staffCopy.payment(0)
-            )}
+        <FisDivider className="mt-4 mb-2" />
+        <div className="flex flex-col items-start @[16rem]:flex-row @[16rem]:items-center @[16rem]:justify-between @[16rem]:gap-x-3">
+          <p className="flex min-h-11 items-center text-meta text-ink-2">
+            {/* One span: as loose flex items, the text would lose the space before the amount. */}
+            <span>
+              {order.dueKurus > 0 ? (
+                <>
+                  {/* "Kasada ₺55": the amount is what the till needs, so it carries the weight. */}
+                  {staffCopy.payment(order.dueKurus).replace(formatTL(order.dueKurus), "")}
+                  <span className="font-semibold text-ink tabular-nums">{formatTL(order.dueKurus)}</span>
+                </>
+              ) : (
+                staffCopy.payment(0)
+              )}
+            </span>
           </p>
           {canReject && (
-            <Button variant="quiet" size="sm" onClick={onReject} aria-describedby={headingId} className="-mr-2">
+            <Button variant="quiet" size="sm" onClick={onReject} aria-describedby={headingId} className={SECONDARY}>
               {staffCopy.reject}
             </Button>
           )}
           {noShow && (
-            <Button variant="quiet" size="sm" onClick={() => onBump("no_show")} aria-describedby={headingId} className="-mr-2">
+            <Button variant="quiet" size="sm" onClick={() => onBump("no_show")} aria-describedby={headingId} className={SECONDARY}>
               {staffCopy.noShow}
             </Button>
           )}
@@ -141,7 +150,7 @@ export function StaffTicket({ order, slug, hue, posKind, now, arrivedAt, onBump,
               {primary.label}
             </Button>
           ) : (
-            <p className="mt-1 flex min-h-14 items-center justify-center gap-2 rounded-[10px] bg-surface-2 px-4 text-button text-ink-2">
+            <p className="flex min-h-11 items-center gap-2 text-body text-ink-2">
               <Info aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0" />
               {primary.label}
             </p>

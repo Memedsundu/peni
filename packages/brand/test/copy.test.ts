@@ -91,6 +91,9 @@ describe("masa and staff", () => {
     expect(elapsedChip(3)).toEqual({ label: "3 dk", icon: "Clock", tone: "neutral" });
     expect(elapsedChip(7)).toEqual({ label: "7 dk", icon: "Timer", tone: "warning" });
     expect(elapsedChip(12)).toEqual({ label: "12 dk · gecikiyor", icon: "AlarmClock", tone: "danger" });
+    // A ready cup waits for its customer: never "gecikiyor", never danger.
+    expect(elapsedChip(7, "ready")).toEqual({ label: "7 dk", icon: "Clock", tone: "neutral" });
+    expect(elapsedChip(27, "ready")).toEqual({ label: "27 dk bekliyor", icon: "Clock", tone: "warning" });
   });
   it("staff strings", () => {
     expect(staffCopy.payment(5500)).toBe("Kasada ₺55");
