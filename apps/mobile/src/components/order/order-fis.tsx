@@ -14,7 +14,7 @@ import type { OrderDTO } from "@peni/api";
 import { orderCopy, staffCopy } from "@peni/brand/copy";
 import { formatTL } from "@peni/brand/format";
 import { memo, useEffect, useState } from "react";
-import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
+import { Platform, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Fis, FisDivider, FisRow, FisText, HazirStamp, StatusTrack } from "@/components/brand";
 import { Skeleton } from "@/components/ui";
 import { fonts, useTokens } from "@/lib/theme";
@@ -41,7 +41,9 @@ export const OrderFis = memo(function OrderFis({ order, prepRange, stampAnimates
       variant="order"
       tone={ready ? "ready" : "default"}
       legend={orderCopy.legend(order.cafeName)}
-      announce={code ? orderCopy.readyAnnouncement(code) : orderCopy.headline.ready}
+      // iOS only: VoiceOver has no live regions. TalkBack and the web hear the headline's
+      // assertive region, and a second announcement would make them say it twice.
+      announce={Platform.OS !== "ios" ? null : code ? orderCopy.readyAnnouncement(code) : orderCopy.headline.ready}
     >
       <CodeBlock code={code} who={whoLine(order, now)} ready={ready} stampAnimates={stampAnimates} />
       <StatusTrack order={order} stopped={isVoid(order.status)} style={styles.track} />
@@ -142,7 +144,7 @@ function Headline({ order, prepRange, earnMode }: { order: OrderDTO; prepRange?:
 
   return (
     <View style={styles.headline}>
-      {/* One live region; it turns assertive for Hazır (the Fis also announces it on iOS). */}
+      {/* One live region (the text `liveText` says on iOS); it turns assertive for Hazır. */}
       <View accessibilityLiveRegion={ready ? "assertive" : "polite"} aria-live={ready ? "assertive" : "polite"} style={styles.headlineText}>
         <FisText variant="h3" accessibilityLabel={earned != null ? `${title} ${orderCopy.earned(earned)}` : undefined}>
           {noWidow(title)}
@@ -202,7 +204,8 @@ function Lines({ order }: { order: OrderDTO }) {
       ) : null}
       <FisDivider />
       {due > 0 ? (
-        <View style={styles.total} accessible accessibilityLabel={`${orderCopy.dueLabel} ${formatTL(due)}`}>
+        // A void order owes nothing: the struck amount is for the eye; the label says so.
+        <View style={styles.total} accessible accessibilityLabel={voided ? orderCopy.noPayment : `${orderCopy.dueLabel} ${formatTL(due)}`}>
           <FisText variant="strong" color={voided ? "ink2" : "ink"}>
             {orderCopy.dueLabel}
           </FisText>
@@ -234,7 +237,10 @@ export function OrderFisSkeleton() {
   return (
     <View accessible accessibilityLabel="Sipariş yükleniyor" accessibilityState={{ busy: true }} aria-busy>
       <Fis variant="order" legend={null}>
-        <Skeleton line="plate" width={196} style={styles.skeletonLegend} />
+        {/* In its own box: a margin on the bar itself would replace the line's half-leading. */}
+        <View style={styles.skeletonLegend}>
+          <Skeleton line="plate" width={196} />
+        </View>
         <View style={styles.codeBlock}>
           <Skeleton line="code" width={164} />
           <Skeleton line="meta" width={104} style={styles.whoGap} />
@@ -269,7 +275,13 @@ export function OrderFisSkeleton() {
           <Skeleton line="strong" width={132} />
           <Skeleton line="h3" width={60} />
         </View>
+        {/* "Peni kodun: …" */}
+        <View style={styles.memberCode}>
+          <Skeleton line="plate" width={168} />
+        </View>
       </Fis>
+      {/* "Kafeye dön", 24pt under the slip: the page doesn't jump when the order lands. */}
+      <Skeleton height={48} radius={10} style={styles.skeletonAction} />
     </View>
   );
 }
@@ -306,6 +318,7 @@ const styles = StyleSheet.create({
   struck: { textDecorationLine: "line-through" },
   memberCode: { marginTop: 20 },
   skeletonLegend: { marginTop: 8 },
+  skeletonAction: { marginTop: 24 },
   skeletonTrack: { flexDirection: "row" },
   skeletonLine: { position: "absolute", left: "12.5%", right: "12.5%", top: 10, height: 2 },
   skeletonStop: { flex: 1, alignItems: "center", gap: 6 },

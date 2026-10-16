@@ -280,7 +280,7 @@ export const masaCopy = {
   eventLegend: "PENİ MASASI",
   /** "6/14 yer dolu · sen de geliyorsun" / "Masa doldu". */
   seats: (count: number, capacity: number, rsvpedByMe = false) =>
-    count >= capacity ? "Masa doldu" : `${formatNumber(count)}/${formatNumber(capacity)} yer dolu${rsvpedByMe ? `${SEP}sen de geliyorsun` : ""}`,
+    `${count >= capacity ? "Masa doldu" : `${formatNumber(count)}/${formatNumber(capacity)} yer dolu`}${rsvpedByMe ? `${SEP}sen de geliyorsun` : ""}`,
   rsvp: "Geliyorum",
   rsvped: "Geliyorsun",
   full: "Masa doldu",

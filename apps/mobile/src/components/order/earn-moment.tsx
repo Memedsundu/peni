@@ -57,8 +57,29 @@ function EarnLine({ peni, cafe, strike }: { peni: number; cafe: CoinCafe; strike
 /* Once per order                                                                              */
 /* ------------------------------------------------------------------------------------------ */
 
-/** SecureStore keys allow letters, digits, ".", "-" and "_". */
-const seenKey = (orderId: string) => `peni.earnSeen.${orderId.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+/**
+ * The orders whose earn moment has played here: one bounded key (the newest 50 ids), never a
+ * key per order — Keychain items outlive the app, even an uninstall on iOS.
+ */
+const SEEN_KEY = "peni.earnSeen";
+const SEEN_MAX = 50;
+
+async function readSeen(): Promise<string[]> {
+  try {
+    const parsed: unknown = JSON.parse((await storage.get(SEEN_KEY)) ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Marks `orderId` as seen; returns whether it already was. */
+async function markSeen(orderId: string): Promise<boolean> {
+  const seen = await readSeen();
+  if (seen.includes(orderId)) return true;
+  await storage.set(SEEN_KEY, JSON.stringify([orderId, ...seen].slice(0, SEEN_MAX)));
+  return false;
+}
 
 /**
  * Whether the A6 strike plays for this order: `strike` when the order was collected while the
@@ -78,15 +99,14 @@ export function useEarnMoment(orderId: string | null, earned: number | null, liv
     decided.current = key;
     if (live) {
       setMode("strike");
-      void storage.set(seenKey(orderId), "1").catch(() => {});
+      void markSeen(orderId).catch(() => {});
       return;
     }
     let alive = true;
     (async () => {
       let seen = false;
       try {
-        seen = (await storage.get(seenKey(orderId))) === "1";
-        if (!seen) await storage.set(seenKey(orderId), "1");
+        seen = await markSeen(orderId);
       } catch {
         // Keychain unavailable: it may strike once more next time. Harmless.
       }

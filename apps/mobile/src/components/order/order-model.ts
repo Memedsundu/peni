@@ -72,6 +72,29 @@ export function peniUsed(order: Pick<OrderDTO, "peniDiscountKurus">): number {
   return Math.round(order.peniDiscountKurus / 100);
 }
 
+/**
+ * What the fiş's live region holds, as one sentence for VoiceOver (which has no live regions):
+ * the headline, the peni earned, and a void order's note and back-lines.
+ */
+export function liveText(order: OrderDTO, prepRange?: { low: number; high: number } | null): string {
+  const earned = earnedPeni(order);
+  const notes = voidNotes(order);
+  return [headline(order, prepRange), earned != null ? orderCopy.earned(earned) : null, notes.note, ...notes.lines]
+    .filter((part): part is string => !!part)
+    .join(" ");
+}
+
+/**
+ * The cancel sheet's sentence (§9.4, as on web). The promise about peni going back is made only
+ * when peni was used: "Barista henüz başlamadı." on its own otherwise (and until the order is read).
+ */
+export function cancelSheetBody(order: Pick<OrderDTO, "peniDiscountKurus"> | null): string {
+  const body = orderCopy.cancelSheet.body;
+  if (order && peniUsed(order) > 0) return body;
+  const cut = body.indexOf(";");
+  return cut > 0 ? `${body.slice(0, cut)}.` : body;
+}
+
 /** The product the askı covered, for "Askıdaki çay yerine döndü."; null when no askı was used. */
 export function askiItemName(order: Pick<OrderDTO, "askidaKurus" | "lines">): string | null {
   if (order.askidaKurus <= 0) return null;

@@ -1,7 +1,7 @@
 import type { CafeDetailDTO, PostDTO } from "@peni/api";
 import { masaCopy } from "@peni/brand/copy";
 import { formatNumber, formatTime, relDay, SEP, TIME_ZONE } from "@peni/brand/format";
-import { buildIcs } from "@/server/ics";
+import { buildIcs } from "@/lib/ics";
 
 /*
  * Pure helpers for the Masa feed (design-system.md §9.3 "Masa", §6.5). No React, no DOM:

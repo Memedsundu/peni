@@ -16,6 +16,7 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import * as SystemUI from "expo-system-ui";
 import { useEffect, useMemo } from "react";
+import { Platform } from "react-native";
 import { ToastHost } from "@/components/ui/toast";
 import { CartProvider } from "@/lib/cart";
 import { ModeProvider, useMode } from "@/lib/mode";
@@ -68,6 +69,19 @@ function Shell() {
   useEffect(() => {
     SystemUI.setBackgroundColorAsync(t.bg).catch(() => {});
   }, [t.bg]);
+
+  // Web only (the browser preview): the D2 focus ring — 2px in the theme's focus colour, 2px off
+  // the control, for keyboard focus only — instead of each browser's own outline.
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof document === "undefined") return;
+    let style = document.getElementById("peni-focus") as HTMLStyleElement | null;
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "peni-focus";
+      document.head.appendChild(style);
+    }
+    style.textContent = `:focus-visible{outline:2px solid ${t.focus};outline-offset:2px}:focus:not(:focus-visible){outline:none}`;
+  }, [t.focus]);
 
   useEffect(() => {
     if (ready) SplashScreen.hide();

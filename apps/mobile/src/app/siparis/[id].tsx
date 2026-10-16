@@ -22,7 +22,7 @@ import { AccessibilityInfo, Platform, RefreshControl, ScrollView, StyleSheet, Vi
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   earnedPeni,
-  headline,
+  liveText,
   OrderFis,
   OrderFisSkeleton,
   POLL_FAILURES_SHOWN,
@@ -86,9 +86,10 @@ export default function OrderScreen() {
     lastStatus.current = order.status;
     if (prev === null || prev === order.status) return;
     if (order.status === "rejected") haptic("warning");
-    // Hazır is announced by the Fis; VoiceOver has no live regions, so say the rest here.
+    // Hazır is announced by the Fis; VoiceOver has no live regions, so say the rest here, all
+    // of what the live region holds ("Afiyet olsun. +5 peni cüzdanında").
     if (Platform.OS === "ios" && order.status !== "ready") {
-      AccessibilityInfo.announceForAccessibility(headline(order, prepRange));
+      AccessibilityInfo.announceForAccessibility(liveText(order, prepRange));
     }
   }, [order?.status]);
 

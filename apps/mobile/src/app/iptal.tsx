@@ -1,11 +1,12 @@
 /**
  * `iptal` sheet (design-system.md §9.4, §10.3, D16): the cancel confirm, opened from the fiş
  * with `?id=<orderId>` and only while the order is `submitted`, so a double tap can never
- * cancel. A native form sheet with `fitToContents` (its content has natural heights, never
- * `flex: 1`); the title lives in the content, because Android has no header in a sheet.
+ * cancel. A native form sheet with `fitToContents`, framed like every other sheet
+ * (`SheetFrame`: the title in the content, a 44pt "Kapat", the 16pt gutter).
  *
  * - "Siparişi iptal edelim mi?" + "Barista henüz başlamadı; iptal edersen kullandığın peni
- *   cüzdanına döner." Buttons: quiet danger "İptal et" and primary "Vazgeç".
+ *   cüzdanına döner." — the peni half only when peni was used (`cancelSheetBody`, as on web).
+ *   Buttons: quiet danger "İptal et" and primary "Vazgeç".
  * - Errors stay inline in the sheet (a danger Banner over the buttons), the order is re-read,
  *   and nothing else on the fiş changes.
  * - If the barista accepts while the sheet is open, there is nothing left to cancel: the sheet
@@ -14,17 +15,14 @@
  *   already reads "İptal edildi." No toast (§17).
  */
 import { actionCopy, errorCopy, orderCopy } from "@peni/brand/copy";
-import { SEP } from "@peni/brand/format";
 import { router, Stack, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { errorMessage, orderCode, putOrder, useCachedOrder } from "@/components/order";
-import { Banner, Button, ButtonRow, T } from "@/components/ui";
+import { SheetFrame } from "@/components/cafe/sheet";
+import { cancelSheetBody, errorMessage, putOrder, useCachedOrder } from "@/components/order";
+import { Banner, Button, ButtonRow } from "@/components/ui";
 import { refreshActiveOrder } from "@/lib/active-order";
 import { haptic } from "@/lib/haptics";
 import { useSession } from "@/lib/session";
-import { useTokens } from "@/lib/theme";
 
 /** The barista moved first (the web sheet says the same). */
 const TOO_LATE = "Barista siparişini hazırlamaya başladı; artık iptal edilemez.";
@@ -33,8 +31,6 @@ const CANCELLING = "İptal ediliyor…";
 
 export default function IptalSheet() {
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const t = useTokens();
-  const insets = useSafeAreaInsets();
   const { api } = useSession();
   const order = useCachedOrder(id);
   const [busy, setBusy] = useState(false);
@@ -56,8 +52,6 @@ export default function IptalSheet() {
   }, [order?.status]);
 
   const tooLate = order != null && order.status !== "submitted" && order.status !== "cancelled";
-  const code = order ? orderCode(order) : null;
-  const legend = order ? [code, order.cafeName].filter(Boolean).join(SEP) : null;
 
   const confirm = async () => {
     if (!id || busy) return;
@@ -77,53 +71,44 @@ export default function IptalSheet() {
     }
   };
 
+  const banner = !id ? (
+    <Banner tone="danger" title={errorCopy.orderNotFound} />
+  ) : tooLate ? (
+    <Banner tone="info" title={TOO_LATE} />
+  ) : error ? (
+    <Banner tone="danger" title={error} />
+  ) : null;
+
   return (
-    <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: 16 + insets.bottom }]}>
+    <>
       {/* No swipe-to-dismiss while the request is in flight. */}
       <Stack.Screen options={{ gestureEnabled: !busy }} />
-
-      <View style={styles.head}>
-        {legend ? (
-          <T variant="plate" color="ink2">
-            {legend}
-          </T>
-        ) : null}
-        <T variant="h3">{c.title}</T>
-        {tooLate || !id ? null : (
-          <T variant="body" color="ink2">
-            {c.body}
-          </T>
-        )}
-      </View>
-
-      {!id ? (
-        <Banner tone="danger" title={errorCopy.orderNotFound} />
-      ) : tooLate ? (
-        <Banner tone="info" title={TOO_LATE} />
-      ) : error ? (
-        <Banner tone="danger" title={error} />
-      ) : null}
-
-      {tooLate || !id ? (
-        <Button title={actionCopy.ok} fullWidth onPress={() => router.back()} />
-      ) : (
-        <ButtonRow>
-          <Button
-            title={c.confirm}
-            variant="danger-quiet"
-            fullWidth
-            loading={busy}
-            loadingLabel={CANCELLING}
-            onPress={() => void confirm()}
-          />
-          <Button title={c.keep} fullWidth disabled={busy} onPress={() => router.back()} />
-        </ButtonRow>
-      )}
-    </View>
+      <SheetFrame
+        title={c.title}
+        description={tooLate || !id ? undefined : cancelSheetBody(order)}
+        closeDisabled={busy}
+        footer={
+          tooLate || !id ? (
+            <Button title={actionCopy.ok} fullWidth onPress={() => router.back()} />
+          ) : (
+            <ButtonRow>
+              <Button
+                title={c.confirm}
+                variant="danger-quiet"
+                fullWidth
+                loading={busy}
+                loadingLabel={CANCELLING}
+                onPress={() => void confirm()}
+              />
+              <Button title={c.keep} fullWidth disabled={busy} onPress={() => router.back()} />
+            </ButtonRow>
+          )
+        }
+        // No banner: the buttons follow the description directly.
+        bodyStyle={banner ? undefined : { marginTop: 0 }}
+      >
+        {banner}
+      </SheetFrame>
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  sheet: { paddingHorizontal: 20, paddingTop: 28, gap: 20 },
-  head: { gap: 8 },
-});

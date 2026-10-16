@@ -86,6 +86,7 @@ describe("masa and staff", () => {
     expect(masaCopy.seats(6, 14)).toBe("6/14 yer dolu");
     expect(masaCopy.seats(6, 14, true)).toBe("6/14 yer dolu · sen de geliyorsun");
     expect(masaCopy.seats(14, 14)).toBe("Masa doldu");
+    expect(masaCopy.seats(14, 14, true)).toBe("Masa doldu · sen de geliyorsun");
   });
   it("elapsed chips (§9.10)", () => {
     expect(elapsedChip(3)).toEqual({ label: "3 dk", icon: "Clock", tone: "neutral" });
