@@ -68,7 +68,8 @@ function SignedIn({ me }: { me: MeDTO }) {
 function SignedOut() {
   return (
     <>
-      <Card className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* p-4 at every width: the sentence lines up with the rows' 16px inset below. */}
+      <Card padding="none" className="flex flex-col items-start gap-4 p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-body-lg text-ink">Adını ve görünürlüğünü ayarlamak için giriş yap.</p>
         <Button href={signInHref("/profil")} className="max-sm:w-full">
           {actionCopy.signIn}

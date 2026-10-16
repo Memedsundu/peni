@@ -325,6 +325,8 @@ export function GiftSheet({ open, onOpenChange, wallet, cities, cafeSlug, onSent
       }}
       // Typed input (a number, a note) survives a stray tap outside.
       dismissible={step === "cafe" || step === "done"}
+      // The step's body, not the close button: the title is announced, and nothing lights up.
+      initialFocus={bodyRef}
       eyebrow={eyebrow}
       title={title}
       description={description}

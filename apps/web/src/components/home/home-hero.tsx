@@ -22,7 +22,7 @@ export function HomeHero() {
         Siparişini önceden ver, kasada öde. Her harcamada o kafeye özel peni biriktir, askıya bir çay bırak.
       </p>
       <Link
-        href="/masa-kurallari"
+        href="/masa-kurallari#neden-peni"
         className={cx(
           "group -ml-2 mt-3 inline-flex min-h-11 items-center gap-2 rounded-[10px] px-2 text-button text-ink",
           focusRing,

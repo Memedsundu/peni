@@ -2,9 +2,13 @@ import type { OrderDTO, OrderLineDTO } from "@peni/api";
 import { describe, expect, it } from "vitest";
 import {
   askiItemName,
+  cancelSheetBody,
   documentTitle,
+  earnMode,
   fisLines,
   groupByDay,
+  hasEarn,
+  isNotFoundError,
   itemsSummary,
   paidQuantities,
   reorderHref,
@@ -113,7 +117,40 @@ describe("history", () => {
   });
 });
 
+describe("earn moment", () => {
+  it("strikes live, or the first time; otherwise it is simply there", () => {
+    expect(earnMode("ready", true)).toBe("strike");
+    expect(earnMode("collected", false)).toBe("strike");
+    expect(earnMode(null, false)).toBe("strike");
+    expect(earnMode("collected", true)).toBe("static");
+    expect(earnMode(null, true)).toBe("static");
+  });
+
+  it("needs a collected order with earned peni", () => {
+    expect(hasEarn(order({ status: "collected", earnedPeni: 2 }))).toBe(true);
+    expect(hasEarn(order({ status: "collected", earnedPeni: 0 }))).toBe(false);
+    expect(hasEarn(order({ status: "ready", earnedPeni: 2 }))).toBe(false);
+    expect(hasEarn(null)).toBe(false);
+  });
+});
+
+describe("errors", () => {
+  it("recognises a not-found by its shape, not its class", () => {
+    expect(isNotFoundError({ code: "NOT_FOUND", status: 404, message: "Order not found" })).toBe(true);
+    expect(isNotFoundError(Object.assign(new Error("x"), { status: 404 }))).toBe(true);
+    expect(isNotFoundError(new Error("boom"))).toBe(false);
+    expect(isNotFoundError(null)).toBe(false);
+  });
+});
+
 describe("copy", () => {
+  it("only promises the peni back in the cancel sheet when peni was used", () => {
+    expect(cancelSheetBody(order({ peniDiscountKurus: 9_000 }))).toBe(
+      "Barista henüz başlamadı; iptal edersen kullandığın peni cüzdanına döner.",
+    );
+    expect(cancelSheetBody(order())).toBe("Barista henüz başlamadı.");
+  });
+
   it("titles the tab 'Hazır · P-003' only while ready", () => {
     expect(documentTitle(order({ status: "ready" }))).toBe("Hazır · P-003");
     expect(documentTitle(order({ status: "accepted" }))).toBe("Sipariş P-003 · Peni");

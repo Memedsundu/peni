@@ -95,7 +95,6 @@ export function CafeGridSkeleton() {
               <Skeleton className="h-4 w-32" />
               <Skeleton className="mt-2 h-[22px]" style={{ width: `${w * 100}%` }} />
               <Skeleton className="mt-5 h-4 w-44" />
-              <Skeleton className="mt-3 h-4 w-36" />
             </div>
           </div>
         </li>

@@ -183,7 +183,42 @@ export function voidNotes(order: OrderDTO): { note: string | null; lines: string
   }
 }
 
+/**
+ * The cancel sheet's sentence (§9.4). The spec's promise about peni going back is only made
+ * when peni was used: "Barista henüz başlamadı." on its own otherwise.
+ */
+export function cancelSheetBody(order: Pick<OrderDTO, "peniDiscountKurus">): string {
+  const body = orderCopy.cancelSheet.body;
+  if (peniUsed(order) > 0) return body;
+  const cut = body.indexOf(";");
+  return cut > 0 ? `${body.slice(0, cut)}.` : body;
+}
+
+/**
+ * A "not found" from the app layer, judged by shape rather than `instanceof`: after a dev hot
+ * reload the long-lived app singleton throws errors from an older copy of the module.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  const e = error as { status?: unknown; code?: unknown } | null;
+  return typeof e === "object" && e !== null && (e.status === 404 || e.code === "NOT_FOUND");
+}
+
 /* ------------------------------------------------------------------------- earn moment (A6) */
+
+/** A collected order that earned peni: the fiş shows the coin and "+2 peni cüzdanında". */
+export function hasEarn(order: Pick<OrderDTO, "status" | "earnedPeni"> | null): boolean {
+  return order != null && order.status === "collected" && order.earnedPeni != null && order.earnedPeni > 0;
+}
+
+/**
+ * How the earn moment shows: `strike` plays A6, `static` is simply there. It strikes when the
+ * order turned collected while the customer was looking (`previous` was another status), or
+ * the first time this order's peni is seen at all.
+ */
+export function earnMode(previous: FulfillmentStatus | null, seenBefore: boolean): "strike" | "static" {
+  const live = previous !== null && previous !== "collected";
+  return live || !seenBefore ? "strike" : "static";
+}
 
 const earnKey = (orderId: string) => `peni.earnSeen.${orderId}`;
 

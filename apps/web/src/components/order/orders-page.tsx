@@ -9,6 +9,7 @@ import { Banner, Button, cx, EmptyState, Skeleton } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { CompactFis } from "./compact-fis";
 import { OrderHistory, OrderHistorySkeleton } from "./order-history";
+import { ordersCopy } from "./copy";
 import { byNewest, isActive, ORDERS_POLL_MS } from "./order-model";
 
 export type OrdersInitial =
@@ -18,12 +19,6 @@ export type OrdersInitial =
   | { kind: "client" };
 
 type LoadState = "ok" | "loading" | "signed_out" | "error";
-
-const TITLE = "Siparişlerim";
-const LEGEND_NOW = "ŞİMDİ";
-const LEGEND_PAST = "GEÇMİŞ";
-const EMPTY = "Henüz siparişin yok. Bir kafe seç, ilk siparişini ver.";
-const SIGNED_OUT = "Siparişlerini görmek için giriş yap.";
 
 function messageOf(e: unknown): string {
   if (e instanceof PeniApiError && e.code === "NETWORK") return errorCopy.network;
@@ -105,7 +100,7 @@ export function OrdersPage({ initial }: { initial: OrdersInitial }) {
   if (load === "signed_out") {
     return (
       <Page>
-        <EmptyState icon={ReceiptText} text={SIGNED_OUT} action={{ label: actionCopy.signIn, href: "/giris?returnTo=%2Fsiparisler" }} />
+        <EmptyState icon={ReceiptText} text={ordersCopy.signedOut} action={{ label: actionCopy.signIn, href: "/giris?returnTo=%2Fsiparisler" }} />
       </Page>
     );
   }
@@ -132,8 +127,8 @@ export function OrdersPage({ initial }: { initial: OrdersInitial }) {
         {load === "error" && error ? (
           <Banner tone="danger" title={withoutRetry(error)} action={retry} />
         ) : (
-          <div aria-busy="true" aria-label="Siparişler yükleniyor" className="flex flex-col">
-            <Skeleton className="mb-2 h-4 w-16" />
+          <div aria-busy="true" aria-label={ordersCopy.loading} className="flex flex-col">
+            <Skeleton className="mb-3 h-4 w-16" />
             <OrderHistorySkeleton />
           </div>
         )}
@@ -145,7 +140,7 @@ export function OrdersPage({ initial }: { initial: OrdersInitial }) {
     return (
       <Page>
         {error && <Banner tone="danger" title={withoutRetry(error)} action={retry} className="mb-4" />}
-        <EmptyState icon={ReceiptText} text={EMPTY} action={{ label: actionCopy.browseCafes, href: "/" }} />
+        <EmptyState icon={ReceiptText} text={ordersCopy.empty} action={{ label: actionCopy.browseCafes, href: "/" }} />
       </Page>
     );
   }
@@ -159,7 +154,7 @@ export function OrdersPage({ initial }: { initial: OrdersInitial }) {
         {active.length > 0 && (
           <section aria-labelledby="simdi">
             <h2 id="simdi" className="mb-3 legend text-ink-2">
-              {LEGEND_NOW}
+              {ordersCopy.legendNow}
             </h2>
             <ul className="flex flex-col gap-5">
               {active.map((o) => (
@@ -172,8 +167,8 @@ export function OrdersPage({ initial }: { initial: OrdersInitial }) {
         )}
         {past.length > 0 && (
           <section aria-labelledby="gecmis">
-            <h2 id="gecmis" className="mb-2 legend text-ink-2">
-              {LEGEND_PAST}
+            <h2 id="gecmis" className="mb-3 legend text-ink-2">
+              {ordersCopy.legendPast}
             </h2>
             <OrderHistory orders={past} now={now} />
           </section>
@@ -187,7 +182,7 @@ export function OrdersPage({ initial }: { initial: OrdersInitial }) {
 function Page({ wide = false, children }: { wide?: boolean; children: React.ReactNode }) {
   return (
     <div className={cx("mx-auto w-full max-w-[640px]", wide && "lg:max-w-[1088px]")}>
-      <h1 className="mb-6 font-display text-h2 md:mb-8">{TITLE}</h1>
+      <h1 className="mb-6 font-display text-h2 md:mb-8">{ordersCopy.title}</h1>
       {children}
     </div>
   );

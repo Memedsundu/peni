@@ -12,6 +12,7 @@ import { cx, focusRing, MD_UP, NumberRoll, Sheet, tappable, useMediaQuery } from
 import { ease, spring } from "@/lib/motion";
 import type { CafeCart, CartTotals } from "./cart";
 import { CartBody, CartFooter } from "./cart-content";
+import { BlockedBanner } from "./menu-section";
 
 interface CartViewProps {
   cafe: CoinCafe;
@@ -131,26 +132,29 @@ export function CartSheet({ open, onOpenChange, ...view }: CartViewProps & { ope
       title={cartCopy.title}
       footer={<CartFooter totals={view.totals} blocked={view.blocked} busy={view.busy} error={view.error} onSubmit={view.onSubmit} />}
     >
-      <CartBody cafe={view.cafe} cart={view.cart} totals={view.totals} editable />
+      <CartBody cafe={view.cafe} cart={view.cart} totals={view.totals} editable busy={view.busy} />
     </Sheet>
   );
 }
 
 /**
  * CartPanel (≥1024): a sticky fiş beside the menu, legend "MODA KAHVESİ · SEPET", h3
- * "Siparişin". Empty: "Menüden bir şey seç. Ödemeyi kasada yaparsın."
+ * "Siparişin". Empty: "Menüden bir şey seç. Ödemeyi kasada yaparsın." — or, while ordering is
+ * blocked, the menu's banner instead, so the slip never invites what the menu can't do.
  */
 export function CartPanel(view: CartViewProps) {
   const empty = view.totals.count === 0;
   return (
     <Fis variant="order" legend={`${trUpper(view.cafe.name)} · SEPET`} bodyClassName="gap-0">
       <h3 className="mt-3 font-display text-h3 text-ink">{cartCopy.title}</h3>
-      {empty ? (
+      {empty && view.blocked ? (
+        <BlockedBanner reason={view.blocked} className="mt-3" />
+      ) : empty ? (
         <p className="mt-2 text-meta text-ink-2">{cartCopy.empty}</p>
       ) : (
         <>
           <div className="mt-3">
-            <CartBody cafe={view.cafe} cart={view.cart} totals={view.totals} editable={false} />
+            <CartBody cafe={view.cafe} cart={view.cart} totals={view.totals} editable={false} busy={view.busy} />
           </div>
           <hr className="my-4 border-0 border-t-[1.5px] border-dashed border-line-strong" />
           <CartFooter totals={view.totals} blocked={view.blocked} busy={view.busy} error={view.error} onSubmit={view.onSubmit} />

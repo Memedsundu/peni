@@ -1,13 +1,17 @@
 import type { GiftPreviewDTO } from "@peni/api";
-import { cafeHue, formatPeni, numberWord, SEP, trUpper } from "@peni/brand/format";
+import { cafeHue, SEP, trUpper } from "@peni/brand/format";
 import { cafeHues } from "@peni/brand/tokens";
 import { ImageResponse } from "next/og";
 import { coinDataUri, OG, OG_FONT, OG_SIZE, ogFonts } from "@/components/home/og-art";
 import { getApp } from "@/server/runtime";
+import { giftShareCopy } from "./og-copy";
 
-export const alt = "Seni bir çay bekliyor";
-export const size = OG_SIZE;
-export const contentType = "image/png";
+/** One image per gift; its alt text is the title the image draws (expired, peni-only…). */
+export async function generateImageMetadata({ params }: { params: { id: string } | Promise<{ id: string }> }) {
+  const { id } = await params;
+  const gift = await read(id);
+  return [{ id: "kart", alt: giftShareCopy(gift).title, size: OG_SIZE, contentType: "image/png" }];
+}
 
 /**
  * The link preview of a shared ısmarlama (design-system.md §15, P2): the café's colourway as
@@ -19,10 +23,7 @@ export default async function GiftOpengraphImage({ params }: { params: Promise<{
   const { id } = await params;
   const [fonts, gift] = await Promise.all([ogFonts(), read(id)]);
 
-  const what = gift ? (gift.goods ?? formatPeni(gift.peni)) : null;
-  const pending = gift?.status === "pending" || gift?.status === "accepted";
-  const title = !gift ? "Mahallenin masası." : pending ? `Seni ${spoken(what!)} bekliyor` : "Bu ısmarlamanın süresi doldu.";
-  const line = gift && pending ? `${gift.fromFirstName} sana ${gift.cafeName} için ${what} ısmarladı.` : null;
+  const { title, line } = giftShareCopy(gift);
   const band = gift ? cafeHues[cafeHue(gift.cafeSlug)] : OG.ink;
 
   return new ImageResponse(
@@ -46,7 +47,7 @@ export default async function GiftOpengraphImage({ params }: { params: Promise<{
         </div>
       </div>
     ),
-    { ...size, fonts },
+    { ...OG_SIZE, fonts },
   );
 }
 
@@ -57,9 +58,4 @@ async function read(id: string): Promise<GiftPreviewDTO | null> {
   } catch {
     return null;
   }
-}
-
-function spoken(goods: string): string {
-  const m = /^(\d+) (.+)$/.exec(goods);
-  return m ? `${numberWord(Number(m[1]))} ${m[2]}` : goods;
 }

@@ -11,7 +11,8 @@ import { peni } from "@/lib/client";
 /*
  * QA harness for the Askı module. The café is fetched live (the cookie session decides who is
  * looking); `?durum=` bends the response into each state so every one can be screenshot:
- * /kit/aski?durum=claimed_today, ?kafe=kuzguncuk, …
+ * /kit/aski?durum=claimed_today, ?kafe=kuzguncuk, ?bakiye=16 (the viewer's balance),
+ * ?havuz=40 (the pool, in peni; the viewer may take), …
  */
 
 type Durum =
@@ -47,9 +48,16 @@ const DURUMLAR: { id: Durum; label: string }[] = [
   { id: "kalabalik", label: "23 çay" },
 ];
 
-function bend(cafe: CafeDetailDTO, durum: Durum): CafeDetailDTO {
+function bend(cafe: CafeDetailDTO, durum: Durum, bakiye: number | null, havuz: number | null): CafeDetailDTO {
   const a = { ...cafe.askida };
   const c: CafeDetailDTO = { ...cafe, askida: a };
+  if (bakiye != null && c.membership) c.membership = { ...c.membership, balancePeni: bakiye };
+  if (havuz != null) {
+    const ref = cafe.menu.find((m) => m.askida && m.name === a.referenceItemName);
+    a.balancePeni = havuz;
+    a.itemsAvailable = ref ? Math.floor(havuz / Math.ceil(ref.priceKurus / 100)) : 0;
+    a.myEligibility = { status: "ok" };
+  }
   switch (durum) {
     case "claimed_today":
       a.myEligibility = { status: "claimed_today" };
@@ -93,15 +101,26 @@ function bend(cafe: CafeDetailDTO, durum: Durum): CafeDetailDTO {
   return c;
 }
 
-function readParams(): { durum: Durum; slug: string } {
-  if (typeof window === "undefined") return { durum: "canli", slug: "moda" };
+interface Params {
+  durum: Durum;
+  slug: string;
+  bakiye: number | null;
+  havuz: number | null;
+}
+
+function readParams(): Params {
+  if (typeof window === "undefined") return { durum: "canli", slug: "moda", bakiye: null, havuz: null };
   const q = new URLSearchParams(window.location.search);
   const d = q.get("durum") as Durum | null;
-  return { durum: d && DURUMLAR.some((x) => x.id === d) ? d : "canli", slug: q.get("kafe") ?? "moda" };
+  const num = (k: string) => {
+    const v = q.get(k);
+    return v != null && /^\d+$/.test(v) ? Number(v) : null;
+  };
+  return { durum: d && DURUMLAR.some((x) => x.id === d) ? d : "canli", slug: q.get("kafe") ?? "moda", bakiye: num("bakiye"), havuz: num("havuz") };
 }
 
 export function AskiKit() {
-  const [{ durum, slug }, setParams] = useState<{ durum: Durum; slug: string }>({ durum: "canli", slug: "moda" });
+  const [{ durum, slug, bakiye, havuz }, setParams] = useState<Params>({ durum: "canli", slug: "moda", bakiye: null, havuz: null });
   const [raw, setRaw] = useState<CafeDetailDTO | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,7 +147,7 @@ export function AskiKit() {
 
   const ctx = useMemo<CafeCtx | null>(() => {
     if (!raw) return null;
-    const cafe = bend(raw, durum);
+    const cafe = bend(raw, durum, bakiye, havuz);
     const isSignedIn = durum === "signed_out" ? false : signedIn;
     const member = isSignedIn && cafe.membership != null;
     return {
@@ -155,7 +174,7 @@ export function AskiKit() {
       ikramProductId: ikram,
       orderingBlocked: durum === "closed" ? "closed" : durum === "preorder_off" ? "preorder_off" : null,
     };
-  }, [raw, durum, signedIn, slug, load, ikram]);
+  }, [raw, durum, bakiye, havuz, signedIn, slug, load, ikram]);
 
   return (
     <div className="flex flex-col gap-8">

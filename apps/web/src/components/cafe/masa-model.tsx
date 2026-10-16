@@ -1,10 +1,33 @@
-import type { PostDTO } from "@peni/api";
-import { formatTime, relDay } from "@peni/brand/format";
+import type { CafeDetailDTO, PostDTO } from "@peni/api";
+import { formatNumber, formatTime, relDay, SEP, TIME_ZONE } from "@peni/brand/format";
+import { buildIcs } from "@/server/ics";
 
 /*
  * Pure helpers for the Masa feed (design-system.md §9.3 "Masa", §6.5). No React, no DOM:
  * everything here is unit-tested in masa-model.test.ts.
  */
+
+/**
+ * Masa strings that `@peni/brand` `masaCopy` doesn't carry yet. They live here, in one place,
+ * until they move into packages/brand/src/copy.ts (so mobile says the same words); then this
+ * object goes and the components read `masaCopy` alone.
+ */
+export const masaMoreCopy = {
+  showLess: "Daha az göster",
+  send: "Gönder",
+  heart: "Kalp",
+  answersLabel: "Cevaplar",
+  olderAnswersLabel: "Önceki cevaplar",
+  commentsLabel: "Yorumlar",
+  /** An open table (no capacity): "8 kişi geliyor" / "8 kişi geliyor · sen de geliyorsun". */
+  attending: (n: number, me = false) => `${formatNumber(n)} kişi geliyor${me ? `${SEP}sen de geliyorsun` : ""}`,
+  /** A table that's over: "9/12 yer doluydu". */
+  seatsPast: (n: number, capacity: number) => `${formatNumber(n)}/${formatNumber(capacity)} yer doluydu`,
+  /** An open table that's over: "8 kişi geldi". */
+  came: (n: number) => `${formatNumber(n)} kişi geldi`,
+  /** What "Paylaş" sends with the link: "Moda Kahvesi · Peni masası · 19:00". */
+  shareText: (cafeName: string, time: string) => `${cafeName}${SEP}Peni masası${SEP}${time}`,
+} as const;
 
 /** A Peni masası lasts two hours (the same length the .ics file uses). */
 export const EVENT_LENGTH_MS = 2 * 60 * 60 * 1000;
@@ -105,6 +128,47 @@ export function withOverlay<T extends object>(server: T, overlay: Overlay<T> | n
 /** The link "Paylaş" hands out: the café page, scrolled to this card. */
 export function postUrl(origin: string, slug: string, postId: string): string {
   return `${origin.replace(/\/$/, "")}/k/${encodeURIComponent(slug)}#post-${encodeURIComponent(postId)}`;
+}
+
+/** "2026-10-22": the event's day in the cafés' time zone. */
+function isoDay(iso: string): string {
+  // en-CA writes dates as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    new Date(iso),
+  );
+}
+
+/** "peni-masasi-2026-10-22.ics", the name the server's file [G22] also carries. */
+export function icsFilename(eventStartsAt: string): string {
+  return `peni-masasi-${isoDay(eventStartsAt)}.ics`;
+}
+
+/**
+ * "Takvime ekle" without the server (§9.3): DTSTART = `eventStartsAt`, two hours, SUMMARY = the
+ * topic, LOCATION = the café and its address. The fallback when the [G22] file can't be fetched.
+ */
+export function eventIcs(
+  post: Pick<PostDTO, "id" | "title" | "body" | "eventStartsAt">,
+  cafe: Pick<CafeDetailDTO, "name" | "address" | "district" | "city">,
+  now: Date,
+  url?: string,
+): { filename: string; body: string } | null {
+  if (!post.eventStartsAt) return null;
+  const start = new Date(post.eventStartsAt);
+  const description = eventBody(post);
+  return {
+    filename: icsFilename(post.eventStartsAt),
+    body: buildIcs({
+      uid: `${post.id}@peni`,
+      stamp: now,
+      start,
+      end: new Date(start.getTime() + EVENT_LENGTH_MS),
+      summary: eventTopic(post),
+      location: [cafe.name, cafe.address, cafe.district, cafe.city].filter(Boolean).join(", ") || null,
+      description: description || null,
+      url: url ?? null,
+    }),
+  };
 }
 
 /** The DOM id of a card, which the "Bugün masada" strip and shared links scroll to. */

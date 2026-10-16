@@ -28,8 +28,16 @@ export function CafeSkeleton({ slug }: { slug: string | null }) {
           <Skeleton className="mt-5 h-5 w-52" />
           <Skeleton className="mt-1.5 h-4 w-72 max-w-full" />
           <Skeleton radius={10} className="mt-4 h-11 w-60" />
-          <Skeleton radius={0} className="mt-6 h-12 w-full" />
-          <Skeleton className="mt-6 h-4 w-20" />
+          {/* The segmented bar: three label bars in thirds over its hairline, as light as the real one. */}
+          <div className="mt-6 flex h-12 items-center border-b border-line">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="flex flex-1 justify-center">
+                <Skeleton className="h-3.5 w-12" />
+              </div>
+            ))}
+          </div>
+          {/* The category legend sits on the item names' axis, as in the real menu. */}
+          <Skeleton className="mt-6 ml-4 h-4 w-20 md:ml-5" />
           <div className="mt-2 divide-y divide-line overflow-hidden rounded-[14px] bg-surface shadow-raised">
             {[0.5, 0.35, 0.45, 0.3].map((w, i) => (
               <div key={i} className="flex min-h-[72px] items-center gap-3 px-4 py-3 md:px-5">

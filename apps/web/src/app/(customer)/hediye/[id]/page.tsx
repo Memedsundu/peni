@@ -1,5 +1,4 @@
 import type { GiftPreviewDTO } from "@peni/api";
-import { formatPeni, numberWord } from "@peni/brand/format";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
@@ -8,6 +7,7 @@ import { AppError } from "@/server/app";
 import { SESSION_COOKIE } from "@/server/http";
 import { getApp } from "@/server/runtime";
 import { GiftLanding } from "./gift-landing";
+import { giftShareCopy } from "./og-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +25,8 @@ export async function generateMetadata({ params }: { params: Params }): Promise<
   const { id } = await params;
   const gift = await readGift(id).catch(() => null);
   if (!gift) return { title: "Ismarlama" };
-  const what = gift.goods ?? formatPeni(gift.peni);
-  const title = `Seni ${spoken(what)} bekliyor`;
-  const description = `${gift.fromFirstName} sana ${gift.cafeName} için ${what} ısmarladı.`;
+  const { title, line } = giftShareCopy(gift);
+  const description = line ?? `${gift.cafeName} için bir ısmarlama.`;
   return {
     title: "Ismarlama",
     description,
@@ -51,8 +50,3 @@ const readGift = cache(async (id: string): Promise<GiftPreviewDTO | null> => {
     throw error;
   }
 });
-
-function spoken(goods: string): string {
-  const m = /^(\d+) (.+)$/.exec(goods);
-  return m ? `${numberWord(Number(m[1]))} ${m[2]}` : goods;
-}

@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { useMemo } from "react";
+import { Platform } from "react-native";
 import { staffStackOptions } from "@/lib/screen-options";
 import { useTokens } from "@/lib/theme";
 
@@ -9,7 +10,8 @@ export default function TezgahStack() {
   const options = useMemo(() => staffStackOptions(t), [t]);
   return (
     <Stack screenOptions={options}>
-      <Stack.Screen name="tezgah" options={{ title: "Tezgâh" }} />
+      {/* iOS: the native large title on press. Elsewhere the screen draws the same press masthead itself. */}
+      <Stack.Screen name="tezgah" options={{ title: "Tezgâh", headerShown: Platform.OS === "ios" }} />
     </Stack>
   );
 }

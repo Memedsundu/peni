@@ -162,7 +162,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
 
   return (
     <div className="mx-auto flex w-full max-w-[400px] flex-col gap-8 md:pt-6">
-      <Card padding="none" className="px-5 pt-8 pb-6 sm:px-7">
+      <Card padding="none" className="px-4 pt-8 pb-6 sm:px-10">
         <header className="flex flex-col items-center text-center">
           <Coin size={96} />
           <h1 className="mt-5 font-display text-h2 text-ink">Hoş geldin</h1>
@@ -176,6 +176,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
                 {resent ? "numarasına yeni bir kod gönderdik." : "numarasına bir kod gönderdik."}
               </p>
             )}
+            {step === "name" && <h2 className="font-display text-h3 text-ink">Adın ne?</h2>}
           </div>
         </header>
 
@@ -205,6 +206,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
                 <CodeInput
                   autoFocus
                   name="code"
+                  className="mx-auto"
                   value={code}
                   onValueChange={(v) => {
                     setCode(v);
@@ -240,8 +242,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
 
           {step === "name" && (
             <>
-              <h2 className="font-display text-h3 text-ink">Adın ne?</h2>
-              <Field label="Adın" hint="Siparişin hazır olunca bu adla çağrılırsın." error={error} className="mt-4">
+              <Field label="Adın" hint="Siparişin hazır olunca bu adla çağrılırsın." error={error}>
                 <Input
                   autoFocus
                   name="given-name"

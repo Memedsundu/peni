@@ -3,13 +3,16 @@
 import { Popover } from "@base-ui/react/popover";
 import type { AskidaDTO } from "@peni/api";
 import { askiCopy } from "@peni/brand/copy";
-import { Check, Info } from "lucide-react";
-import { useState } from "react";
+import { Info } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { AskiCaption, AskiRail, HookGlyph, askiRailProps, type HangSignal } from "@/components/brand";
 import { Button, buttonClasses, cx, focusRing, toast } from "@/components/ui";
 import { useCafe } from "./cafe-context";
+import { AskiIkramNote } from "./aski-bits";
 import { AskiGiveSheet } from "./aski-give-sheet";
-import { afterDonation, donationToast, donorLines, referenceItem, type Donation } from "./aski-model";
+import { signInUrlFor, takeAskiIntent } from "./aski-intent";
+import { afterDonation, donationToast, donorLines, poolView, referenceItem, type Donation } from "./aski-model";
 import { AskiTakeSheet } from "./aski-take-sheet";
 
 /*
@@ -26,9 +29,28 @@ import { AskiTakeSheet } from "./aski-take-sheet";
  * - The weekly ikram count is hidden below 3 (`askiCaption`, D8).
  */
 export function AskiPanel() {
-  const { cafe, member, requireJoin, refresh, ikramProductId } = useCafe();
+  const { cafe, signedIn, member, requireJoin, refresh, ikramProductId } = useCafe();
+  const router = useRouter();
   const [takeOpen, setTakeOpen] = useState(false);
   const [giveOpen, setGiveOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * Back from /giris with `?aski=birak|al` (aski-intent): re-open the sheet the visitor was
+   * heading for, once, with the panel in view so the cup they leave hangs where they can see it.
+   */
+  const intentRead = useRef(false);
+  useEffect(() => {
+    if (intentRead.current) return;
+    intentRead.current = true;
+    const intent = takeAskiIntent();
+    if (!intent || !signedIn || !cafe.askida.enabled) return;
+    panelRef.current?.scrollIntoView({ block: "center" });
+    if (intent === "al") setTakeOpen(true);
+    else if (member) setGiveOpen(true);
+    else requireJoin(() => setGiveOpen(true));
+    // Once, on arrival.
+  }, []);
 
   /*
    * A8 after one's own donation. The new count and the hang signal land in ONE render (the rail
@@ -46,9 +68,11 @@ export function AskiPanel() {
   const reference = referenceItem(cafe);
   // Until the refetch lands the server still reports the pool as it was before the donation.
   const local = own && own.base.balancePeni === askida.balancePeni && own.base.itemsAvailable === askida.itemsAvailable ? own : null;
+  // Counted in the reference item; in a cheaper askı item when no whole reference item is left (poolView).
+  const view = local ? { itemsAvailable: local.itemsAvailable, referenceItemName: askida.referenceItemName } : poolView(cafe);
   const shown = {
-    itemsAvailable: local ? local.itemsAvailable : askida.itemsAvailable,
-    referenceItemName: askida.referenceItemName,
+    itemsAvailable: view.itemsAvailable,
+    referenceItemName: view.referenceItemName,
     claimsPerDay: askida.claimsPerDay,
     claimedLast7Days: askida.claimedLast7Days,
     donatedLast7DaysPeni: askida.donatedLast7DaysPeni + (local ? local.donatedPeni : 0),
@@ -75,17 +99,18 @@ export function AskiPanel() {
 
   const give = () => {
     if (member) setGiveOpen(true);
+    else if (!signedIn) router.push(signInUrlFor("birak"));
     else requireJoin(() => setGiveOpen(true));
   };
 
   return (
-    // The page's `<section id="aski">` carries the h2 ("Askı"); the legend is this panel's own heading.
-    <div data-aski-panel className="@container rounded-[14px] bg-aski-soft p-4 text-ink md:p-5">
+    // The legend is the Askı section's heading: an h2 beside "Menü" and "Masa" in the page outline.
+    <div ref={panelRef} data-aski-panel className="@container rounded-[14px] bg-aski-soft p-4 text-ink md:p-5">
       <div className="flex min-h-11 items-center justify-between gap-3">
-        <h3 className="flex items-center gap-2 text-aski-ink">
+        <h2 className="flex items-center gap-2 text-aski-ink">
           <HookGlyph size={20} />
           <span className="legend">{askiCopy.legend}</span>
-        </h3>
+        </h2>
         <AskiExplainer />
       </div>
 
@@ -105,21 +130,15 @@ export function AskiPanel() {
               {askiCopy.give}
             </Button>
           </div>
-          {ikram && (
-            <p role="status" className="mt-3 flex items-start gap-2 text-meta text-ink">
-              <Check aria-hidden size={16} absoluteStrokeWidth strokeWidth={1.75} className="mt-px size-4 shrink-0 text-ink-2" />
-              <span>
-                <span className="font-semibold">{ikram.name}</span> siparişine eklendi. Kasada ₺0 görünür.
-              </span>
-            </p>
-          )}
+          {ikram && <AskiIkramNote name={ikram.name} className="mt-3" />}
         </div>
 
         {donors.length > 0 && (
           <ul
             className={cx(
               "flex flex-col gap-2 border-t border-aski-ink/20 pt-4",
-              "@xl:self-start @xl:border-t-0 @xl:border-l @xl:pt-0.5 @xl:pl-6",
+              // Beside the rail the rule runs the column's full height, so the panel reads as two balanced halves.
+              "@xl:self-stretch @xl:border-t-0 @xl:border-l @xl:pt-0.5 @xl:pl-6",
             )}
           >
             {donors.map((d) => (

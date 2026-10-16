@@ -148,7 +148,6 @@ function Sentence({ pieces }: { pieces: readonly Piece[] }) {
         ) : (
           <span key={i} className="font-semibold whitespace-nowrap text-peni-ink tabular-nums">
             {formatPeni(p.peni, { signed: p.signed })}
-            {p.suffix}
           </span>
         ),
       )}

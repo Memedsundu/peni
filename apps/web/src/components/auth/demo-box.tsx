@@ -1,7 +1,7 @@
 "use client";
 
 import { initials } from "@peni/brand/format";
-import { ArrowRight, LoaderCircle } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { cx, focusRing, pressMotion, tappable } from "@/components/ui";
 
 /** The seeded neighbours (apps/web/src/server/seed.ts). */
@@ -86,11 +86,13 @@ export function DemoBox({
                     {busy ? "Giriş yapılıyor…" : p.note}
                   </span>
                 </span>
-                {busy ? (
-                  <LoaderCircle aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0 animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <ArrowRight aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0 text-ink-2" />
-                )}
+                {/* While busy the meta line reads "Giriş yapılıyor…"; no spinner (§17). */}
+                <ArrowRight
+                  aria-hidden
+                  size={20}
+                  strokeWidth={1.75}
+                  className={cx("size-5 shrink-0 text-ink-2", busy && "invisible")}
+                />
               </button>
             </li>
           );

@@ -4,12 +4,12 @@ import type { PostDTO } from "@peni/api";
 import { masaCopy } from "@peni/brand/copy";
 import { formatNumber, relDay } from "@peni/brand/format";
 import { Heart, MessageCircle } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { CafeHueBand, Coin } from "@/components/brand";
 import { cx, focusRing, pressMotion, tappable } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { useCafe } from "./cafe-context";
-import { newestFirst, postDomId, toggledHeart, whenLabel } from "./masa-model";
+import { masaMoreCopy, newestFirst, postDomId, toggledHeart, whenLabel } from "./masa-model";
 import { CommentForm, JoinPopover, Reveal, useJoinLabel, usePostToggle } from "./masa-shared";
 
 const cardScroll = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)]";
@@ -93,7 +93,7 @@ export function CafePost({ post, now }: { post: PostDTO; now: Date }) {
         <Reveal open={open} id={commentsId}>
           <div className="mt-3 border-t border-line pt-1 md:mt-4">
             {comments.length > 0 && (
-              <ul aria-label="Yorumlar" className="flex flex-col divide-y divide-line">
+              <ul aria-label={masaMoreCopy.commentsLabel} className="flex flex-col divide-y divide-line">
                 {comments.map((c) => (
                   <li key={c.id} className="py-3">
                     <p className="text-meta text-ink-2">
@@ -112,6 +112,8 @@ export function CafePost({ post, now }: { post: PostDTO; now: Date }) {
               <CommentForm
                 postId={post.id}
                 label={masaCopy.commentLabel}
+                // With no comments yet, the "Yorum yaz" toggle right above already names the field.
+                labelHidden={comments.length === 0}
                 autoFocus={open && comments.length === 0}
                 className={cx(comments.length > 0 ? "border-t border-line pt-4" : "pt-3", "pb-1")}
               />
@@ -132,6 +134,14 @@ export function HeartButton({ post }: { post: PostDTO }) {
   const { cafe, member, requireJoin } = useCafe();
   const joinLabel = useJoinLabel(masaCopy.heartJoinAction);
   const { shown, act } = usePostToggle({ reactedByMe: post.reactedByMe, reactionCount: post.reactionCount });
+  // Joining swaps the popover trigger for the member's heart: focus follows to the new button.
+  const button = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!member || !refocus.current) return;
+    refocus.current = false;
+    button.current?.focus({ preventScroll: true });
+  }, [member]);
 
   const react = () => {
     const send = () => act(toggledHeart(shown), () => peni.cafes.react(cafe.slug, post.id), send);
@@ -147,7 +157,7 @@ export function HeartButton({ post }: { post: PostDTO }) {
         fill={shown.reactedByMe ? "currentColor" : "none"}
         className="size-5 shrink-0"
       />
-      <span className="sr-only">Kalp</span>
+      <span className="sr-only">{masaMoreCopy.heart}</span>
       {shown.reactionCount > 0 && <span className="tabular-nums">{formatNumber(shown.reactionCount)}</span>}
     </>
   );
@@ -159,13 +169,18 @@ export function HeartButton({ post }: { post: PostDTO }) {
         triggerClassName={footerButton}
         text={masaCopy.heartJoin}
         action={joinLabel}
-        onJoin={() => requireJoin(() => void act(toggledHeart(shown), () => peni.cafes.react(cafe.slug, post.id)))}
+        onJoin={() =>
+          requireJoin(() => {
+            refocus.current = true;
+            void act(toggledHeart(shown), () => peni.cafes.react(cafe.slug, post.id));
+          })
+        }
       />
     );
   }
 
   return (
-    <button type="button" aria-pressed={shown.reactedByMe} onClick={react} className={footerButton}>
+    <button ref={button} type="button" aria-pressed={shown.reactedByMe} onClick={react} className={footerButton}>
       {face}
     </button>
   );

@@ -35,17 +35,18 @@ function subscribe(listener: () => void) {
 /**
  * "Görünüm" (design-system.md §9.8): Sistem · Açık · Koyu. Writes `localStorage["peni-theme"]`
  * and `<html data-theme>` at once, through `applyTheme`; "Sistem" removes both. The server
- * renders "Sistem" and the real choice appears on hydration.
+ * cannot know the stored choice, so it renders the track with no key selected (never a wrong
+ * one); the real choice appears on hydration.
  */
 export function ThemeChoice({ className }: { className?: string }) {
-  const value = useSyncExternalStore<ThemePreference>(subscribe, readTheme, () => "system");
+  const value = useSyncExternalStore<ThemePreference | null>(subscribe, readTheme, () => null);
   return (
     <Segmented
       id="gorunum"
       variant="track"
       label="Görünüm"
       items={ITEMS}
-      value={value}
+      value={value ?? ""}
       onChange={(id) => {
         applyTheme(id as ThemePreference);
         notify();

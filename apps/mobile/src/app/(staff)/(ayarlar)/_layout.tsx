@@ -1,5 +1,6 @@
 import { Stack } from "expo-router";
 import { useMemo } from "react";
+import { Platform } from "react-native";
 import { staffStackOptions } from "@/lib/screen-options";
 import { useTokens } from "@/lib/theme";
 
@@ -9,7 +10,8 @@ export default function AyarlarStack() {
   const options = useMemo(() => staffStackOptions(t), [t]);
   return (
     <Stack screenOptions={options}>
-      <Stack.Screen name="ayarlar" options={{ title: "Ayarlar" }} />
+      {/* iOS: the native large title on press. Elsewhere the screen draws the same press masthead itself. */}
+      <Stack.Screen name="ayarlar" options={{ title: "Ayarlar", headerShown: Platform.OS === "ios" }} />
     </Stack>
   );
 }

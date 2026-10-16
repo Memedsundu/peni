@@ -77,7 +77,8 @@ function StripButton({ onClick, children }: { onClick: () => void; children: Rea
       type="button"
       onClick={onClick}
       className={cx(
-        "group flex min-h-12 w-full items-center gap-3 rounded-[8px] px-1 py-2 text-left",
+        // px-2 −mx-1 keeps the text axis and gives the inset focus ring air off the first glyph.
+        "group -mx-1 flex min-h-12 w-[calc(100%+8px)] items-center gap-3 rounded-[8px] px-2 py-2 text-left",
         tappable,
         colorMotion,
         focusRingInset,

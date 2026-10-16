@@ -148,7 +148,7 @@ describe("HAREKETLER", () => {
     expect(lines).toContain("Kasada alışveriş · +13 peni");
     expect(lines).toContain("Siparişte 90 peni kullandın");
     expect(lines).toContain("Askıya 30 peni bıraktın");
-    expect(lines).toContain("Sipariş P-010 · 7 penin döndü");
+    expect(lines).toContain("Sipariş P-010 · 7 peni sana döndü");
     // Pending incoming gifts are fişes at the top, not history; folded ledger lines are gone.
     expect(items.some((i) => i.id === "gift:in1")).toBe(false);
     expect(items.filter((i) => i.id.startsWith("ledger:")).map((i) => i.id)).not.toContain("ledger:s1");

@@ -2,6 +2,7 @@
 import { Tabs } from "expo-router/js-tabs";
 import { StatusBar } from "expo-status-bar";
 import { ChartColumn, Coffee, Inbox, Settings } from "lucide-react-native";
+import { StaffBoardPoller } from "@/components/staff/poller";
 import { useNewOrderCount } from "@/lib/staff-badge";
 import { useTokens } from "@/lib/theme";
 import { tabIcon, WebTabBar, webTabsOptions } from "@/lib/web-tabs";
@@ -17,6 +18,8 @@ export default function StaffTabsWeb() {
   return (
     <>
       <StatusBar style="light" />
+      {/* One poll for every tab: new orders ring, badge and buzz wherever the staff are. */}
+      <StaffBoardPoller />
       <Tabs screenOptions={webTabsOptions(t)} tabBar={(props) => <WebTabBar {...props} />}>
         <Tabs.Screen
           name="(tezgah)"

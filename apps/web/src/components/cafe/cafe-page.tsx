@@ -88,7 +88,7 @@ export function CafePage({ slug, initial, entry }: { slug: string; initial: Cafe
     try {
       await fetchCafe();
     } catch (e) {
-      if (e instanceof PeniApiError && e.status === 404) setLoadState("not_found");
+      if (e instanceof PeniApiError && (e.status === 404 || e.code === "NOT_FOUND")) setLoadState("not_found");
       else {
         setLoadState("error");
         setLoadError(loadMessage(e));
@@ -313,7 +313,7 @@ export function CafePage({ slug, initial, entry }: { slug: string; initial: Cafe
   }
 
   const cartView = { cafe, cart, totals, blocked: orderingBlocked, busy, error: orderError, onSubmit: submit };
-  const sectionClass = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)] outline-none";
+  const sectionClass = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+8px)] outline-none";
 
   return (
     <CafeContext.Provider value={ctx}>
@@ -345,18 +345,19 @@ export function CafePage({ slug, initial, entry }: { slug: string; initial: Cafe
                 member={member}
                 blocked={orderingBlocked}
                 dropped={dropped}
+                locked={busy}
                 onChange={cart.setQty}
                 onJoinAdd={joinAndAdd}
               />
             </section>
 
             {sectionIds.includes("aski") && (
-              <section id="aski" tabIndex={-1} aria-label="Askı" className={cx(sectionClass, "mt-10 md:mt-12")}>
+              <section id="aski" tabIndex={-1} aria-label="Askı" className={cx(sectionClass, "mt-8 md:mt-12")}>
                 <AskiPanel />
               </section>
             )}
 
-            <section id="masa" tabIndex={-1} aria-label="Masa" className={cx(sectionClass, "mt-10 md:mt-12")}>
+            <section id="masa" tabIndex={-1} aria-label="Masa" className={cx(sectionClass, "mt-8 md:mt-12")}>
               <MasaFeed />
             </section>
 
@@ -377,7 +378,11 @@ export function CafePage({ slug, initial, entry }: { slug: string; initial: Cafe
       <CartSheet open={sheetOpen} onOpenChange={setSheetOpen} {...cartView} />
       <JoinSheet
         open={join.open}
-        onOpenChange={(open) => setJoin((j) => ({ ...j, open }))}
+        onOpenChange={(open) => {
+          setJoin((j) => ({ ...j, open }));
+          // A failed join in the sheet stays with the sheet: it never surfaces under the row.
+          if (!open) setJoinError(null);
+        }}
         cafe={cafe}
         signedIn={signedIn}
         request={join.request}

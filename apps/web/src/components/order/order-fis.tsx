@@ -5,8 +5,9 @@ import { cartCopy, orderCopy, staffCopy } from "@peni/brand/copy";
 import { capitalizeTr, formatTL, relDay, SEP } from "@peni/brand/format";
 import { Fis, FisDivider, FisRow, HazirStamp, StatusTrack } from "@/components/brand";
 import { cx, Skeleton } from "@/components/ui";
-import { EarnMoment } from "./earn-moment";
-import { fisLines, isVoid, orderCode, voidNotes } from "./order-model";
+import { orderPageCopy } from "./copy";
+import { EarnMoment, type EarnShow } from "./earn-moment";
+import { fisLines, hasEarn, isVoid, orderCode, voidNotes } from "./order-model";
 
 /*
  * The order fiş (design-system.md §9.4, §6.3): Oxford rule and "MODA KAHVESİ · SİPARİŞ",
@@ -22,12 +23,14 @@ export interface OrderFisProps {
   order: OrderDTO;
   /** The order turned ready while the customer was looking: the stamp comes down (A11). */
   stampAnimates?: boolean;
-  /** Play the coin strike for `earnedPeni` (A6). */
-  earnAnimates?: boolean;
+  /** How the earn moment shows for `earnedPeni` (A6): see `EarnMoment`. */
+  earnShow?: EarnShow;
+  /** The h1 (the code). Focus lands here when the control that had it goes away (after a cancel). */
+  headingRef?: React.Ref<HTMLHeadingElement>;
   now?: Date;
 }
 
-export function OrderFis({ order, stampAnimates = false, earnAnimates = false, now }: OrderFisProps) {
+export function OrderFis({ order, stampAnimates = false, earnShow = "static", headingRef, now }: OrderFisProps) {
   const ready = order.status === "ready";
   const code = orderCode(order);
   const day = relDay(order.submittedAt, now);
@@ -40,12 +43,18 @@ export function OrderFis({ order, stampAnimates = false, earnAnimates = false, n
       <div className="@container mt-5">
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2">
           {code ? (
-            <h1 className="col-span-2 font-display text-code whitespace-nowrap lining-nums tabular-nums @min-[19rem]:col-span-1">
+            <h1
+              ref={headingRef}
+              tabIndex={-1}
+              className="col-span-2 justify-self-start rounded-[4px] font-display text-code whitespace-nowrap lining-nums tabular-nums @min-[19rem]:col-span-1"
+            >
               <span className="sr-only">{orderCopy.headerTitle} </span>
               {code}
             </h1>
           ) : (
-            <h1 className="sr-only">{orderCopy.headerTitle}</h1>
+            <h1 ref={headingRef} tabIndex={-1} className="sr-only">
+              {orderCopy.headerTitle}
+            </h1>
           )}
           <p className="col-start-1 row-start-2 text-meta text-ink-2">{who}</p>
           {ready && (
@@ -57,9 +66,9 @@ export function OrderFis({ order, stampAnimates = false, earnAnimates = false, n
         </div>
       </div>
 
-      <StatusTrack order={order} className="mt-6" />
+      <OrderTrack order={order} className="mt-6" />
 
-      <Headline order={order} earnAnimates={earnAnimates} />
+      <Headline order={order} earnShow={earnShow} />
 
       <OrderLines order={order} />
 
@@ -70,10 +79,25 @@ export function OrderFis({ order, stampAnimates = false, earnAnimates = false, n
   );
 }
 
-function Headline({ order, earnAnimates }: { order: OrderDTO; earnAnimates: boolean }) {
+/**
+ * The StatusTrack, and for an order that stopped (rejected, cancelled, not collected) the same
+ * track at rest: the tapped stops stay ink, while the stops it never reached and the rail under
+ * them fall back to the quiet `line`, so a dead order never reads as one waiting for the barista.
+ * Composed here by redefining `--line-strong` for the track alone; the brand file is untouched.
+ */
+export function OrderTrack({ order, className }: { order: OrderDTO; className?: string }) {
+  const stopped = isVoid(order.status);
+  return (
+    <div data-stopped={stopped || undefined} className={cx(stopped && "[--line-strong:var(--line)]", className)}>
+      <StatusTrack order={order} />
+    </div>
+  );
+}
+
+function Headline({ order, earnShow }: { order: OrderDTO; earnShow: EarnShow }) {
   const ready = order.status === "ready";
   const code = orderCode(order);
-  const earned = order.status === "collected" && order.earnedPeni != null && order.earnedPeni > 0 ? order.earnedPeni : null;
+  const earned = hasEarn(order) ? order.earnedPeni! : null;
   const notes = voidNotes(order);
 
   const politeText =
@@ -107,7 +131,7 @@ function Headline({ order, earnAnimates }: { order: OrderDTO; earnAnimates: bool
       </div>
       {earned != null && (
         <div className="mt-3">
-          <EarnMoment peni={earned} cafe={{ name: order.cafeName, slug: order.cafeSlug }} animate={earnAnimates} />
+          <EarnMoment peni={earned} cafe={{ name: order.cafeName, slug: order.cafeSlug }} show={earnShow} />
         </div>
       )}
     </div>
@@ -159,7 +183,7 @@ function OrderLines({ order }: { order: OrderDTO }) {
 /** Loading (§9.4): a skeleton fiş with the real geometry. */
 export function OrderFisSkeleton() {
   return (
-    <div aria-busy="true" aria-label="Sipariş yükleniyor">
+    <div aria-busy="true" aria-label={orderPageCopy.loading}>
       <Fis variant="order" legend={<Skeleton className="h-4 w-48" />}>
         <div className="mt-5 flex flex-col gap-2">
           <Skeleton className="h-16 w-44" />

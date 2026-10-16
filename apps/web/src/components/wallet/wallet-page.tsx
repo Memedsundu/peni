@@ -239,7 +239,7 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
             <h2 id="jeton-kesesi" className="mb-3 legend text-ink-2">
               {peniCopy.coinPurse}
             </h2>
-            <div className={w.cafes.length > 1 ? "grid gap-4 sm:grid-cols-2" : "grid gap-4 sm:max-w-[420px]"}>
+            <div className={w.cafes.length > 1 ? "-mb-4 grid gap-x-4 sm:grid-cols-2" : "-mb-4 grid sm:max-w-[420px]"}>
               {w.cafes.map((c) => (
                 <WalletCoinCard key={c.membershipId} cafe={c} city={cities[c.cafeSlug] ?? null} onGift={openGift} />
               ))}
@@ -283,7 +283,8 @@ function PageHeader({ meta, action }: { meta?: string; action?: React.ReactNode 
   );
 }
 
-function WalletSkeleton() {
+/** The page's real geometry while the wallet loads (also the route's `loading.tsx`). */
+export function WalletSkeleton() {
   return (
     <div aria-busy="true" className="flex flex-col gap-8 md:gap-10">
       <span className="sr-only">Cüzdan yükleniyor</span>
@@ -297,7 +298,7 @@ function WalletSkeleton() {
       <div className="grid gap-8 md:gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-12">
         <div aria-hidden>
           <Skeleton className="mb-3 h-4 w-28" />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="-mb-4 grid gap-x-4 sm:grid-cols-2">
             <WalletCoinCardSkeleton />
             <WalletCoinCardSkeleton />
           </div>

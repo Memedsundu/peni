@@ -6,6 +6,7 @@ import { dark, light } from "@peni/brand/tokens";
 import { NativeTabs } from "expo-router/native-tabs";
 import { StatusBar } from "expo-status-bar";
 import { DynamicColorIOS, Platform } from "react-native";
+import { StaffBoardPoller } from "@/components/staff/poller";
 import { useNewOrderCount } from "@/lib/staff-badge";
 import { fonts, useTokens } from "@/lib/theme";
 
@@ -17,6 +18,8 @@ export default function StaffTabs() {
     <>
       {/* Every staff header is press-dark in both themes (§10.10). */}
       <StatusBar style="light" />
+      {/* One poll for every tab: new orders ring, badge and buzz wherever the staff are. */}
+      <StaffBoardPoller />
       <NativeTabs
         tintColor={ios ? DynamicColorIOS({ light: light.ink, dark: dark.ink }) : t.ink}
         minimizeBehavior="never"

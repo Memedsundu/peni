@@ -45,7 +45,8 @@ export default function MasaKurallariPage() {
       </ol>
 
       <section aria-labelledby="neden-peni" className="mt-8 border-t border-line pt-8 md:mt-10">
-        <h2 id="neden-peni" className="font-display text-h2 text-ink">
+        {/* The hero's "Neden peni?" link lands here, with the section rule still in view. */}
+        <h2 id="neden-peni" className="scroll-mt-[calc(var(--header-h)+48px)] font-display text-h2 text-ink">
           Neden peni?
         </h2>
         <p className="mt-4 text-body-lg text-ink">{WHY_PENI}</p>

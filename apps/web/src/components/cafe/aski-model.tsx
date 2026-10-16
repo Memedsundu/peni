@@ -7,8 +7,8 @@
  *   and café matches stay in the weekly line.
  * - Only whole items are counted or drawn (D9).
  */
-import type { AskidaDTO, AskidaWallEventDTO, CafeDetailDTO, MenuItemDTO } from "@peni/api";
-import { askiCopy } from "@peni/brand/copy";
+import { PeniApiError, errorMessagesTr, type AskidaDTO, type AskidaWallEventDTO, type CafeDetailDTO, type MenuItemDTO } from "@peni/api";
+import { askiCopy, errorCopy } from "@peni/brand/copy";
 import { formatNumber, formatPeni, goodsName, relDay } from "@peni/brand/format";
 
 /** What one askı item costs from the pool, in whole peni (the server's `kurusToPeniCeil`). */
@@ -26,6 +26,25 @@ export function referenceItem(cafe: Pick<CafeDetailDTO, "menu" | "askida">): Men
   const items = askiItems(cafe);
   const name = cafe.askida.referenceItemName;
   return items.find((m) => m.name === name) ?? null;
+}
+
+/**
+ * What the rail and its caption count in. Normally the reference item ("Askıda 7 çay
+ * bekliyor"). When the pool holds no whole reference item but does hold a cheaper askı item
+ * (28 peni: no çay, one simit), the rail counts that item instead ("Askıda 1 simit bekliyor",
+ * drawn as a simit), so the panel never says "Askı şu an boş." above a simit someone can take.
+ */
+export function poolView(
+  cafe: Pick<CafeDetailDTO, "menu" | "askida">,
+): Pick<AskidaDTO, "itemsAvailable" | "referenceItemName"> {
+  const { itemsAvailable, referenceItemName, balancePeni } = cafe.askida;
+  if (itemsAvailable > 0) return { itemsAvailable, referenceItemName };
+  const cheapest = askiItems(cafe)
+    .filter((i) => i.available && itemPeni(i) <= balancePeni)
+    .sort((a, b) => itemPeni(a) - itemPeni(b))[0];
+  return cheapest
+    ? { itemsAvailable: Math.floor(balancePeni / itemPeni(cheapest)), referenceItemName: cheapest.name }
+    : { itemsAvailable, referenceItemName };
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -109,8 +128,16 @@ export function takeState(input: {
   return { kind: "ok" };
 }
 
-export function takeStateText(s: Exclude<TakeState, { kind: "ok" }>): string {
+/**
+ * The sentence for a take state. `shownCaption` is the rail caption already on screen: when the
+ * pool is empty it reads "Askı şu an boş.", so the note carries only the rest of the spec's
+ * sentence ("Biri bıraktığında burada görünür.") instead of saying "boş" twice.
+ */
+export function takeStateText(s: Exclude<TakeState, { kind: "ok" }>, shownCaption?: string): string {
   const t = askiCopy.takeStates;
+  if (s.kind === "empty" && shownCaption && t.empty.startsWith(shownCaption) && t.empty.length > shownCaption.length) {
+    return t.empty.slice(shownCaption.length).trim();
+  }
   switch (s.kind) {
     case "non_member":
       return t.nonMember;
@@ -163,4 +190,13 @@ export function afterDonation(
 export function donationToast(d: Donation): { title: string; description?: string } {
   const title = d.item ? askiCopy.hungToast(1, d.item.name) : `${formatPeni(d.peni)} askıya bırakıldı.`;
   return d.matchedPeni > 0 ? { title, description: askiCopy.matchToast(d.matchedPeni) } : { title };
+}
+
+/**
+ * The inline error under the give sheet's button. Only codes with Turkish copy reach the screen;
+ * a bare `HTTP_503` from a proxy (whose message is the English status text) or an unknown code
+ * reads as the generic line.
+ */
+export function donateErrorText(e: unknown): string {
+  return e instanceof PeniApiError && Object.hasOwn(errorMessagesTr, e.code) ? e.message : errorCopy.generic;
 }

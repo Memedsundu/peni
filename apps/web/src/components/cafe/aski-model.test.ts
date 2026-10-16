@@ -1,6 +1,7 @@
 import type { AskidaDTO, CafeDetailDTO, MenuItemDTO } from "@peni/api";
+import { PeniApiError } from "@peni/api";
 import { describe, expect, it } from "vitest";
-import { afterDonation, donationToast, donationWhat, donorLines, takeState, takeStateText } from "./aski-model";
+import { afterDonation, donateErrorText, donationToast, donationWhat, donorLines, poolView, takeState, takeStateText } from "./aski-model";
 
 const item = (productId: string, name: string, priceKurus: number): MenuItemDTO => ({
   productId,
@@ -84,6 +85,9 @@ describe("take states [G3]", () => {
     expect(takeStateText({ kind: "claimed_today" })).toBe("Bugünkü ikramını aldın. Yarın yine gel.");
     expect(takeStateText({ kind: "too_new", daysLeft: 3 })).toBe("Askıdan almak için üyeliğinin 7 günlük olması gerekiyor. 3 gün kaldı.");
     expect(takeStateText({ kind: "empty" })).toBe("Askı şu an boş. Biri bıraktığında burada görünür.");
+    // Under a rail caption that already says "Askı şu an boş." the note carries only the rest.
+    expect(takeStateText({ kind: "empty" }, "Askı şu an boş.")).toBe("Biri bıraktığında burada görünür.");
+    expect(takeStateText({ kind: "empty" }, "Askıda 1 çay bekliyor")).toBe("Askı şu an boş. Biri bıraktığında burada görünür.");
   });
 });
 
@@ -101,5 +105,27 @@ describe("A8 after one's own donation", () => {
   it("toasts the item, or the peni for a custom amount, with the match as its second line", () => {
     expect(donationToast({ peni: 30, matchedPeni: 15, item: CAY })).toEqual({ title: "1 çay askıya asıldı.", description: "Kafe de 15 peni ekledi." });
     expect(donationToast({ peni: 45, matchedPeni: 0, item: null })).toEqual({ title: "45 peni askıya bırakıldı." });
+  });
+});
+
+describe("give sheet errors", () => {
+  it("shows Turkish copy for known codes and the generic line for anything else", () => {
+    expect(donateErrorText(new PeniApiError("INSUFFICIENT_BALANCE", 400, "Insufficient balance"))).toBe("Bakiyen bunun için yetmiyor.");
+    expect(donateErrorText(new PeniApiError("NETWORK", 0, "Failed to fetch"))).toBe("Bağlantı kurulamadı. Tekrar dene.");
+    expect(donateErrorText(new PeniApiError("HTTP_503", 503, "Service Unavailable"))).toBe("Bir şeyler ters gitti. Tekrar dene.");
+    expect(donateErrorText(new PeniApiError("SOMETHING_NEW", 400, "Some English text"))).toBe("Bir şeyler ters gitti. Tekrar dene.");
+    expect(donateErrorText(new Error("boom"))).toBe("Bir şeyler ters gitti. Tekrar dene.");
+  });
+});
+
+describe("pool view (§6.2, D9)", () => {
+  it("counts in the reference item while one is left", () => {
+    expect(poolView(cafe(askida()))).toEqual({ itemsAvailable: 7, referenceItemName: "Çay" });
+  });
+  it("counts in the cheapest askı item the pool still covers, never 'boş' above a takeable simit", () => {
+    expect(poolView(cafe(askida({ balancePeni: 28, itemsAvailable: 0 })))).toEqual({ itemsAvailable: 1, referenceItemName: "Simit" });
+  });
+  it("stays empty when nothing is covered", () => {
+    expect(poolView(cafe(askida({ balancePeni: 12, itemsAvailable: 0 })))).toEqual({ itemsAvailable: 0, referenceItemName: "Çay" });
   });
 });

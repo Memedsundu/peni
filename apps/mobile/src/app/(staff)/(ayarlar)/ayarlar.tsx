@@ -1,87 +1,251 @@
-// Ayarlar (§10.10), first cut on the legacy kit; rebuilt on the new primitives in §16 step 6.
-import { staffCopy } from "@peni/brand/copy";
+/**
+ * Kafe modu · Ayarlar (design-system.md §10.10).
+ *
+ * - KAFE: the café picker — one row per café from `cafes.list()`, never a free-text slug.
+ *   Switching re-validates the stored key against the new café (`staff.dashboard`) before it
+ *   is kept; "Anahtar tutmadı." stays at the list, with the way to enter another key.
+ * - TEZGÂH: the "Ses" switch (the new-order chime; off shows the "Ses kapalı" banner on Tezgâh).
+ * - "Personel anahtarını unut": forgets the key (the café is remembered for next time); every
+ *   tab then asks for a key.
+ * - "Müşteri moduna dön" (secondary, 56pt): sends any bump still waiting, sets the mode to
+ *   customer and lands on "/".
+ */
+import { createPeniClient, PeniApiError, type CafeSummaryDTO } from "@peni/api";
+import { errorCopy, staffCopy } from "@peni/brand/copy";
+import { SEP } from "@peni/brand/format";
 import { router } from "expo-router";
-import { ChevronRight } from "lucide-react-native";
-import { useCallback } from "react";
-import { Pressable, Switch, Text, View } from "react-native";
-import { Body, Button, Card, Label, Screen, useLegacyTheme } from "@/components/legacy-ui";
+import { Check, CircleAlert, KeyRound } from "lucide-react-native";
+import { useCallback, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import { BACK_TO_CUSTOMER, flushBumps, GATE_ACTION, StaffScreen } from "@/components/staff";
+import { Banner, Button, Card, Icon, PressableScale, Row, RowGroup, Skeleton, Spinner, SwitchRow, T } from "@/components/ui";
 import { haptic } from "@/lib/haptics";
 import { useMode } from "@/lib/mode";
-import { useSession } from "@/lib/session";
+import { API_URL, useSession } from "@/lib/session";
 import { useStaffSound } from "@/lib/staff-prefs";
-import { space, switchColors, typeStyle } from "@/lib/theme";
+import { space, useTokens } from "@/lib/theme";
 import { useLoad } from "@/lib/use-load";
 
-export default function Ayarlar() {
-  const { api, staffKey, staffSlug, setStaff } = useSession();
-  const { setMode } = useMode();
-  const t = useLegacyTheme();
-  const [soundOn, setSoundOn] = useStaffSound();
-  const { data: cafes } = useLoad(useCallback(() => api.cafes.list(), [api]));
-  const cafeName = cafes?.cafes.find((c) => c.slug === staffSlug)?.name ?? staffSlug;
+const CAFE_LEGEND = "Kafe";
+const BOARD_LEGEND = "Tezgâh";
+const SOUND = "Ses";
+const SOUND_HINT = "Yeni sipariş gelince ses çalar.";
+const FORGET = "Personel anahtarını unut";
+const FORGET_HINT = "Bu telefonda kayıtlı anahtar silinir.";
+const NO_KEY = "Personel anahtarı kayıtlı değil.";
+const OTHER_KEY = "Bu kafe için başka bir anahtar gir.";
 
-  const row = {
+export default function Ayarlar() {
+  const t = useTokens();
+  const { api, staffKey, staffSlug, setStaff, setStaffKey } = useSession();
+  const { setMode } = useMode();
+  const [soundOn, setSoundOn] = useStaffSound();
+  const { data, error: listError, refresh } = useLoad(useCallback(() => api.cafes.list(), [api]));
+  const [checking, setChecking] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  const pick = async (cafe: CafeSummaryDTO) => {
+    if (checking || cafe.slug === staffSlug || !staffKey) return;
+    setChecking(cafe.slug);
+    setPickError(null);
+    try {
+      // Validate the stored key for the new café before keeping it.
+      const probe = createPeniClient({ baseUrl: API_URL, getStaffKey: () => staffKey });
+      await probe.staff.dashboard(cafe.slug);
+      flushBumps();
+      await setStaff({ key: staffKey, slug: cafe.slug });
+      haptic("success");
+    } catch (e) {
+      haptic("error");
+      setPickError(e instanceof PeniApiError && e.code === "NETWORK" ? errorCopy.network : errorCopy.staffKey);
+    } finally {
+      setChecking(null);
+    }
+  };
+
+  const forget = async () => {
+    flushBumps();
+    haptic("confirm");
+    setPickError(null);
+    await setStaffKey(null);
+  };
+
+  const backToCustomer = () => {
+    flushBumps();
+    haptic("confirm");
+    void setMode("customer");
+  };
+
+  return (
+    <StaffScreen title={staffCopy.sections.ayarlar} slug={staffKey ? staffSlug : null}>
+      <View style={styles.sections}>
+        {/* KAFE */}
+        <View style={styles.section}>
+          <T variant="legend" color="ink2" accessibilityRole="header">
+            {CAFE_LEGEND}
+          </T>
+          {listError && !data ? (
+            <Banner
+              tone="danger"
+              title={errorCopy.cafesLoad}
+              action={
+                <Button
+                  title={errorCopy.retry}
+                  variant="secondary"
+                  size="sm"
+                  loading={retrying}
+                  loadingLabel={errorCopy.retry}
+                  onPress={async () => {
+                    setRetrying(true);
+                    await refresh();
+                    setRetrying(false);
+                  }}
+                />
+              }
+            />
+          ) : (
+            <Card padding="none" role="radiogroup" aria-label={CAFE_LEGEND} accessibilityState={!data ? { busy: true } : undefined}>
+              {data
+                ? data.cafes.map((c, i) => (
+                    <CafeChoice
+                      key={c.slug}
+                      cafe={c}
+                      first={i === 0}
+                      selected={c.slug === staffSlug}
+                      checking={checking === c.slug}
+                      disabled={!staffKey || (checking != null && checking !== c.slug)}
+                      onPress={() => void pick(c)}
+                    />
+                  ))
+                : [0, 1].map((i) => (
+                    <View key={i} aria-hidden style={[styles.choice, i ? { borderTopWidth: 1, borderTopColor: t.line } : null]}>
+                      <View style={styles.choiceText}>
+                        <Skeleton width={i ? "62%" : "48%"} line="body" />
+                        <Skeleton width={96} line="meta" />
+                      </View>
+                    </View>
+                  ))}
+            </Card>
+          )}
+          {pickError ? (
+            <View accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>
+              <View style={styles.errorIcon}>
+                <Icon icon={CircleAlert} size={20} color={t.danger} />
+              </View>
+              <View style={styles.errorText}>
+                <T variant="body" color="danger">
+                  {pickError}
+                </T>
+                {pickError === errorCopy.staffKey ? (
+                  <T variant="meta" color="ink2">
+                    {OTHER_KEY}
+                  </T>
+                ) : null}
+              </View>
+              {pickError === errorCopy.staffKey ? (
+                <Button title={GATE_ACTION} variant="secondary" size="sm" onPress={() => router.push("/kafe-modu")} />
+              ) : null}
+            </View>
+          ) : null}
+          {!staffKey ? (
+            <Banner
+              tone="info"
+              icon={KeyRound}
+              title={NO_KEY}
+              action={<Button title={GATE_ACTION} size="sm" onPress={() => router.push("/kafe-modu")} />}
+            />
+          ) : null}
+        </View>
+
+        {/* TEZGÂH */}
+        <RowGroup title={BOARD_LEGEND}>
+          <SwitchRow
+            label={SOUND}
+            hint={soundOn ? SOUND_HINT : staffCopy.soundOff}
+            checked={soundOn}
+            onCheckedChange={setSoundOn}
+            style={styles.switchRow}
+          />
+          {staffKey ? (
+            <Row
+              title={FORGET}
+              meta={FORGET_HINT}
+              tone="danger"
+              start={<Icon icon={KeyRound} size={20} color={t.danger} />}
+              onPress={() => void forget()}
+            />
+          ) : null}
+        </RowGroup>
+
+        <Button title={BACK_TO_CUSTOMER} variant="secondary" size="lg" fullWidth onPress={backToCustomer} />
+      </View>
+    </StaffScreen>
+  );
+}
+
+function CafeChoice({
+  cafe,
+  first,
+  selected,
+  checking,
+  disabled,
+  onPress,
+}: {
+  cafe: CafeSummaryDTO;
+  first: boolean;
+  selected: boolean;
+  checking: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const t = useTokens();
+  const place = [cafe.district, cafe.city].filter(Boolean).join(SEP);
+  return (
+    <PressableScale
+      accessibilityRole="radio"
+      accessibilityState={{ checked: selected, disabled: disabled && !selected, busy: checking }}
+      accessibilityLabel={place ? `${cafe.name}, ${place}` : cafe.name}
+      targetScale={1}
+      pressedColor={t.surface2}
+      disabled={disabled}
+      onPress={() => {
+        if (selected) return;
+        haptic("selection");
+        onPress();
+      }}
+      style={[styles.choice, first ? null : { borderTopWidth: 1, borderTopColor: t.line }]}
+    >
+      <View style={styles.choiceText}>
+        <T variant={selected ? "strong" : "body"}>{cafe.name}</T>
+        {place ? (
+          <T variant="meta" color="ink2">
+            {place}
+          </T>
+        ) : null}
+      </View>
+      <View style={styles.choiceEnd}>
+        {checking ? <Spinner color={t.ink} /> : selected ? <Icon icon={Check} size={20} color={t.ink} /> : null}
+      </View>
+    </PressableScale>
+  );
+}
+
+const styles = StyleSheet.create({
+  sections: { gap: space.section - 4 },
+  section: { gap: 8 },
+  choice: {
     minHeight: space.row,
     paddingVertical: space.rowV,
     paddingHorizontal: space.rowH,
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-  } as const;
-
-  return (
-    <Screen>
-      <Card style={{ padding: 0, gap: 0, overflow: "hidden" }}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityHint="Kafeyi değiştir"
-          onPress={() => router.push("/kafe-modu")}
-          style={({ pressed }) => [row, { backgroundColor: pressed ? t.surface2 : "transparent" }]}
-        >
-          <View style={{ flex: 1, gap: 2 }}>
-            <Label>Kafe</Label>
-            <Text maxFontSizeMultiplier={1.6} style={[typeStyle("body"), { color: t.ink }]}>
-              {cafeName ?? "Seçilmedi"}
-            </Text>
-          </View>
-          <ChevronRight size={20} strokeWidth={1.75} color={t.ink2} />
-        </Pressable>
-        <View style={[row, { borderTopWidth: 1, borderTopColor: t.line }]}>
-          <View style={{ flex: 1, gap: 2 }}>
-            <Text maxFontSizeMultiplier={1.6} style={[typeStyle("body"), { color: t.ink }]}>
-              Ses
-            </Text>
-            <Text maxFontSizeMultiplier={1.6} style={[typeStyle("meta"), { color: t.ink2 }]}>
-              {soundOn ? staffCopy.soundOn : staffCopy.soundOff}
-            </Text>
-          </View>
-          <Switch
-            accessibilityLabel="Ses"
-            value={soundOn}
-            onValueChange={(on) => {
-              haptic("selection");
-              setSoundOn(on);
-            }}
-            {...switchColors(t)}
-          />
-        </View>
-        {staffKey ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => void setStaff(null)}
-            style={({ pressed }) => [
-              row,
-              { borderTopWidth: 1, borderTopColor: t.line, backgroundColor: pressed ? t.surface2 : "transparent" },
-            ]}
-          >
-            <Text maxFontSizeMultiplier={1.6} style={[typeStyle("body"), { color: t.danger, flex: 1 }]}>
-              Personel anahtarını unut
-            </Text>
-          </Pressable>
-        ) : null}
-      </Card>
-      {!staffKey && <Body muted>Personel anahtarı kayıtlı değil.</Body>}
-      <Button title="Müşteri moduna dön" variant="ghost" onPress={() => void setMode("customer")} />
-    </Screen>
-  );
-}
+  },
+  choiceText: { flex: 1, minWidth: 0, gap: 2 },
+  choiceEnd: { width: 24, alignItems: "center" },
+  switchRow: { paddingHorizontal: space.rowH },
+  error: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", columnGap: 8, rowGap: 8, paddingTop: 4 },
+  errorIcon: { alignSelf: "flex-start", paddingTop: 1 },
+  errorText: { flex: 1, minWidth: 160, gap: 2 },
+});

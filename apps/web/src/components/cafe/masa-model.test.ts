@@ -12,6 +12,9 @@ import {
   toggledRsvp,
   whenLabel,
   withOverlay,
+  eventIcs,
+  icsFilename,
+  masaMoreCopy,
 } from "./masa-model";
 
 const post = (over: Partial<PostDTO> = {}): PostDTO => ({
@@ -105,4 +108,43 @@ describe("optimistic toggles", () => {
 
 it("links to the card on the café page", () => {
   expect(postUrl("https://peni.app/", "moda", "post_1")).toBe("https://peni.app/k/moda#post-post_1");
+});
+
+describe("Takvime ekle without the server", () => {
+  const cafe = { name: "Moda Kahvesi", address: "Moda Cd. No: 42", district: "Kadıköy", city: "İstanbul" };
+  const event = post({
+    id: "post_event_1",
+    kind: "event",
+    title: "Takas kütüphanesi",
+    body: "Bir kitap getir, bir kitap al.",
+    eventStartsAt: "2026-10-22T16:00:00.000Z",
+  });
+
+  it("names the file after the day in Istanbul", () => {
+    expect(icsFilename("2026-10-22T16:00:00.000Z")).toBe("peni-masasi-2026-10-22.ics");
+    // 01:30 in Istanbul is still the evening before in UTC.
+    expect(icsFilename("2026-10-22T22:30:00.000Z")).toBe("peni-masasi-2026-10-23.ics");
+  });
+
+  it("is two hours from eventStartsAt, with the topic and the café's address", () => {
+    const file = eventIcs(event, cafe, new Date("2026-10-16T12:00:00Z"))!;
+    expect(file.filename).toBe("peni-masasi-2026-10-22.ics");
+    const lines = file.body.replace(/\r\n /g, "").split("\r\n");
+    expect(lines).toContain("DTSTART:20261022T160000Z");
+    expect(lines).toContain("DTEND:20261022T180000Z");
+    expect(lines).toContain("SUMMARY:Takas kütüphanesi");
+    expect(lines).toContain("LOCATION:Moda Kahvesi\\, Moda Cd. No: 42\\, Kadıköy\\, İstanbul");
+    expect(lines).toContain("DESCRIPTION:Bir kitap getir\\, bir kitap al.");
+  });
+
+  it("is nothing for a post that isn't an event", () => {
+    expect(eventIcs(post(), cafe, new Date())).toBeNull();
+  });
+});
+
+it("says how full a table was, and how many are coming to an open one", () => {
+  expect(masaMoreCopy.seatsPast(9, 12)).toBe("9/12 yer doluydu");
+  expect(masaMoreCopy.came(8)).toBe("8 kişi geldi");
+  expect(masaMoreCopy.attending(8)).toBe("8 kişi geliyor");
+  expect(masaMoreCopy.attending(8, true)).toBe("8 kişi geliyor · sen de geliyorsun");
 });

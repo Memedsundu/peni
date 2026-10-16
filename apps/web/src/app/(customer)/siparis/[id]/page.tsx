@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import { orderCopy } from "@peni/brand/copy";
-import { orderCode } from "@/components/order/order-model";
+import { isNotFoundError, orderCode } from "@/components/order/order-model";
 import { OrderPage, type OrderInitial } from "@/components/order/order-page";
-import { AppError } from "@/server/app";
 import { SESSION_COOKIE } from "@/server/http";
 import { getApp } from "@/server/runtime";
 
@@ -43,7 +42,9 @@ const readOrder = cache(async (id: string): Promise<OrderInitial> => {
     if (!customer) return { kind: "signed_out" };
     return { kind: "ok", order: app.orderFor(customer, id) };
   } catch (error) {
-    if (error instanceof AppError && error.status === 404) return { kind: "not_found" };
+    // By shape, not `instanceof AppError`: after a dev hot reload the app singleton throws
+    // errors from an older copy of the module, and the class check would miss them.
+    if (isNotFoundError(error)) return { kind: "not_found" };
     return { kind: "client" };
   }
 });

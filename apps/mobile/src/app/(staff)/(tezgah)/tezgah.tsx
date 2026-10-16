@@ -1,133 +1,219 @@
-// Legacy café board ("panel"), moved into the (tezgah) staff tab. Rebuilt per §10.10 in §16 step 6.
+/**
+ * Tezgâh (design-system.md §10.10, with §9.10 for the anatomy and the copy).
+ *
+ *   ▓ Moda Kahvesi                                   large title, press
+ *   ▓ 17:50                 [● Uygulama siparişleri: Açık ⌄]   → durdur sheet
+ *   ━ café band
+ *   [banners: error · paused "· 12 dk kaldı" + Şimdi aç · Ses kapalı + Sesi aç]
+ *   Yeni (2) · Hazırlanıyor (1) · Hazır (0)          sticky Segmented
+ *   StaffTicket … (one column, 56pt actions)
+ *
+ * - The board is polled every 4s by the staff tab layout (new orders ring and badge from any
+ *   tab); this screen draws it. Pull to refresh reloads at once.
+ * - Bumps are deferred commits with a 5s "Geri al" toast (A12: the ticket leaves its column at
+ *   once; the ones under it slide up; taps wait until it has settled). Reject opens `reddet`.
+ * - The screen stays awake while this tab is focused.
+ * - Loading: skeleton tickets. Errors: a danger Banner with "Tekrar dene"; the last board stays.
+ */
 import type { OrderDTO } from "@peni/api";
-import { askiCopy, staffCopy } from "@peni/brand/copy";
-import { router, Stack } from "expo-router";
-import { useCallback, useEffect, useRef } from "react";
-import { Alert, View } from "react-native";
-import { Body, Button, Card, ErrorText, Label, Row, Screen, Title } from "@/components/legacy-ui";
+import { errorCopy, staffCopy } from "@peni/brand/copy";
+import { router } from "expo-router";
+import { CirclePause, VolumeX } from "lucide-react-native";
+import { useCallback, useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import Animated, { FadeIn, FadeOut, LayoutAnimationConfig, LinearTransition, ReduceMotion } from "react-native-reanimated";
+import {
+  BoardErrorBanner,
+  boardColumns,
+  bumpOrder,
+  COLUMN_KEY,
+  KeepAwakeWhileFocused,
+  loadBoard,
+  pausedBannerText,
+  setPause,
+  StaffGate,
+  StaffScreen,
+  StaffTicket,
+  StaffTicketSkeleton,
+  TezgahStrip,
+  useBoard,
+  useNow,
+  useSettling,
+  type BoardColumn,
+  type BumpAction,
+} from "@/components/staff";
+import { Banner, Button, Segmented, T, toast } from "@/components/ui";
 import { haptic } from "@/lib/haptics";
+import { durations } from "@/lib/motion";
 import { useSession } from "@/lib/session";
-import { setNewOrderCount } from "@/lib/staff-badge";
-import { useLoad } from "@/lib/use-load";
+import { useRememberedCafeName, useStaffSound } from "@/lib/staff-prefs";
+import { radius, useTokens } from "@/lib/theme";
 
-type Action = "accept" | "reject" | "ready" | "collect" | "no_show";
-const OPEN = ["submitted", "accepted", "ready"] as const;
-const TITLES: Record<(typeof OPEN)[number], string> = {
+const LABEL: Record<BoardColumn, string> = {
   submitted: staffCopy.columns.new,
   accepted: staffCopy.columns.accepted,
   ready: staffCopy.columns.ready,
 };
 
+const ticketMotion = {
+  layout: LinearTransition.duration(durations.move).reduceMotion(ReduceMotion.System),
+  entering: FadeIn.duration(durations.ui).reduceMotion(ReduceMotion.System),
+  exiting: FadeOut.duration(durations.reduced).reduceMotion(ReduceMotion.System),
+};
+
 export default function Tezgah() {
-  const { api, staffKey, staffSlug } = useSession();
-  const slug = staffSlug;
-  const { data, error, refresh } = useLoad(
-    useCallback(() => (staffKey && slug ? api.staff.dashboard(slug) : Promise.resolve(null)), [api, staffKey, slug]),
-    4000,
+  const t = useTokens();
+  const { api, staffKey } = useSession();
+  const board = useBoard();
+  const { slug, data, error, loading, unauthorized, overrides, arrivals } = board;
+  const [column, setColumn] = useState<BoardColumn>("submitted");
+  const now = useNow();
+  const settling = useSettling(board.movedAt);
+  const [soundOn, setSoundOn] = useStaffSound();
+  const [resuming, setResuming] = useState(false);
+
+  const cols = useMemo(() => (data ? boardColumns(data.orders, overrides) : null), [data, overrides]);
+
+  const refresh = useCallback(async () => {
+    if (slug) await loadBoard(api, slug);
+  }, [api, slug]);
+
+  const onBump = useCallback(
+    (order: OrderDTO, action: BumpAction) => {
+      if (slug) bumpOrder(api, slug, order, action);
+    },
+    [api, slug],
   );
+  const onReject = useCallback((order: OrderDTO) => {
+    router.push({ pathname: "/reddet", params: { id: order.id } });
+  }, []);
 
-  const newCount = data?.orders.filter((o) => o.status === "submitted").length ?? 0;
-  const seen = useRef<number | null>(null);
-  useEffect(() => {
-    setNewOrderCount(newCount);
-    if (seen.current != null && newCount > seen.current) haptic("warning");
-    seen.current = newCount;
-  }, [newCount]);
-
-  if (!staffKey || !slug)
-    return (
-      <Screen>
-        <Body>Tezgâhı açmak için personel anahtarını gir.</Body>
-        <Button title="Kafe modu" onPress={() => router.push("/kafe-modu")} />
-      </Screen>
-    );
-
-  const act = async (o: OrderDTO, action: Action, reason?: string) => {
+  const resumeNow = async () => {
+    if (!slug || resuming) return;
+    setResuming(true);
     try {
-      await api.staff.transition(slug, o.id, { action, reason });
+      await setPause(api, slug, null);
       haptic("confirm");
-      await refresh();
-    } catch (e) {
+    } catch {
       haptic("error");
-      Alert.alert(staffCopy.reject, (e as Error).message);
+      toast(errorCopy.change, { tone: "danger" });
+    } finally {
+      setResuming(false);
     }
   };
-  const reject = (o: OrderDTO) =>
-    Alert.alert(staffCopy.rejectSheet.title, undefined, [
-      { text: "Vazgeç", style: "cancel" },
-      ...staffCopy.rejectSheet.reasons.map((r) => ({ text: r, onPress: () => act(o, "reject", r) })),
-    ]);
+
+  const remembered = useRememberedCafeName(slug);
+  const title = data?.cafe.name ?? remembered ?? staffCopy.sections.tezgah;
+
+  if (!staffKey || !slug || unauthorized) {
+    return (
+      <StaffScreen title={staffCopy.sections.tezgah}>
+        <StaffGate rejected={unauthorized} />
+      </StaffScreen>
+    );
+  }
+
+  const paused = data?.cafe.appOrderingPaused ?? null;
+  const banners = (
+    <>
+      {error ? <BoardErrorBanner what={staffCopy.sections.tezgah} stale={data != null} onRetry={refresh} /> : null}
+      {data && paused ? (
+        <Banner
+          tone="warning"
+          icon={CirclePause}
+          title={pausedBannerText(data.cafe.pausedUntil, Math.max(now, Date.now()))}
+          action={
+            <Button title={staffCopy.resume} size="sm" loading={resuming} loadingLabel={staffCopy.resume} onPress={() => void resumeNow()} />
+          }
+        />
+      ) : null}
+      {!soundOn ? (
+        <Banner
+          tone="warning"
+          icon={VolumeX}
+          title={staffCopy.soundOffBanner}
+          action={<Button title={staffCopy.soundOffAction} variant="secondary" size="sm" onPress={() => setSoundOn(true)} />}
+        />
+      ) : null}
+    </>
+  );
+  const hasBanners = !!error || !!(data && paused) || !soundOn;
+
+  const orders = cols?.[column] ?? [];
+  const items = (["submitted", "accepted", "ready"] as const).map((id) => ({
+    id,
+    label: LABEL[id],
+    count: cols ? cols[id].length : undefined,
+  }));
 
   return (
-    <Screen refreshing={false} onRefresh={refresh}>
-      {data && <Stack.Screen options={{ title: data.cafe.name }} />}
-      <ErrorText>{error}</ErrorText>
-      {data && (
-        <>
-          <Row style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
-            <Body strong>{data.cafe.appOrderingPaused ? staffCopy.ordersPaused : staffCopy.ordersOpen}</Body>
-            <Button
-              small
-              variant={data.cafe.appOrderingPaused ? "primary" : "ghost"}
-              title={data.cafe.appOrderingPaused ? staffCopy.resume : "Durdur"}
-              onPress={() => api.staff.setPaused(slug, !data.cafe.appOrderingPaused).then(refresh)}
-            />
-          </Row>
-          {OPEN.map((status) => {
-            const orders = data.orders.filter((o) => o.status === status);
-            return (
-              <View key={status} style={{ gap: 8 }}>
-                <Label>{staffCopy.segment(TITLES[status], orders.length)}</Label>
-                {orders.length === 0 && (
-                  <Body muted>{staffCopy.columnEmpty[status === "submitted" ? "new" : status]}</Body>
-                )}
-                {orders.map((o) => (
-                  <Card key={o.id}>
-                    <Row style={{ justifyContent: "space-between" }}>
-                      <Title size={28}>{o.orderNumber ?? "—"}</Title>
-                      <Body muted>{o.customerName}</Body>
-                    </Row>
-                    {o.lines.map((l, i) => (
-                      <Body key={i}>
-                        {l.quantity} × {l.name}
-                        {l.fromAskida ? ` · ${askiCopy.ticketChip}` : ""}
-                        {l.note ? ` · ${l.note}` : ""}
-                      </Body>
-                    ))}
-                    {o.customerNote && <Body muted>{staffCopy.note(o.customerNote)}</Body>}
-                    <Body strong>{staffCopy.payment(o.dueKurus)}</Body>
-                    <Row style={{ flexWrap: "wrap" }}>
-                      {status === "submitted" && (
-                        <Button small title={staffCopy.action.submitted} onPress={() => act(o, "accept")} />
-                      )}
-                      {status === "accepted" && (
-                        <Button
-                          small
-                          variant="leaf"
-                          title={staffCopy.action.accepted}
-                          onPress={() => act(o, "ready")}
-                        />
-                      )}
-                      {status === "ready" &&
-                        (data.cafe.posKind === "standalone" ? (
-                          <Button small title={staffCopy.action.ready} onPress={() => act(o, "collect")} />
-                        ) : (
-                          <Body muted>{staffCopy.action.closesAtTill}</Body>
-                        ))}
-                      {status === "ready" && (
-                        <Button small variant="ghost" title={staffCopy.noShow} onPress={() => act(o, "no_show")} />
-                      )}
-                      {status !== "ready" && (
-                        <Button small variant="berry" title={staffCopy.reject} onPress={() => reject(o)} />
-                      )}
-                    </Row>
-                  </Card>
-                ))}
-              </View>
-            );
-          })}
-        </>
+    <StaffScreen
+      title={title}
+      slug={slug}
+      strip={<TezgahStrip paused={paused} />}
+      top={hasBanners ? banners : undefined}
+      sticky={
+        !data && !loading ? undefined : (
+        <Segmented
+          id="tezgah"
+          label={staffCopy.sections.tezgah}
+          items={items}
+          value={column}
+          onChange={(id) => setColumn(id as BoardColumn)}
+          style={styles.segmented}
+        />
+        )
+      }
+      onRefresh={refresh}
+      busy={loading && !data}
+      bodyPointerEvents={settling ? "none" : "auto"}
+    >
+      <KeepAwakeWhileFocused />
+      {!cols ? (
+        loading ? (
+          <View style={styles.list}>
+            <StaffTicketSkeleton />
+            <StaffTicketSkeleton />
+          </View>
+        ) : null
+      ) : (
+        <LayoutAnimationConfig key={column} skipEntering skipExiting>
+          {orders.length === 0 ? (
+            <Animated.View entering={ticketMotion.entering} style={[styles.empty, { backgroundColor: t.surface2 }]}>
+              <T variant="meta" color="ink2" align="center">
+                {staffCopy.columnEmpty[COLUMN_KEY[column]]}
+              </T>
+            </Animated.View>
+          ) : null}
+          <View style={styles.list}>
+            {orders.map((order) => (
+              <Animated.View key={order.id} {...ticketMotion}>
+                <StaffTicket
+                  order={order}
+                  slug={slug}
+                  posKind={data!.cafe.posKind}
+                  now={now}
+                  arrivedAt={arrivals.get(order.id)}
+                  onBump={onBump}
+                  onReject={onReject}
+                />
+              </Animated.View>
+            ))}
+          </View>
+        </LayoutAnimationConfig>
       )}
-    </Screen>
+    </StaffScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  segmented: { marginTop: 4 },
+  list: { gap: 16 },
+  empty: {
+    height: 120,
+    borderRadius: radius.card,
+    paddingHorizontal: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

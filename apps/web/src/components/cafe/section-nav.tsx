@@ -8,12 +8,16 @@ export type CafeSectionId = "menu" | "aski" | "masa";
 
 const LABELS: Record<CafeSectionId, string> = { menu: "Menü", aski: "Askı", masa: "Masa" };
 
-/** The line under the sticky bar where a section counts as "current": header + bar + a little air. */
+/**
+ * The line under the sticky bar where a section counts as "current": header + bar + 64px. That
+ * is more than the gap between two sections (32px phone, 48px desktop), so the tab flips as the
+ * previous section leaves view, not a beat after.
+ */
 function spyLine(): number {
   const root = getComputedStyle(document.documentElement);
   const header = Number.parseFloat(root.getPropertyValue("--header-h")) || 56;
   const seg = Number.parseFloat(root.getPropertyValue("--seg-h")) || 48;
-  return header + seg + 24;
+  return header + seg + 64;
 }
 
 /**
@@ -110,7 +114,7 @@ export function SectionNav({
     <div
       className={cx(
         className,
-        "sticky top-[var(--header-h)] z-30 -mx-4 border-b border-line bg-bg px-4 [background:var(--grain),var(--bg)] sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0",
+        "sticky top-[var(--header-h)] z-20 -mx-4 border-b border-line bg-bg px-4 [background:var(--grain),var(--bg)] sm:-mx-6 sm:px-6 lg:mx-0 lg:px-0",
       )}
       // Plain clicks scroll smoothly from here; modified clicks keep the anchor's own behaviour.
       onClickCapture={(event) => {

@@ -3,13 +3,14 @@
 import type { GiftPreviewDTO } from "@peni/api";
 import { PeniApiError } from "@peni/api";
 import { actionCopy, errorCopy } from "@peni/brand/copy";
-import { capitalizeTr, dativeName, dativeTime, formatPeni, formatTime, locativeTime, numberWord, relDay, SEP, trUpper } from "@peni/brand/format";
+import { capitalizeTr, dativeName, dativeTime, formatPeni, formatTime, locativeTime, relDay, SEP, trUpper } from "@peni/brand/format";
 import { Undo2 } from "lucide-react";
 import { useState } from "react";
 import { signInHref } from "@/components/auth/return-to";
 import { Coin, Fis, FisDivider } from "@/components/brand";
 import { Banner, Button } from "@/components/ui";
 import { peni } from "@/lib/client";
+import { spoken } from "./og-copy";
 
 /**
  * Gift landing (design-system.md §9.7, [G11]): the shared link of an ısmarlama. A centred
@@ -32,6 +33,8 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
 
   // "1 çay" never breaks between the number and the item.
   const what = (gift.goods ?? formatPeni(gift.peni)).replace(/(\d) /g, "$1\u00A0");
+  // In running text a peni amount is copper (§3.1); goods ("1 çay") stay ink.
+  const whatText = gift.goods ? what : <PeniText>{what}</PeniText>;
   const cafe = { name: gift.cafeName, slug: gift.cafeSlug };
   const legend = `ISMARLAMA${SEP}${trUpper(gift.cafeName)}`;
   const status = accepted ? "accepted" : gift.status;
@@ -53,7 +56,7 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
   };
 
   let title: string;
-  let body: string | null = null;
+  let body: React.ReactNode = null;
   let note: string | null = null;
   let action: React.ReactNode = null;
 
@@ -67,7 +70,7 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
     );
   } else if (viewer === "sender") {
     title = `${capitalizeTr(spoken(what))} ısmarladın`;
-    body = status === "accepted" ? `${gift.cafeName} için. Kabul edildi.` : `${gift.cafeName} için. Henüz kabul edilmedi.`;
+    body = `${gift.cafeName} için gönderdin; ${status === "accepted" ? "kabul edildi." : "henüz kabul edilmedi."}`;
     note = status === "pending" ? `Kabul edilmezse peni ${relDay(gift.expiresAt)} ${locativeTime(formatTime(gift.expiresAt))} sana döner.` : null;
     action = (
       <Button variant="secondary" fullWidth href="/cuzdan">
@@ -77,7 +80,11 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
   } else if (status === "accepted") {
     if (viewer === "recipient") {
       title = "Afiyet olsun!";
-      body = `${formatPeni(gift.peni)} cüzdanında.`;
+      body = (
+        <>
+          <PeniText>{formatPeni(gift.peni).replace(/(\d) /g, "$1\u00A0")}</PeniText> cüzdanında.
+        </>
+      );
       action = (
         <Button fullWidth href="/cuzdan">
           Cüzdanına git
@@ -85,7 +92,11 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
       );
     } else {
       title = "Bu ısmarlama kabul edildi.";
-      body = `${gift.fromFirstName}, ${gift.cafeName} için ${what} ısmarlamıştı.`;
+      body = (
+        <>
+          {gift.fromFirstName}, {gift.cafeName} için {whatText} ısmarlamıştı.
+        </>
+      );
       action = (
         <Button variant="secondary" fullWidth href="/">
           {actionCopy.browseCafes}
@@ -94,7 +105,11 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
     }
   } else {
     title = `Seni ${spoken(what)} bekliyor`;
-    body = `${gift.fromFirstName} sana ${gift.cafeName} için ${what} ısmarladı.`;
+    body = (
+      <>
+        {gift.fromFirstName} sana {gift.cafeName} için {whatText} ısmarladı.
+      </>
+    );
     note = `${capitalizeTr(relDay(gift.expiresAt))} ${dativeTime(formatTime(gift.expiresAt))} kadar kabul edebilirsin.`;
     if (viewer === "signed_out") {
       action = (
@@ -152,8 +167,7 @@ export function GiftLanding({ gift }: { gift: GiftPreviewDTO }) {
   );
 }
 
-/** "1 çay" → "bir çay", "2 çay" → "iki çay": goods as they are said in a headline. */
-function spoken(goods: string): string {
-  const m = /^(\d+)[ \u00A0](.+)$/.exec(goods);
-  return m ? `${numberWord(Number(m[1]))} ${m[2]}` : goods;
+/** A peni amount inside a sentence: copper, semibold (§3.1). */
+function PeniText({ children }: { children: React.ReactNode }) {
+  return <span className="font-semibold text-peni-ink tabular-nums">{children}</span>;
 }

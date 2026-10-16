@@ -12,22 +12,33 @@ import { BlockedBanner } from "./menu-section";
  * The cart's body (design-system.md §9.3 "Cart content" 1–5), shared by the phone sheet and
  * the desktop fiş: lines, the ikram line, the peni toggle, the note and the earn preview.
  * `editable` puts a 44px stepper on every line (the sheet); the desktop slip leaves editing to
- * the menu beside it.
+ * the menu beside it. While the order is being sent (`busy`) the body is locked (`inert`, and
+ * dimmed after a beat so a quick send doesn't flash): the request already carries this cart,
+ * so an edit made now would be silently dropped.
  */
 export function CartBody({
   cafe,
   cart,
   totals,
   editable,
+  busy = false,
 }: {
   cafe: CoinCafe;
   cart: CafeCart;
   totals: CartTotals;
   editable: boolean;
+  busy?: boolean;
 }) {
   const { state } = cart;
   return (
-    <div className="flex flex-col">
+    <div
+      inert={busy}
+      className={cx(
+        // An opacity fade only, so it stays under reduced motion too (and keeps the delay).
+        "flex flex-col transition-opacity duration-200 ease-out-strong",
+        busy && "opacity-60 delay-150",
+      )}
+    >
       <ul className="flex flex-col" aria-label={cartCopy.title}>
         {totals.lines.map((line) => (
           <li key={line.item.productId} className={cx("flex items-center gap-3", editable ? "min-h-14 py-1.5" : "py-1.5")}>
@@ -50,11 +61,15 @@ export function CartBody({
         ))}
         {totals.soldOut.map((item) => (
           <li key={item.productId} className={cx("flex items-center gap-3", editable ? "min-h-14 py-1.5" : "py-1.5")}>
-            <span className="min-w-0 flex-1 text-body text-ink-2">{item.name}</span>
+            {/* On the desktop slip the menu row has no control left for it: the X sits by the name, as on the ikram line. */}
+            <span className="flex min-w-0 flex-1 items-center gap-1 text-body text-ink-2">
+              <span className="min-w-0">{item.name}</span>
+              {!editable && <RemoveButton label={removeLabel(item.name)} onClick={() => cart.setQty(item.productId, 0)} compact />}
+            </span>
             <Chip kind="tag">{cartCopy.soldOut}</Chip>
             {editable && (
               <span className="flex w-[116px] shrink-0 justify-end">
-                <RemoveButton label={cartCopy.remove(item.name)} onClick={() => cart.setQty(item.productId, 0)} />
+                <RemoveButton label={removeLabel(item.name)} onClick={() => cart.setQty(item.productId, 0)} />
               </span>
             )}
           </li>
@@ -172,6 +187,9 @@ export function CartFooter({
     </div>
   );
 }
+
+/** The X takes the whole line out, so it says so; the colon keeps a suffix off the dynamic name. */
+const removeLabel = (name: string) => `Sepetten çıkar: ${name}`;
 
 function RemoveButton({ label, onClick, compact = false }: { label: string; onClick: () => void; compact?: boolean }) {
   return (

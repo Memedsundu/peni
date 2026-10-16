@@ -80,6 +80,7 @@ export function MenuSection({
   member,
   blocked,
   dropped,
+  locked = false,
   onChange,
   onJoinAdd,
 }: {
@@ -90,6 +91,8 @@ export function MenuSection({
   blocked: null | "closed" | "preorder_off";
   /** Names `?sepet=` couldn't add because they are sold out. */
   dropped: readonly string[];
+  /** An order is being sent with the cart as it is: no edits until it lands (desktop edits here). */
+  locked?: boolean;
   onChange: (productId: string, qty: number) => void;
   onJoinAdd: (item: MenuItemDTO) => void;
 }) {
@@ -104,14 +107,14 @@ export function MenuSection({
   }, [menu]);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6" inert={locked}>
       {blocked && <BlockedBanner reason={blocked} />}
       {dropped.length > 0 && <Banner tone="info" title={cartCopy.dropped(joinNames(dropped))} />}
       {categories.map(([category, items]) => {
         const headingId = `menu-${slugify(category)}`;
         return (
           <section key={category} aria-labelledby={headingId} className="flex flex-col gap-2">
-            <h3 id={headingId} className="legend px-1 text-ink-2">
+            <h3 id={headingId} className="legend px-4 text-ink-2 md:px-5">
               {category}
             </h3>
             <ul className="divide-y divide-line overflow-hidden rounded-[14px] bg-surface shadow-raised">

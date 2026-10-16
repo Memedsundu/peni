@@ -1,6 +1,11 @@
-/** Customer tabs in the browser preview: JS tabs with lucide icons (see `_layout.tsx` for native). */
+/**
+ * Customer tabs in the browser preview: JS tabs with lucide icons (see `_layout.tsx` for native).
+ * The active order shows as the Siparişler badge and the floating pill 8pt above the tab bar
+ * (the Android / iOS < 26 behaviour, §8.4).
+ */
 import { Tabs } from "expo-router/js-tabs";
 import { Coffee, ReceiptText, UserRound } from "lucide-react-native";
+import { WithActiveOrderPill } from "@/components/order";
 import { useActiveOrder, useActiveOrderPolling } from "@/lib/active-order";
 import { useSession } from "@/lib/session";
 import { useTokens } from "@/lib/theme";
@@ -18,7 +23,14 @@ export default function CustomerTabsWeb() {
   const active = useActiveOrder();
 
   return (
-    <Tabs screenOptions={webTabsOptions(t)} tabBar={(props) => <WebTabBar {...props} />}>
+    <Tabs
+      screenOptions={webTabsOptions(t)}
+      tabBar={(props) => (
+        <WithActiveOrderPill>
+          <WebTabBar {...props} />
+        </WithActiveOrderPill>
+      )}
+    >
       <Tabs.Screen name="(kafeler)" options={{ title: "Kafeler", tabBarIcon: KAFELER }} />
       <Tabs.Screen
         name="(siparisler)"

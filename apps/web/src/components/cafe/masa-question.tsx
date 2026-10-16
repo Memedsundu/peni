@@ -6,7 +6,7 @@ import { Check } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { Button, cx } from "@/components/ui";
 import { useCafe } from "./cafe-context";
-import { ANSWERS_SHOWN, newestFirst, postDomId, whenLabel } from "./masa-model";
+import { ANSWERS_SHOWN, masaMoreCopy, newestFirst, postDomId, whenLabel } from "./masa-model";
 import { CommentForm, Reveal, useJoinLabel } from "./masa-shared";
 
 const cardScroll = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)]";
@@ -31,14 +31,25 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
   const [justAnswered, setJustAnswered] = useState(false);
   const answeredRef = useRef<HTMLParagraphElement>(null);
   const answered = post.answeredTodayByMe || justAnswered;
+  // Closing the composer unmounts the focused field: focus goes back to "Sen de cevapla".
+  const answerButton = useRef<HTMLButtonElement>(null);
+  const refocusAnswer = useRef(false);
 
   const answers = newestFirst(post.comments);
   const first = answers.slice(0, ANSWERS_SHOWN);
   const rest = answers.slice(ANSWERS_SHOWN);
+  // The server's count, in case it ever sends only the newest answers.
+  const answerCount = Math.max(post.commentCount, answers.length);
 
   useEffect(() => {
     if (justAnswered) answeredRef.current?.focus({ preventScroll: true });
   }, [justAnswered]);
+
+  useEffect(() => {
+    if (composing || !refocusAnswer.current) return;
+    refocusAnswer.current = false;
+    answerButton.current?.focus();
+  }, [composing]);
 
   return (
     <article
@@ -60,7 +71,7 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
 
       {answers.length > 0 && (
         <div className="mt-4">
-          <ul aria-label="Cevaplar" className="flex flex-col gap-2">
+          <ul aria-label={masaMoreCopy.answersLabel} className="flex flex-col gap-2">
             {first.map((a) => (
               <AnswerNote key={a.id} answer={a} now={now} />
             ))}
@@ -68,7 +79,7 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
           {rest.length > 0 && (
             <>
               <Reveal open={allOpen} id={restId}>
-                <ul aria-label="Önceki cevaplar" className="flex flex-col gap-2 pt-2">
+                <ul aria-label={masaMoreCopy.olderAnswersLabel} className="flex flex-col gap-2 pt-2">
                   {rest.map((a) => (
                     <AnswerNote key={a.id} answer={a} now={now} />
                   ))}
@@ -82,7 +93,7 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
                 onClick={() => setAllOpen((v) => !v)}
                 className="-ml-3 mt-1"
               >
-                {allOpen ? "Daha az göster" : masaCopy.allAnswers(answers.length)}
+                {allOpen ? masaMoreCopy.showLess : masaCopy.allAnswers(answerCount)}
               </Button>
             </>
           )}
@@ -99,7 +110,7 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
           </div>
         ) : answered ? (
           <p ref={answeredRef} tabIndex={-1} role="status" className="flex items-center gap-2 text-body text-ink outline-none">
-            <Check aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0 text-masa-ink" />
+            <Check aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0 text-ink" />
             {masaCopy.answered}
           </p>
         ) : composing ? (
@@ -111,10 +122,13 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
               setComposing(false);
               setJustAnswered(true);
             }}
-            onCancel={() => setComposing(false)}
+            onCancel={() => {
+              refocusAnswer.current = true;
+              setComposing(false);
+            }}
           />
         ) : (
-          <Button variant="secondary" onClick={() => setComposing(true)}>
+          <Button ref={answerButton} variant="secondary" onClick={() => setComposing(true)}>
             {masaCopy.answer}
           </Button>
         )}

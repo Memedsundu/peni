@@ -13,14 +13,14 @@ export default async function ProfilePage() {
   return <ProfileView me={await readMe()} />;
 }
 
+/**
+ * null only when nobody is signed in (the "Giriş yap" invitation). Any other failure is thrown,
+ * so (customer)/error.tsx says "Bu sayfa açılamadı." with "Tekrar dene" instead of pretending
+ * the visitor is signed out.
+ */
 async function readMe(): Promise<MeDTO | null> {
-  // Outside the try: cookies() signals dynamic rendering by throwing during prerender.
   const token = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
-  try {
-    const app = await getApp();
-    const customer = app.customerForToken(token);
-    return customer ? app.me(customer) : null;
-  } catch {
-    return null;
-  }
+  const app = await getApp();
+  const customer = app.customerForToken(token);
+  return customer ? app.me(customer) : null;
 }

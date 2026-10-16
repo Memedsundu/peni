@@ -8,4 +8,4 @@ export { HistoryList, HistoryListSkeleton, type HistoryListProps } from "./histo
 export { PeniKoduDialog, primePeniKodu, type PeniKoduDialogProps } from "./peni-kodu-dialog";
 export { QrCode } from "./qr-code";
 export { markBalanceSeen, WalletCoinCard, WalletCoinCardSkeleton, type WalletCoinCardProps } from "./wallet-coin-card";
-export { WalletPage, type WalletInitial } from "./wallet-page";
+export { WalletPage, WalletSkeleton, type WalletInitial } from "./wallet-page";

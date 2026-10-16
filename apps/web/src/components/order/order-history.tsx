@@ -3,9 +3,10 @@
 import type { OrderDTO } from "@peni/api";
 import { statusChips } from "@peni/brand/copy";
 import { formatTime, formatTL } from "@peni/brand/format";
-import { Check, CircleAlert, Undo2 } from "lucide-react";
+import { Ban, Check, CircleAlert, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { Chip, colorMotion, cx, focusRingInset, Skeleton, tappable } from "@/components/ui";
+import { ordersCopy } from "./copy";
 import { groupByDay, isVoid, itemsSummary, orderCode, reorderHref, usualLabel, usualOrderIds } from "./order-model";
 
 /*
@@ -19,10 +20,13 @@ import { groupByDay, isVoid, itemsSummary, orderCode, reorderHref, usualLabel, u
 
 const CHIP_ICON = { Check, Undo2, CircleAlert } as const;
 
-/** The total when nothing was due at the till (§11: never "₺0"). */
-const NO_PAYMENT = "Ödeme yok";
-
 type ClosedStatus = keyof typeof statusChips;
+
+/**
+ * Every chip is icon + word (§3.2). The shared table gives "İptal edildi" no icon yet; until it
+ * does, it reads with `Ban`, so the chip column keeps one left edge.
+ */
+const FALLBACK_ICON: Partial<Record<ClosedStatus, typeof Ban>> = { cancelled: Ban };
 
 export function OrderHistory({ orders, now }: { orders: OrderDTO[]; now?: Date }) {
   const groups = groupByDay(orders, now);
@@ -48,7 +52,9 @@ export function OrderHistory({ orders, now }: { orders: OrderDTO[]; now?: Date }
 
 function HistoryRow({ order, usual }: { order: OrderDTO; usual: boolean }) {
   const code = orderCode(order);
-  const chip = order.status in statusChips ? statusChips[order.status as ClosedStatus] : null;
+  const closed = order.status in statusChips ? (order.status as ClosedStatus) : null;
+  const chip = closed ? statusChips[closed] : null;
+  const chipIcon = chip?.icon ? CHIP_ICON[chip.icon] : closed ? FALLBACK_ICON[closed] : undefined;
   const voided = isVoid(order.status);
   const usualText = usual ? usualLabel(order.lines) : null;
 
@@ -75,13 +81,18 @@ function HistoryRow({ order, usual }: { order: OrderDTO; usual: boolean }) {
             </span>
             <span className="mt-0.5 block text-meta text-ink-2">{itemsSummary(order.lines)}</span>
           </span>
-          <span className={cx("shrink-0 text-button tabular-nums", voided ? "text-ink-2" : "text-ink")}>
-            {order.dueKurus > 0 ? formatTL(order.dueKurus) : <span className="text-meta font-normal text-ink-2">{NO_PAYMENT}</span>}
-          </span>
+          {/* A void order owed nothing: its total is struck through, exactly as on its fiş. */}
+          {order.dueKurus > 0 ? (
+            <span className={cx("shrink-0 text-button tabular-nums", voided ? "text-ink-2 line-through decoration-[1.5px]" : "text-ink")}>
+              {formatTL(order.dueKurus)}
+            </span>
+          ) : (
+            <span className="shrink-0 text-meta text-ink-2">{ordersCopy.noPayment}</span>
+          )}
         </span>
         <span className="mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1">
           {chip && (
-            <Chip tone={chip.tone} icon={chip.icon ? CHIP_ICON[chip.icon] : undefined}>
+            <Chip tone={chip.tone} icon={chipIcon}>
               {chip.label}
             </Chip>
           )}
@@ -91,10 +102,13 @@ function HistoryRow({ order, usual }: { order: OrderDTO; usual: boolean }) {
         </span>
       </Link>
       {/* A sibling of the row link, never inside it: two separate targets. */}
+      {/* One line, always: a long usual order ends in "…" rather than growing into a block
+          heavier than its row. 100cqw is this strip's width; 31px is the chip's padding and
+          border. The full words stay in the DOM (and in `title` for a pointer). */}
       {usualText && (
-        <div className="px-4 pb-3 md:px-5">
-          <Chip kind="choice" href={reorderHref(order)} prefetch={false} className="max-w-full">
-            {usualText}
+        <div className="@container px-4 pb-3 md:px-5">
+          <Chip kind="choice" href={reorderHref(order)} prefetch={false} title={usualText} className="max-w-full">
+            <span className="block max-w-[calc(100cqw-31px)] truncate">{usualText}</span>
           </Chip>
         </div>
       )}

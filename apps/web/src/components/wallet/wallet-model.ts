@@ -166,7 +166,7 @@ export function recentsFor(recents: readonly RecentRecipientDTO[] | undefined, c
 /* ========================================================================================== */
 
 /** A sentence piece: plain words, or a peni amount (drawn in `peni-ink`). */
-export type Piece = string | { peni: number; signed?: boolean; suffix?: string };
+export type Piece = string | { peni: number; signed?: boolean };
 
 export type HistoryChip = {
   label: string;
@@ -260,7 +260,7 @@ function ledgerItem(e: LedgerEntryDTO): HistoryItem | null {
       return { ...base, pieces: ["Askıya ", { peni: n }, " bıraktın"] };
     case "refund":
       return e.peni >= 0
-        ? { ...base, pieces: [e.orderNumber ? `Sipariş ${e.orderNumber}${SEP}` : "", { peni: n, suffix: "n" }, " döndü"] }
+        ? { ...base, pieces: [e.orderNumber ? `Sipariş ${e.orderNumber}${SEP}` : "", { peni: n }, " sana döndü"] }
         : { ...base, pieces: [e.orderNumber ? `Sipariş ${e.orderNumber}${SEP}` : "", { peni: n }, " geri alındı"] };
     // Gift lines without their gift (should not happen; the gift line normally says it all).
     case "gift_out":
@@ -312,5 +312,5 @@ export function groupByDay(items: readonly HistoryItem[], now: Date = new Date()
 
 /** The plain sentence, for tests and screen readers: "Mehmet'e 30 peni ısmarladın". */
 export function sentence(pieces: readonly Piece[]): string {
-  return pieces.map((p) => (typeof p === "string" ? p : `${formatPeni(p.peni, { signed: p.signed })}${p.suffix ?? ""}`)).join("");
+  return pieces.map((p) => (typeof p === "string" ? p : formatPeni(p.peni, { signed: p.signed }))).join("");
 }

@@ -2,13 +2,13 @@
 
 import { PeniApiError, type GiftDTO, type RefItemDTO } from "@peni/api";
 import { actionCopy, errorCopy } from "@peni/brand/copy";
-import { dativeName, formatNumber, formatPeni } from "@peni/brand/format";
+import { dativeName, formatNumber, formatPeni, SEP } from "@peni/brand/format";
 import { Check, Heart } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Coin, Fis, type CoinCafe } from "@/components/brand";
 import { Banner, Button, Sheet } from "@/components/ui";
 import { peni } from "@/lib/client";
-import { firstName, giftDeadline, giftInviteTitle, giftLegend } from "./wallet-model";
+import { firstName, giftDeadline, giftInviteTitle, giftLegend, giftWhat } from "./wallet-model";
 
 /*
  * GiftInvite (design-system.md §9.6, A7, [G15]): an incoming, pending ısmarlama as a gift fiş.
@@ -44,12 +44,17 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
   const [declineOpen, setDeclineOpen] = useState(false);
   const [declineError, setDeclineError] = useState<string | null>(null);
   const thankRef = useRef<HTMLButtonElement>(null);
+  const thankedRef = useRef<HTMLParagraphElement>(null);
+  const [thankedHere, setThankedHere] = useState(false);
   const from = firstName(gift.fromName);
 
   // "Kabul et" leaves the DOM on success: hand focus to what replaced it.
   useEffect(() => {
     if (flips > 0) thankRef.current?.focus({ preventScroll: true });
   }, [flips]);
+  useEffect(() => {
+    if (thankedHere) thankedRef.current?.focus({ preventScroll: true });
+  }, [thankedHere]);
 
   const accept = async () => {
     if (busy) return;
@@ -74,6 +79,7 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
     try {
       await peni.gifts.thank(gift.id);
       setThanked(true);
+      setThankedHere(true);
     } catch (e) {
       setError(messageOf(e));
     } finally {
@@ -144,7 +150,7 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
               </Button>
             </>
           ) : thanked ? (
-            <p className="flex min-h-12 items-center gap-2 text-body text-success-ink" role="status">
+            <p ref={thankedRef} tabIndex={-1} className="flex min-h-12 items-center gap-2 text-body text-success-ink outline-none" role="status">
               <Check aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0" />
               {`Teşekkürün ${dativeName(from)} iletildi.`}
             </p>
@@ -176,7 +182,18 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
           </div>
         }
       >
-        {declineError && <Banner tone="danger" title={declineError} />}
+        <div className="flex flex-col gap-3">
+          {/* Which gift: with two fişes waiting, the sheet names the one it is about. */}
+          <p className="flex items-center gap-3 rounded-[10px] bg-surface-2 px-3 py-2.5 text-body text-ink-2">
+            <Coin size={28} cafe={cafe} />
+            <span className="min-w-0">
+              <span className="font-semibold text-ink">{giftWhat(gift.peni, refItems)}</span>
+              {SEP}
+              {gift.cafeName}
+            </span>
+          </p>
+          {declineError && <Banner tone="danger" title={declineError} />}
+        </div>
       </Sheet>
     </>
   );

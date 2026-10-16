@@ -1,53 +1,88 @@
-// Legacy Kafeler list, moved into the (kafeler) tab. Rebuilt with CafeCard in §16 step 6.
-import { askiCopy, peniCopy } from "@peni/brand/copy";
-import { Link } from "expo-router";
-import { useCallback } from "react";
-import { Pressable, View } from "react-native";
-import { Body, Button, Card, Coin, ErrorText, Label, Row, Screen, Title, useLegacyTheme } from "@/components/legacy-ui";
+/**
+ * Kafeler (design-system.md §10.1, with §9.1 for anatomy and copy): the first tab, "/".
+ *
+ * - The large title "Kafeler" (native on iOS; in the content elsewhere, see `TabScreen`).
+ * - Signed out: the slim strip "Kafeye katıl, peni biriktir." + "Giriş yap" (the `giris` modal).
+ * - The CafeCards, 16pt apart. Each is a link to `kafe/[slug]` (with the iOS zoom).
+ * - Loading: two skeleton cards. Empty: "Yakında burada mahallenin kafeleri olacak." Error:
+ *   the danger banner "Kafeler yüklenemedi." + "Tekrar dene" — at the top, and over the list
+ *   when a refresh fails, never in place of it.
+ *
+ * Reloads when the tab comes into focus (balances move after an order) and on pull to refresh.
+ */
+import { errorCopy } from "@peni/brand/copy";
+import { Store } from "lucide-react-native";
+import { useCallback, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import { CafeCard, CafeCardSkeleton } from "@/components/home/cafe-card";
+import { SignedOutStrip } from "@/components/home/signed-out-strip";
+import { TabScreen } from "@/components/home/tab-screen";
+import { Banner, Button, EmptyState } from "@/components/ui";
 import { useSession } from "@/lib/session";
 import { useLoad } from "@/lib/use-load";
 
-export default function Cafes() {
+const EMPTY = "Yakında burada mahallenin kafeleri olacak.";
+
+export default function Kafeler() {
   const { api, signedIn } = useSession();
-  const t = useLegacyTheme();
-  const { data, error, loading, refresh } = useLoad(useCallback(() => api.cafes.list(), [api]));
+  const { data, error, refresh } = useLoad(useCallback(() => api.cafes.list(), [api]));
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async () => {
+    setRetrying(true);
+    await refresh();
+    setRetrying(false);
+  };
+
+  const cafes = data?.cafes ?? null;
+  const loading = cafes == null && error == null;
 
   return (
-    <Screen refreshing={loading} onRefresh={refresh}>
-      {!signedIn && (
-        <View style={{ backgroundColor: t.surface2, borderRadius: 10, padding: 12, gap: 8 }}>
-          <Body>Kafeye katıl, peni biriktir.</Body>
-          <Link href="/giris" asChild>
-            <Button title="Giriş yap" variant="ghost" small onPress={() => {}} />
-          </Link>
+    <TabScreen
+      title="Kafeler"
+      onRefresh={refresh}
+      busy={loading}
+      gap={16}
+      centered={cafes?.length === 0 && !error}
+      top={signedIn ? null : <SignedOutStrip />}
+    >
+      {error ? (
+        <Banner
+          tone="danger"
+          title={errorCopy.cafesLoad}
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              title={errorCopy.retry}
+              loading={retrying}
+              loadingLabel={errorCopy.retry}
+              onPress={() => void retry()}
+            />
+          }
+        />
+      ) : null}
+
+      {loading ? (
+        <View style={styles.list}>
+          <CafeCardSkeleton />
+          <CafeCardSkeleton nameWidth="78%" />
         </View>
-      )}
-      <ErrorText>{error}</ErrorText>
-      {data?.cafes.map((c) => (
-        <Link key={c.id} href={`/kafe/${c.slug}`} asChild>
-          <Pressable accessibilityRole="link" accessibilityLabel={c.name}>
-            <Card>
-              <Label>{[c.district, c.city].filter(Boolean).join(" · ")}</Label>
-              <Title size={22}>{c.name}</Title>
-              {c.balancePeni != null && (
-                <Row>
-                  <Coin />
-                  <Body>
-                    {peniCopy.balance(c.balancePeni).before}
-                    <Body strong style={{ color: t.peniInk }}>
-                      {peniCopy.balance(c.balancePeni).amount}
-                    </Body>
-                  </Body>
-                </Row>
-              )}
-              <Body muted>{askiCopy.cardLine(c.askidaItemsAvailable, null)}</Body>
-              <Body strong style={{ color: c.acceptingOrders ? t.leaf : t.ink2 }}>
-                {c.acceptingOrders ? "Sipariş alıyor" : "Şu an sipariş almıyor"}
-              </Body>
-            </Card>
-          </Pressable>
-        </Link>
-      ))}
-    </Screen>
+      ) : null}
+
+      {cafes && cafes.length > 0 ? (
+        <View style={styles.list}>
+          {cafes.map((cafe) => (
+            <CafeCard key={cafe.id} cafe={cafe} />
+          ))}
+        </View>
+      ) : null}
+
+      {cafes && cafes.length === 0 ? <EmptyState icon={Store} text={EMPTY} /> : null}
+    </TabScreen>
   );
 }
+
+const styles = StyleSheet.create({
+  list: { gap: 16 },
+});

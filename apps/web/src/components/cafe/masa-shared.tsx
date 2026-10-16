@@ -3,11 +3,20 @@
 import { Popover } from "@base-ui/react/popover";
 import { PeniApiError } from "@peni/api";
 import { actionCopy, errorCopy } from "@peni/brand/copy";
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FocusEvent,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { Button, cx, Field, focusRing, Textarea, toast } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { useCafe } from "./cafe-context";
-import { COMMENT_MAX, withOverlay, type Overlay } from "./masa-model";
+import { COMMENT_MAX, masaMoreCopy, withOverlay, type Overlay } from "./masa-model";
 
 /*
  * Pieces the three Masa cards share: the act() wrapper (optimistic state, rollback, toast), the
@@ -136,6 +145,7 @@ export function Reveal({ open, id, children, className }: { open: boolean; id?: 
 export function CommentForm({
   postId,
   label,
+  labelHidden = false,
   placeholder,
   autoFocus = false,
   onSent,
@@ -144,6 +154,8 @@ export function CommentForm({
 }: {
   postId: string;
   label: string;
+  /** When the control that opened the form already says `label` right above it. */
+  labelHidden?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
   onSent?: () => void;
@@ -173,7 +185,7 @@ export function CommentForm({
 
   return (
     <form onSubmit={submit} className={cx("flex flex-col gap-3", className)}>
-      <Field label={label} error={error} counter={text.length > COMMENT_MAX - 100 ? { length: text.length, max: COMMENT_MAX } : undefined}>
+      <Field label={label} labelHidden={labelHidden} error={error} counter={text.length > COMMENT_MAX - 100 ? { length: text.length, max: COMMENT_MAX } : undefined}>
         <Textarea
           ref={area}
           value={text}
@@ -200,7 +212,7 @@ export function CommentForm({
           </Button>
         )}
         <Button type="submit" size="sm" loading={busy}>
-          Gönder
+          {masaMoreCopy.send}
         </Button>
       </div>
     </form>
@@ -264,4 +276,57 @@ export function JoinPopover({
       </Popover.Portal>
     </Popover.Root>
   );
+}
+
+/**
+ * Keeps a keyboard-focused control clear of the sticky header + section bar above and the fixed
+ * bottom nav (or cart bar) below (WCAG 2.2 2.4.11). After the browser has scrolled the control
+ * into view, it checks what is actually drawn over the control's edge; if that is a fixed or
+ * sticky bar, the page moves by the overlap plus 16px. Once `html` carries scroll-padding for
+ * these bars, nothing overlaps and this does nothing.
+ */
+export function useFocusClearOfBars() {
+  return useCallback((event: FocusEvent<HTMLElement>) => {
+    const el = event.target;
+    if (!(el instanceof HTMLElement) || !el.matches(":focus-visible")) return;
+    window.requestAnimationFrame(() => {
+      if (document.activeElement !== el) return;
+      // The fixed or sticky bar drawn over the control at height y, if any.
+      const barAt = (x: number, y: number): DOMRect | null => {
+        if (y < 0 || y >= window.innerHeight) return null;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || el.contains(hit) || hit.contains(el)) return null;
+        for (let n: Element | null = hit; n && n !== document.body; n = n.parentElement) {
+          const position = getComputedStyle(n).position;
+          if (position === "fixed" || position === "sticky") return n.getBoundingClientRect();
+        }
+        return null;
+      };
+      // Bars stack (the header, then the section bar under it), so look again after each move.
+      for (let i = 0; i < 3; i++) {
+        const r = el.getBoundingClientRect();
+        const x = Math.min(Math.max(r.left + Math.min(r.width / 2, 24), 0), window.innerWidth - 1);
+        const cover = barAt(x, r.bottom - 2) ?? barAt(x, r.top + 2);
+        if (!cover) return;
+        // A bar in the lower half of the window is the bottom nav (or the cart bar): move the
+        // page up until the control clears it. One in the upper half is the header: move it down.
+        const lower = cover.top + cover.height / 2 > window.innerHeight / 2;
+        window.scrollBy({ top: lower ? r.bottom - cover.top + 16 : -(cover.bottom - r.top + 16), behavior: "instant" });
+      }
+    });
+  }, []);
+}
+
+/** Hands the browser a file to save, as if a link with `download` had been followed. */
+export function saveFile(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.rel = "noopener";
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Some browsers read the blob after click() returns.
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }

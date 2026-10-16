@@ -1,6 +1,6 @@
-import { StaffPanel } from "@/components/staff-panel";
+import { StaffPanel } from "@/components/staff/staff-panel";
 
-export default async function StaffPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  return <StaffPanel slug={slug} />;
+/** Café panel (design-system.md §9.10). The layout's PressShell carries the café and the key. */
+export default function StaffPage() {
+  return <StaffPanel />;
 }

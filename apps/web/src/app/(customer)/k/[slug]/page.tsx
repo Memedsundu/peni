@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { cache } from "react";
 import { CafePage, type CafeEntryParams, type CafeInitial } from "@/components/cafe/cafe-page";
-import { AppError } from "@/server/app";
 import { SESSION_COOKIE } from "@/server/http";
 import { getApp } from "@/server/runtime";
 
@@ -23,7 +22,9 @@ export default async function Page({ params, searchParams }: { params: Params; s
   const { slug } = await params;
   const sp = await searchParams;
   const entry: CafeEntryParams = { sepet: first(sp.sepet), ekle: first(sp.ekle), katil: first(sp.katil) };
-  const initial = await readCafe(slug);
+  // Dev only: `?_test=client` hands the first read to the client, to review its skeleton and error banner.
+  const clientRead = process.env.NODE_ENV !== "production" && first(sp._test) === "client";
+  const initial: CafeInitial = clientRead ? { kind: "client" } : await readCafe(slug);
   return <CafePage key={slug} slug={slug} initial={initial} entry={entry} />;
 }
 
@@ -41,7 +42,10 @@ const readCafe = cache(async (slug: string): Promise<CafeInitial> => {
     const app = await getApp();
     return { kind: "ok", cafe: await app.cafeDetail(slug, app.customerForToken(token)) };
   } catch (error) {
-    if (error instanceof AppError && error.status === 404) return { kind: "not_found" };
+    // By shape, not by class: the dev runtime keeps its app instance across hot reloads, so its
+    // errors can come from an older copy of the AppError module and fail an `instanceof`.
+    const e = error as { status?: unknown; code?: unknown } | null;
+    if (e?.status === 404 || e?.code === "NOT_FOUND") return { kind: "not_found" };
     return { kind: "client" };
   }
 });

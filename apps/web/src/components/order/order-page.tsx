@@ -8,8 +8,10 @@ import { useActiveOrder } from "@/components/chrome/active-order";
 import { Banner, Button, cx, EmptyState } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { CancelSheet } from "./cancel-sheet";
+import { orderPageCopy } from "./copy";
+import type { EarnShow } from "./earn-moment";
 import { OrderFis, OrderFisSkeleton } from "./order-fis";
-import { documentTitle, earnAlreadySeen, isTerminal, markEarnSeen, ORDER_POLL_MS, reorderHref } from "./order-model";
+import { documentTitle, earnAlreadySeen, earnMode, hasEarn, isTerminal, markEarnSeen, ORDER_POLL_MS, reorderHref } from "./order-model";
 
 export type OrderInitial =
   | { kind: "ok"; order: OrderDTO }
@@ -19,8 +21,6 @@ export type OrderInitial =
   | { kind: "client" };
 
 type LoadState = "ok" | "loading" | "not_found" | "signed_out" | "error";
-
-const SIGNED_OUT = "Bu siparişi görmek için giriş yap.";
 
 function messageOf(e: unknown): string {
   if (e instanceof PeniApiError && e.code === "NETWORK") return errorCopy.network;
@@ -45,10 +45,28 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
   const [now] = useState(() => new Date());
 
   // What changed while the customer was looking (drives the stamp and the coin, A6/A11).
-  const firstStatus = useRef(order?.status ?? null);
   const [liveReady, setLiveReady] = useState(false);
-  const [earnAnimates, setEarnAnimates] = useState(false);
   const lastStatus = useRef(order?.status ?? null);
+
+  /*
+   * The earn moment (A6) is decided before it first paints, never after: a server-rendered
+   * collected fiş holds its place ("pending") until the browser has read whether this order's
+   * peni was already seen, and an order that turns collected while watching gets "strike" in
+   * the same render that shows it collected. So the coin never appears, vanishes and drops in.
+   */
+  const [earnShow, setEarnShow] = useState<EarnShow>(() => (hasEarn(order) ? "pending" : "static"));
+  const earnDecided = useRef(false);
+  const decideEarn = useCallback((previous: OrderDTO["status"] | null, next: OrderDTO) => {
+    if (earnDecided.current || !hasEarn(next)) return;
+    earnDecided.current = true;
+    setEarnShow(earnMode(previous, earnAlreadySeen(next.id)));
+    markEarnSeen(next.id);
+  }, []);
+  useEffect(() => {
+    // The server's collected fiş: first view or a revisit.
+    if (order) decideEarn(null, order);
+    // Only on mount; later changes come through `apply`.
+  }, []);
 
   const apply = useCallback(
     (next: OrderDTO) => {
@@ -57,13 +75,14 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
       setOrder(next);
       setLoad("ok");
       setPollFailed(0);
+      decideEarn(prev, next);
       if (prev !== null && prev !== next.status) {
         if (next.status === "ready") setLiveReady(true);
         // The chip and the Siparişler dot learn about it now, not in 20s.
         void refreshActive();
       }
     },
-    [refreshActive],
+    [refreshActive, decideEarn],
   );
 
   const fetchOrder = useCallback(async () => {
@@ -123,22 +142,14 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
     if (order) document.title = documentTitle(order);
   }, [order?.status, order?.orderNumber]);
 
-  const earnHandled = useRef(false);
-  useEffect(() => {
-    if (!order || earnHandled.current) return;
-    if (order.status !== "collected" || !order.earnedPeni) return;
-    earnHandled.current = true;
-    // Live (collected while looking) or the first time this order's peni is seen.
-    const live = firstStatus.current !== null && firstStatus.current !== "collected";
-    if (live || !earnAlreadySeen(order.id)) setEarnAnimates(true);
-    markEarnSeen(order.id);
-  }, [order]);
-
   /* ------------------------------------------------------------------------ cancel (D16) */
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+  // After a cancel, "İptal et" under the fiş is gone: focus goes to the fiş's heading instead.
+  const heading = useRef<HTMLHeadingElement>(null);
+  const [cancelDone, setCancelDone] = useState(false);
 
   const confirmCancel = useCallback(async () => {
     if (cancelBusy) return;
@@ -146,6 +157,7 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
     setCancelError(null);
     try {
       apply(await peni.orders.cancel(id));
+      setCancelDone(true);
       setCancelOpen(false);
       void refreshActive();
     } catch (e) {
@@ -172,7 +184,7 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
       <Column centered>
         <EmptyState
           icon={ReceiptText}
-          text={SIGNED_OUT}
+          text={orderPageCopy.signedOut}
           action={{ label: actionCopy.signIn, href: `/giris?returnTo=${encodeURIComponent(`/siparis/${id}`)}` }}
         />
       </Column>
@@ -180,13 +192,14 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
   }
 
   if (!order) {
-    return (
-      <Column>
-        {load === "error" && loadError ? (
+    // The first read failed: say so, alone. A skeleton here would claim it is still loading.
+    // (A retry that is itself in flight shows on the button, and the poll keeps trying.)
+    if (load === "error" && loadError) {
+      return (
+        <Column centered>
           <Banner
             tone="danger"
             title={withoutRetry(loadError)}
-            className="mb-4"
             action={
               <Button
                 size="sm"
@@ -203,7 +216,11 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
               </Button>
             }
           />
-        ) : null}
+        </Column>
+      );
+    }
+    return (
+      <Column>
         <OrderFisSkeleton />
       </Column>
     );
@@ -228,7 +245,7 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
         />
       )}
 
-      <OrderFis order={order} now={now} stampAnimates={liveReady} earnAnimates={earnAnimates} />
+      <OrderFis order={order} now={now} stampAnimates={liveReady} earnShow={earnShow} headingRef={heading} />
 
       <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center">
         {rejected ? (
@@ -260,12 +277,18 @@ export function OrderPage({ id, initial }: { id: string; initial: OrderInitial }
       </div>
 
       <CancelSheet
+        order={order}
         open={cancelOpen}
         onOpenChange={setCancelOpen}
         busy={cancelBusy}
         error={cancelError}
         tooLate={order.status !== "submitted" && order.status !== "cancelled"}
         onConfirm={() => void confirmCancel()}
+        finalFocus={cancelDone ? heading : true}
+        onClosed={() => {
+          // Belt and braces: if focus still fell to the page, put it on the heading.
+          if (cancelDone && (document.activeElement === document.body || document.activeElement == null)) heading.current?.focus();
+        }}
       />
     </Column>
   );

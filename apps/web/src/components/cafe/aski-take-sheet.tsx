@@ -2,12 +2,15 @@
 
 import { askiCaption, askiCopy, actionCopy, cartCopy } from "@peni/brand/copy";
 import { CalendarClock, Check, CirclePause, Info, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AskiRail, HookGlyph, askiRailProps } from "@/components/brand";
-import { Button, Chip, ChipGroup, Icon, Sheet, type IconProp } from "@/components/ui";
+import { Button, Chip, Sheet, type IconProp } from "@/components/ui";
 import { useCafe } from "./cafe-context";
-import { askiItemIcon } from "./aski-glyphs";
-import { askiItems, itemPeni, referenceItem, takeState, takeStateText, type TakeState } from "./aski-model";
+import { AskiChoiceGroup, AskiIkramNote, AskiStateNote } from "./aski-bits";
+import { askiChipIcons } from "./aski-glyphs";
+import { signInUrlFor } from "./aski-intent";
+import { askiItems, itemPeni, poolView, referenceItem, takeState, takeStateText, type TakeState } from "./aski-model";
 
 /*
  * "Askıdan al" (design-system.md §9.3, A9, D7, §17).
@@ -18,6 +21,8 @@ import { askiItems, itemPeni, referenceItem, takeState, takeStateText, type Take
  *   (A9, only here, only for the taker), the sheet closes and the item joins the cart as the
  *   ikram line. The real claim happens when the order is sent.
  * - Every other state [G3] replaces the chips and the primary with one sentence.
+ * - An ikram already in the cart is said first ("Siparişine 1 çay eklendi."), with its chip
+ *   selected, so picking another reads as a swap.
  *
  * Dignity: the sheet asks no question, shows no counter and asks for no thanks. Nothing about
  * the taker is shown to anyone; nothing here is sent anywhere until the order is.
@@ -39,11 +44,16 @@ const STATE_ICON: Record<Exclude<TakeState["kind"], "ok">, IconProp> = {
 
 export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
   const { cafe, signedIn, member, orderingBlocked, ikramProductId, addIkram, requireJoin } = useCafe();
+  const router = useRouter();
   const askida = cafe.askida;
   const items = askiItems(cafe);
   const reference = referenceItem(cafe);
   const covers = (item: (typeof items)[number]) => item.available && itemPeni(item) <= askida.balancePeni;
   const coverable = items.filter(covers);
+  // The ones the pool can cover lead; the disabled ones sit last and quietest.
+  const ordered = [...coverable, ...items.filter((i) => !covers(i))];
+  const iconFor = askiChipIcons(items);
+  const inCart = ikramProductId ? (items.find((i) => i.productId === ikramProductId) ?? null) : null;
   const state = takeState({ askida, member, orderingBlocked, coverable: coverable.length });
 
   /* ---------- the chosen item: what's already in the cart, else the reference, else the first that fits ---------- */
@@ -89,8 +99,9 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
     fallback.current = setTimeout(deliver, 700);
   };
 
-  const caption = askiCaption(askida);
-  const rail = askiRailProps(askida);
+  const pool = { ...askida, ...poolView(cafe) };
+  const caption = askiCaption(pool);
+  const rail = askiRailProps(pool);
 
   // Join after this sheet has gone, so the join sheet (or the sign-in page) never opens over it.
   const joinAfterClose = useRef(false);
@@ -137,7 +148,9 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
         if (pending.current) deliver();
         if (joinAfterClose.current) {
           joinAfterClose.current = false;
-          requireJoin(() => onOpenChange(true));
+          // Signed out: sign in and come back to this sheet (`?aski=al`); otherwise join, then back here.
+          if (!signedIn) router.push(signInUrlFor("al"));
+          else requireJoin(() => onOpenChange(true));
         }
       }}
       title={askiCopy.takeSheet.title}
@@ -155,23 +168,23 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
             onTakeComplete={onTakeComplete}
             className="flex justify-center"
           />
-          {/* Empty: the sentence under the window says it once ("Askı şu an boş. Biri bıraktığında …"). */}
-          {state.kind !== "empty" && <p className="text-center text-meta text-aski-ink">{caption.line1}</p>}
+          <p className="text-center text-meta text-aski-ink">{caption.line1}</p>
         </div>
 
         {state.kind === "ok" ? (
           <>
+            {inCart && <AskiIkramNote name={inCart.name} short className="-mb-1" />}
             <div className="flex flex-col gap-2.5">
               <p className="text-button text-ink" aria-hidden>
                 {askiCopy.takeSheet.which}
               </p>
-              <ChipGroup label={askiCopy.takeSheet.which}>
-                {items.map((item) => (
+              <AskiChoiceGroup label={askiCopy.takeSheet.which}>
+                {ordered.map((item) => (
                   <Chip
                     key={item.productId}
                     kind="choice"
-                    icon={askiItemIcon(item)}
-                    className="grow"
+                    icon={iconFor(item)}
+                    className="w-full"
                     selected={item.productId === selected}
                     disabledReason={!item.available ? cartCopy.soldOut : covers(item) ? undefined : askiCopy.takeSheet.notEnough}
                     onClick={() => !taking && setSelected(item.productId)}
@@ -179,26 +192,14 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
                     {item.name}
                   </Chip>
                 ))}
-              </ChipGroup>
+              </AskiChoiceGroup>
             </div>
             <p className="text-body text-ink-2">{askiCopy.takeSheet.body}</p>
           </>
         ) : (
-          <StateNote icon={STATE_ICON[state.kind]} text={takeStateText(state)} />
+          <AskiStateNote icon={STATE_ICON[state.kind]} text={takeStateText(state, caption.line1)} />
         )}
       </div>
     </Sheet>
-  );
-}
-
-/** One calm sentence with its icon, in place of the chips and the primary. */
-function StateNote({ icon, text }: { icon: IconProp; text: string }) {
-  return (
-    <div role="status" className="flex items-start gap-3">
-      <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-full bg-surface-2 text-ink-2">
-        <Icon icon={icon} size={20} />
-      </span>
-      <p className="min-w-0 flex-1 pt-2 text-body-lg text-ink">{text}</p>
-    </div>
   );
 }

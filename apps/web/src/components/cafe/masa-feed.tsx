@@ -11,6 +11,7 @@ import { EventInvite } from "./masa-event";
 import { feedOrder } from "./masa-model";
 import { CafePost } from "./masa-post";
 import { QuestionCard } from "./masa-question";
+import { useFocusClearOfBars } from "./masa-shared";
 
 /**
  * Masa, the café's feed (design-system.md §9.3 "Masa"): h2 "Masa", the compact masthead
@@ -26,9 +27,10 @@ export function MasaFeed() {
   // One clock for the whole feed, so "bugün", "GEÇTİ" and the dateline agree.
   const [now] = useState(() => new Date());
   const posts = feedOrder(cafe.posts);
+  const keepClear = useFocusClearOfBars();
 
   return (
-    <div className="flex flex-col">
+    <div className="flex flex-col" onFocus={keepClear}>
       <h2 className="font-display text-h2 text-ink">{masaCopy.section}</h2>
       <Masthead cafe={cafe} date={now} compact className="mt-3" />
 

@@ -1,6 +1,6 @@
 import type { CafeSummaryDTO } from "@peni/api";
 import { askiCopy, peniCopy } from "@peni/brand/copy";
-import { dateBlock, formatTime, relDay, SEP } from "@peni/brand/format";
+import { capitalizeTr, dateBlock, formatTime, relDay, SEP, TIME_ZONE } from "@peni/brand/format";
 import { askiItemFor } from "@peni/brand/shapes";
 import { Check, CirclePause } from "lucide-react";
 import Link from "next/link";
@@ -114,7 +114,11 @@ function EventChip({ startsAt }: { startsAt: string }) {
   const day = eventDay(startsAt);
   return (
     <span className="inline-flex h-7 items-center gap-2 rounded-[4px] bg-masa-soft px-2 text-masa-ink">
-      <span className="plate text-plate leading-none">{day}</span>
+      {/* The plate abbreviation ("PER") is for the eye; a screen reader hears "Perşembe". */}
+      <span aria-hidden className="plate text-plate leading-none">
+        {day}
+      </span>
+      <span className="sr-only">{eventDaySpoken(startsAt)}</span>
       <span className="text-meta font-semibold tabular-nums">{formatTime(startsAt)}</span>
       <span aria-hidden className="text-meta">
         ·
@@ -122,6 +126,14 @@ function EventChip({ startsAt }: { startsAt: string }) {
       <span className="text-meta">Peni masası</span>
     </span>
   );
+}
+
+/** "Bugün", "Yarın", "Perşembe", or "22 Ekim" further out: the day said in full. */
+function eventDaySpoken(iso: string): string {
+  const rel = relDay(iso);
+  const days = (new Date(iso).getTime() - Date.now()) / 86_400_000;
+  if (rel === "bugün" || rel === "yarın" || days < 6.5) return capitalizeTr(rel);
+  return new Intl.DateTimeFormat("tr-TR", { timeZone: TIME_ZONE, day: "numeric", month: "long" }).format(new Date(iso));
 }
 
 function eventDay(iso: string): string {
