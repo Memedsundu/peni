@@ -28,3 +28,4 @@ expo-env.d.ts
 
 # Self-hosted fonts, copied from node_modules by apps/web/scripts/copy-fonts.mjs (predev/prebuild)
 apps/web/public/fonts/
+apps/web/AGENTS.md
