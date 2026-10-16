@@ -2,14 +2,16 @@
 
 import { newIdempotencyKey } from "@peni/api";
 import { actionCopy, askiCopy, peniCopy } from "@peni/brand/copy";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Coin, CoinGlyph } from "@/components/brand";
-import { Button, Chip, Sheet, Stepper, Switch } from "@/components/ui";
+import { Button, Chip, Sheet, Stepper, Switch, toast } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { useCafe } from "./cafe-context";
 import { AskiChoiceGroup, AskiStateNote } from "./aski-bits";
 import { askiChipIcons } from "./aski-glyphs";
+import { signInUrlFor } from "./aski-intent";
 import { askiItems, donateErrorText, itemPeni, referenceItem, type Donation } from "./aski-model";
 
 /*
@@ -24,9 +26,14 @@ import { askiItems, donateErrorText, itemPeni, referenceItem, type Donation } fr
  * With 0 peni there is nothing to choose: one calm sentence replaces the chips, the match line
  * and the switch, and the footer is a plain "Tamam".
  *
+ * Not a member (or signed out): like the take sheet, it first says what's needed — "Askıya
+ * bırakmak için kafeye katıl. Üyelik ücretsiz." — with "Kafeye katıl" / "Giriş yap ve katıl"
+ * and "Vazgeç". The join (or the sign-in round trip, `?aski=birak`) brings the visitor back here.
+ *
  * On success the sheet closes and, once it has gone, `onDonated` runs: the panel hangs the new
  * cup on this screen only (A8) and shows the toast. Errors stay inline, above the button; the
- * choice is kept, and a retry of the same choice re-uses its idempotency key.
+ * choice is kept, and a retry of the same choice re-uses its idempotency key. A failure that
+ * comes back after the sheet was closed is a toast: there is no sheet left to say it.
  */
 
 export interface AskiGiveSheetProps {
@@ -40,7 +47,8 @@ const OTHER = "other";
 const STEP = 5;
 
 export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetProps) {
-  const { cafe } = useCafe();
+  const { cafe, signedIn, member, requireJoin } = useCafe();
+  const router = useRouter();
   const balance = Math.max(0, Math.floor(cafe.membership?.balancePeni ?? 0));
   const items = askiItems(cafe);
   const reference = referenceItem(cafe);
@@ -117,7 +125,8 @@ export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetPr
         flush();
       }
     } catch (e) {
-      setError(donateErrorText(e));
+      if (openRef.current) setError(donateErrorText(e));
+      else toast.error(donateErrorText(e));
     } finally {
       setBusy(false);
     }
@@ -130,7 +139,23 @@ export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetPr
       : askiCopy.give;
   const bal = peniCopy.balance(balance);
 
-  const footer = empty ? (
+  // Join after this sheet has gone, so the join sheet (or the sign-in page) never opens over it.
+  const joinAfterClose = useRef(false);
+  const join = () => {
+    joinAfterClose.current = true;
+    onOpenChange(false);
+  };
+
+  const footer = !member ? (
+    <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-between">
+      <Button variant="primary" onClick={join} className="w-full sm:w-auto sm:min-w-[200px]">
+        {signedIn ? actionCopy.join : actionCopy.signInAndJoin}
+      </Button>
+      <Button variant="quiet" onClick={() => onOpenChange(false)}>
+        {actionCopy.cancel}
+      </Button>
+    </div>
+  ) : empty ? (
     <Button variant="secondary" fullWidth onClick={() => onOpenChange(false)}>
       {actionCopy.ok}
     </Button>
@@ -170,10 +195,18 @@ export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetPr
       open={open}
       onOpenChange={onOpenChange}
       onOpenChangeComplete={(isOpen) => {
-        if (!isOpen && pending.current) flush();
+        if (isOpen) return;
+        if (pending.current) flush();
+        if (joinAfterClose.current) {
+          joinAfterClose.current = false;
+          // Signed out: sign in and come back to this sheet (`?aski=birak`); otherwise join, then back here.
+          if (!signedIn) router.push(signInUrlFor("birak"));
+          else requireJoin(() => onOpenChange(true));
+        }
       }}
       title={askiCopy.giveSheet.title}
       description={
+        !member ? undefined : (
         <span className="inline-flex items-center gap-1.5">
           <Coin size={16} cafe={cafe} />
           <span>
@@ -181,17 +214,20 @@ export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetPr
             <span className="font-semibold text-peni-ink tabular-nums">{bal.amount}</span>
           </span>
         </span>
+        )
       }
       footer={footer}
     >
-      {empty ? (
+      {!member ? (
+        <AskiStateNote icon={Users} text={askiCopy.giveSheet.nonMember} />
+      ) : empty ? (
         <AskiStateNote icon={CoinGlyph} text={noBalanceText} />
       ) : (
         // Frozen while sending: the request carries the choice made at the tap, so the chips, the
         // stepper and above all the name switch (the one consent in this flow) must not change
         // under it. The sheet's close button stays live.
         <div className="flex flex-col gap-4" inert={busy} aria-busy={busy}>
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-2">
             <p className="text-button text-ink" aria-hidden>
               {askiCopy.giveSheet.what}
             </p>
@@ -214,8 +250,10 @@ export function AskiGiveSheet({ open, onOpenChange, onDonated }: AskiGiveSheetPr
                 cover, on no fill of its own: it must never read as one more (disabled) tile.
               */}
               {isOther && (
-                <div className="col-span-full flex min-h-14 items-center justify-between gap-4 pl-3.5">
-                  <span className="text-button text-ink" aria-hidden>
+                // `items-start`: when the stepper shows its limit ("Bakiyen 52") under itself, the
+                // label stays level with the − and + buttons instead of centring on both lines.
+                <div className="col-span-full flex min-h-14 items-start justify-between gap-4 pt-1.5 pl-3.5">
+                  <span className="flex min-h-11 items-center text-button text-ink" aria-hidden>
                     {askiCopy.giveSheet.stepperLabel}
                   </span>
                   <Stepper

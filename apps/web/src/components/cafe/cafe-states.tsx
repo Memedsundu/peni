@@ -1,6 +1,6 @@
 "use client";
 
-import { errorCopy } from "@peni/brand/copy";
+import { errorCopy, withoutRetry } from "@peni/brand/copy";
 import { Coffee } from "lucide-react";
 import { CafeCover } from "@/components/brand";
 import { Banner, Button, EmptyState, Skeleton } from "@/components/ui";
@@ -75,7 +75,7 @@ export function CafeLoadError({ slug, message, retrying, onRetry }: { slug: stri
       <Banner
         tone="danger"
         // The button says "Tekrar dene"; the sentence doesn't need to say it too.
-        title={message.replace(/\s*Tekrar dene\.$/, "")}
+        title={withoutRetry(message)}
         action={
           <Button size="sm" variant="secondary" loading={retrying} loadingLabel={errorCopy.retry} onClick={onRetry}>
             {errorCopy.retry}

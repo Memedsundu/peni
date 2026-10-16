@@ -22,7 +22,8 @@ import { askiItems, itemPeni, poolView, referenceItem, takeState, takeStateText,
  *   ikram line. The real claim happens when the order is sent.
  * - Every other state [G3] replaces the chips and the primary with one sentence.
  * - An ikram already in the cart is said first ("Siparişine 1 çay eklendi."), with its chip
- *   selected, so picking another reads as a swap.
+ *   selected, so picking another reads as a swap. With that same item chosen the primary is a
+ *   plain "Tamam": nothing lifts off the rail for a no-op.
  *
  * Dignity: the sheet asks no question, shows no counter and asks for no thanks. Nothing about
  * the taker is shown to anyone; nothing here is sent anywhere until the order is.
@@ -69,6 +70,7 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
     if (open) setSelected(pickDefault());
   }
   const chosen = coverable.find((i) => i.productId === selected) ?? null;
+  const unchanged = chosen != null && chosen.productId === ikramProductId;
 
   /* ---------- A9: lift, then close, then hand the item to the cart ---------- */
   const [takeSignal, setTakeSignal] = useState(0);
@@ -112,22 +114,29 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
 
   const footer =
     state.kind === "ok" ? (
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+      // The primary leads in the DOM (and so in Tab order), as it does on screen on phones.
+      <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-between">
         {/* While the cup lifts (200ms) both stay as they are; the handlers ignore a second tap. */}
-        <Button variant="quiet" onClick={() => !taking && onOpenChange(false)} className="sm:mr-auto">
+        {unchanged ? (
+          <Button variant="aski" onClick={() => onOpenChange(false)} className="w-full sm:w-auto sm:min-w-[200px]">
+            {actionCopy.ok}
+          </Button>
+        ) : (
+          <Button variant="aski" onClick={confirm} disabled={!chosen} className="w-full sm:w-auto sm:min-w-[200px]">
+            {askiCopy.takeSheet.confirm}
+          </Button>
+        )}
+        <Button variant="quiet" onClick={() => !taking && onOpenChange(false)}>
           {askiCopy.takeSheet.cancel}
-        </Button>
-        <Button variant="aski" onClick={confirm} disabled={!chosen} className="w-full sm:w-auto sm:min-w-[200px]">
-          {askiCopy.takeSheet.confirm}
         </Button>
       </div>
     ) : state.kind === "non_member" ? (
-      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button variant="quiet" onClick={() => onOpenChange(false)} className="sm:mr-auto">
-          {actionCopy.cancel}
-        </Button>
+      <div className="flex flex-col gap-2 sm:flex-row-reverse sm:justify-between">
         <Button variant="primary" onClick={join} className="w-full sm:w-auto sm:min-w-[200px]">
           {signedIn ? askiCopy.takeStates.nonMemberAction : actionCopy.signInAndJoin}
+        </Button>
+        <Button variant="quiet" onClick={() => onOpenChange(false)}>
+          {actionCopy.cancel}
         </Button>
       </div>
     ) : (
@@ -156,7 +165,7 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
       title={askiCopy.takeSheet.title}
       footer={footer}
     >
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-6">
         {/* The mini rail: what's waiting, drawn as whole items (D9). Its caption is the text for it. */}
         <div className="flex flex-col items-center gap-2 rounded-[14px] bg-aski-soft px-4 pt-4 pb-3">
           <AskiRail
@@ -174,7 +183,7 @@ export function AskiTakeSheet({ open, onOpenChange }: AskiTakeSheetProps) {
         {state.kind === "ok" ? (
           <>
             {inCart && <AskiIkramNote name={inCart.name} short className="-mb-1" />}
-            <div className="flex flex-col gap-2.5">
+            <div className="flex flex-col gap-2">
               <p className="text-button text-ink" aria-hidden>
                 {askiCopy.takeSheet.which}
               </p>

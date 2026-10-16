@@ -29,8 +29,17 @@ export function Masthead({
   headingLevel?: 1 | 2;
   className?: string;
 }) {
-  // The dot stays with the word before it, so a wrapped dateline never starts with "·".
-  const line = dateline(cafe, date, { compact }).split(SEP).join("\u00A0· ");
+  // It breaks only between segments ("16 EKİM 2026" never splits; the name may, when it must),
+  // and the dot stays with the segment before it, so a wrapped line never starts with "·".
+  const line = dateline(cafe, date, { compact })
+    .split(SEP)
+    .map((segment, i, all) => (
+      <span key={i} className={i > 0 ? "whitespace-nowrap" : undefined}>
+        {segment}
+        {i < all.length - 1 ? "\u00A0·" : null}
+        {i < all.length - 1 ? " " : null}
+      </span>
+    ));
   if (compact) {
     return (
       <div className={cx("flex flex-col", className)}>

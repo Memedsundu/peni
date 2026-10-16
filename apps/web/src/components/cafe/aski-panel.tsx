@@ -4,14 +4,13 @@ import { Popover } from "@base-ui/react/popover";
 import type { AskidaDTO } from "@peni/api";
 import { askiCopy } from "@peni/brand/copy";
 import { Info } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AskiCaption, AskiRail, HookGlyph, askiRailProps, type HangSignal } from "@/components/brand";
 import { Button, buttonClasses, cx, focusRing, toast } from "@/components/ui";
 import { useCafe } from "./cafe-context";
 import { AskiIkramNote } from "./aski-bits";
 import { AskiGiveSheet } from "./aski-give-sheet";
-import { signInUrlFor, takeAskiIntent } from "./aski-intent";
+import { takeAskiIntent } from "./aski-intent";
 import { afterDonation, donationToast, donorLines, poolView, referenceItem, type Donation } from "./aski-model";
 import { AskiTakeSheet } from "./aski-take-sheet";
 
@@ -30,7 +29,6 @@ import { AskiTakeSheet } from "./aski-take-sheet";
  */
 export function AskiPanel() {
   const { cafe, signedIn, member, requireJoin, refresh, ikramProductId } = useCafe();
-  const router = useRouter();
   const [takeOpen, setTakeOpen] = useState(false);
   const [giveOpen, setGiveOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -97,19 +95,15 @@ export function AskiPanel() {
     void refresh();
   };
 
-  const give = () => {
-    if (member) setGiveOpen(true);
-    else if (!signedIn) router.push(signInUrlFor("birak"));
-    else requireJoin(() => setGiveOpen(true));
-  };
-
+  // Both buttons open their sheet first, member or not: each sheet says what's needed (§9.3).
   const actions = (
     <>
-      <div className="flex gap-2">
-        <Button variant="aski" onClick={() => setTakeOpen(true)} className="min-w-0 flex-1">
+      {/* Exact halves: `flex-1` would count the secondary's border on one side only. */}
+      <div className="grid grid-cols-2 gap-2">
+        <Button variant="aski" onClick={() => setTakeOpen(true)} className="min-w-0">
           {askiCopy.take}
         </Button>
-        <Button variant="secondary" onClick={give} className="min-w-0 flex-1">
+        <Button variant="secondary" onClick={() => setGiveOpen(true)} className="min-w-0">
           {askiCopy.give}
         </Button>
       </div>
@@ -119,7 +113,13 @@ export function AskiPanel() {
 
   return (
     // The legend is the Askı section's heading: an h2 beside "Menü" and "Masa" in the page outline.
-    <div ref={panelRef} data-aski-panel className="@container rounded-[14px] bg-aski-soft p-4 text-ink md:p-5">
+    // `--line-strong` is the hook colour inside the panel: the secondary button's edge then holds
+    // 3:1 on aski-soft in dark too (sheets are portaled, so nothing else changes).
+    <div
+      ref={panelRef}
+      data-aski-panel
+      className="@container rounded-[14px] bg-aski-soft p-4 text-ink [--line-strong:var(--hook)] md:p-5"
+    >
       <div className="flex min-h-11 items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-aski-ink">
           <HookGlyph size={20} />
@@ -134,11 +134,11 @@ export function AskiPanel() {
         sit beside it. With none (the default, since naming is opt-in) the buttons take the second
         column, so the panel reads "what's waiting | what you can do" with no empty half.
       */}
-      <div className="mt-3 grid gap-5 @xl:grid-cols-[21rem_minmax(0,1fr)] @xl:gap-x-8">
+      <div className="mt-3 grid gap-6 @xl:grid-cols-[21rem_minmax(0,1fr)] @xl:gap-x-8">
         <div className="min-w-0">
           <AskiRail count={rail.count} item={rail.item} size="md" hangSignal={hangSignal} />
           <AskiCaption askida={shown} className="mt-3" />
-          {donors.length > 0 && <div className="mt-5">{actions}</div>}
+          {donors.length > 0 && <div className="mt-6">{actions}</div>}
         </div>
 
         {donors.length > 0 ? (
@@ -150,10 +150,9 @@ export function AskiPanel() {
             )}
           >
             {donors.map((d) => (
+              // "Ayşe K. 1 çay bıraktı · bugün", all of it quiet: a thank-you, never a leaderboard (principle 4).
               <li key={d.key} className="text-meta text-ink-2">
-                {/* "Ayşe K. 1 çay bıraktı · bugün": the name carries the weight, the rest is quiet. */}
-                <span className="font-semibold text-ink">{d.name}</span>
-                {askiCopy.donorLine(d.name, d.what, d.day).slice(d.name.length)}
+                {askiCopy.donorLine(d.name, d.what, d.day)}
               </li>
             ))}
           </ul>
@@ -163,7 +162,7 @@ export function AskiPanel() {
       </div>
 
       <AskiTakeSheet open={takeOpen} onOpenChange={setTakeOpen} />
-      {member && <AskiGiveSheet open={giveOpen} onOpenChange={setGiveOpen} onDonated={onDonated} />}
+      <AskiGiveSheet open={giveOpen} onOpenChange={setGiveOpen} onDonated={onDonated} />
     </div>
   );
 }

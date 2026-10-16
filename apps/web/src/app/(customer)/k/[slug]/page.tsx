@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { notFound } from "next/navigation";
 import { cache } from "react";
 import { CafePage, type CafeEntryParams, type CafeInitial } from "@/components/cafe/cafe-page";
 import { SESSION_COOKIE } from "@/server/http";
@@ -16,7 +17,9 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
  * Café page `/k/[slug]` (design-system.md §9.3). The café is read on the server, so the first
  * paint is the real page and the card → café cover morph (A16) lands on the real hero. If the
  * server read fails for any reason but "not found", the client tries again and owns the
- * skeleton and the error banner.
+ * skeleton and the error banner. An unknown café renders `not-found.tsx`; the page streams
+ * behind `loading.tsx`, so the status line has already gone out as 200 and Next marks the
+ * response `noindex` instead — crawlers still never take it for a page.
  */
 export default async function Page({ params, searchParams }: { params: Params; searchParams: Search }) {
   const { slug } = await params;
@@ -25,13 +28,14 @@ export default async function Page({ params, searchParams }: { params: Params; s
   // Dev only: `?_test=client` hands the first read to the client, to review its skeleton and error banner.
   const clientRead = process.env.NODE_ENV !== "production" && first(sp._test) === "client";
   const initial: CafeInitial = clientRead ? { kind: "client" } : await readCafe(slug);
+  if (initial.kind === "not_found") notFound();
   return <CafePage key={slug} slug={slug} initial={initial} entry={entry} />;
 }
 
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { slug } = await params;
   const initial = await readCafe(slug);
-  return { title: initial.kind === "ok" ? initial.cafe.name : "Kafe" };
+  return { title: initial.kind === "ok" ? initial.cafe.name : initial.kind === "not_found" ? "Kafe bulunamadı" : "Kafe" };
 }
 
 /** Shared by the page and its metadata within one request. */

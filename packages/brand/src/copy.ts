@@ -246,6 +246,8 @@ export const askiCopy = {
     /** Primary (ink): "1 çay bırak · 30 peni"; custom: "45 peni bırak". */
     submitItem: (itemName: string, peni: number) => `1 ${goodsName(itemName)} bırak${SEP}${formatPeni(peni)}`,
     submitCustom: (peni: number) => `${formatPeni(peni)} bırak`,
+    /** Not a member yet: the sheet says what's needed before anything else. */
+    nonMember: "Askıya bırakmak için kafeye katıl. Üyelik ücretsiz.",
   },
   /** Toast after one's own donation: "1 çay askıya asıldı." */
   hungToast: (count: number, itemName: string | null | undefined) =>

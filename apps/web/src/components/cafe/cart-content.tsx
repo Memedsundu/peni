@@ -31,14 +31,9 @@ export function CartBody({
 }) {
   const { state } = cart;
   return (
-    <div
-      inert={busy}
-      className={cx(
-        // An opacity fade only, so it stays under reduced motion too (and keeps the delay).
-        "flex flex-col transition-opacity duration-200 ease-out-strong",
-        busy && "opacity-60 delay-150",
-      )}
-    >
+    // Locked while sending, but never faded: disabled is not opacity (§3.2), and the
+    // "Gönderiliyor…" button already says what is happening.
+    <div inert={busy} aria-busy={busy || undefined} className="flex flex-col">
       <ul className="flex flex-col" aria-label={cartCopy.title}>
         {totals.lines.map((line) => (
           <li key={line.item.productId} className={cx("flex items-center gap-3", editable ? "min-h-14 py-1.5" : "py-1.5")}>
