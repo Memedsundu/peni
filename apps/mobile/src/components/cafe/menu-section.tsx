@@ -63,8 +63,11 @@ export const MenuRow = memo(function MenuRow({
       {state !== "blocked" ? (
         <View style={{ width: SLOT, flexShrink: 0, alignItems: "flex-end" }}>
           {state === "soldout" ? (
-            // Full contrast, the price stays plain: only the slot says it.
-            <Chip kind="tag">{cartCopy.soldOut}</Chip>
+            // Full contrast, the price stays plain: only the slot says it. Right-aligned with the
+            // "+" and stepper column (the tag's own alignSelf would pull it left).
+            <Chip kind="tag" style={{ alignSelf: "flex-end" }}>
+              {cartCopy.soldOut}
+            </Chip>
           ) : state === "join" ? (
             <IconButton variant="secondary" icon={Plus} label={cartCopy.add(item.name)} haptic="tap" onPress={onJoin} />
           ) : (

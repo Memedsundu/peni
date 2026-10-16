@@ -7,6 +7,7 @@ import { Banner, Button, Chip } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { CafeContext, type CafeCtx } from "./cafe-context";
 import { MasaFeed, MasaFeedSkeleton } from "./masa-feed";
+import { MasaSignInNavigate } from "./masa-shared";
 
 /*
  * QA harness for the Masa feed (/kit/masa). The café is fetched live (the cookie session decides
@@ -107,6 +108,8 @@ export function MasaKit() {
   const [signedIn, setSignedIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
+  // "Giriş yap ve katıl" stays on this page and writes where it would have gone.
+  const logSignIn = useCallback((href: string) => setLog((l) => [`signIn: ${decodeURIComponent(href)}`, ...l]), []);
 
   const load = useCallback(async (s: string) => {
     try {
@@ -183,7 +186,9 @@ export function MasaKit() {
             />
           ) : ctx && durum !== "yukleniyor" ? (
             <CafeContext.Provider value={ctx}>
-              <MasaFeed key={durum} />
+              <MasaSignInNavigate.Provider value={logSignIn}>
+                <MasaFeed key={durum} />
+              </MasaSignInNavigate.Provider>
             </CafeContext.Provider>
           ) : (
             <MasaFeedSkeleton />

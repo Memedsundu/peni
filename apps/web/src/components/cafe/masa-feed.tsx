@@ -3,15 +3,15 @@
 import type { PostDTO } from "@peni/api";
 import { masaCopy } from "@peni/brand/copy";
 import { MessageCircle } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Masthead } from "@/components/brand";
 import { EmptyState, Skeleton } from "@/components/ui";
 import { useCafe } from "./cafe-context";
 import { EventInvite } from "./masa-event";
-import { feedOrder } from "./masa-model";
+import { feedOrder, type MasaIntent, type MasaIntentKind } from "./masa-model";
 import { CafePost } from "./masa-post";
 import { QuestionCard } from "./masa-question";
-import { useFocusClearOfBars } from "./masa-shared";
+import { takeMasaIntent, useFocusClearOfBars } from "./masa-shared";
 
 /**
  * Masa, the café's feed (design-system.md §9.3 "Masa"): h2 "Masa", the compact masthead
@@ -21,6 +21,10 @@ import { useFocusClearOfBars } from "./masa-shared";
  * It takes no props; everything comes from `useCafe()`. Actions go through
  * `peni.cafes.react / rsvp / comment`, then `refresh()`. A failed action never wipes the feed:
  * the optimistic state rolls back and a toast says why.
+ *
+ * A signed-out action goes through /giris and comes back as `?katil=1&masa=rsvp:post_1#post-post_1`
+ * (masa-model `masaReturnTo`): the page shell finishes the join, and the card named here finishes
+ * the action as soon as the visitor is a member.
  */
 export function MasaFeed() {
   const { cafe } = useCafe();
@@ -28,6 +32,19 @@ export function MasaFeed() {
   const [now] = useState(() => new Date());
   const posts = feedOrder(cafe.posts);
   const keepClear = useFocusClearOfBars();
+
+  // Read once, on arrival. This runs before the page shell's own entry effect (children first),
+  // which then clears the rest of the query.
+  const [intent, setIntent] = useState<MasaIntent | null>(null);
+  const intentRead = useRef(false);
+  useEffect(() => {
+    if (intentRead.current) return;
+    intentRead.current = true;
+    const brought = takeMasaIntent(cafe.slug);
+    if (brought) setIntent(brought);
+    // Once, on arrival.
+  }, []);
+  const done = () => setIntent(null);
 
   return (
     <div className="flex flex-col" onFocus={keepClear}>
@@ -39,7 +56,13 @@ export function MasaFeed() {
       ) : (
         <div className="mt-6 flex flex-col gap-4 md:gap-5">
           {posts.map((post) => (
-            <MasaItem key={post.id} post={post} now={now} />
+            <MasaItem
+              key={post.id}
+              post={post}
+              now={now}
+              intent={intent?.postId === post.id ? intent.kind : null}
+              onIntentDone={done}
+            />
           ))}
         </div>
       )}
@@ -47,14 +70,24 @@ export function MasaFeed() {
   );
 }
 
-function MasaItem({ post, now }: { post: PostDTO; now: Date }) {
+function MasaItem({
+  post,
+  now,
+  intent,
+  onIntentDone,
+}: {
+  post: PostDTO;
+  now: Date;
+  intent: MasaIntentKind | null;
+  onIntentDone: () => void;
+}) {
   switch (post.kind) {
     case "question":
-      return <QuestionCard post={post} now={now} />;
+      return <QuestionCard post={post} now={now} intent={intent} onIntentDone={onIntentDone} />;
     case "event":
-      return <EventInvite post={post} now={now} />;
+      return <EventInvite post={post} now={now} intent={intent} onIntentDone={onIntentDone} />;
     default:
-      return <CafePost post={post} now={now} />;
+      return <CafePost post={post} now={now} intent={intent} onIntentDone={onIntentDone} />;
   }
 }
 

@@ -1,12 +1,14 @@
 /**
  * Kafe modu · Ayarlar (design-system.md §10.10).
  *
- * - KAFE: the café picker — one row per café from `cafes.list()`, never a free-text slug.
- *   Switching re-validates the stored key against the new café (`staff.dashboard`) before it
- *   is kept; "Anahtar tutmadı." stays at the list, with the way to enter another key.
- * - TEZGÂH: the "Ses" switch (the new-order chime; off shows the "Ses kapalı" banner on Tezgâh).
- * - "Personel anahtarını unut": forgets the key (the café is remembered for next time); every
- *   tab then asks for a key.
+ * - KAFE: the café picker — one row per café from `cafes.list()` (the staff's own cafés [G19]
+ *   first), never a free-text slug. Switching re-validates the stored key against the new café
+ *   (`staff.dashboard`) before it is kept; "Anahtar tutmadı." stays at the list, with the way to
+ *   enter another key. With no key stored there is nothing to switch: the section says so and
+ *   offers "Anahtarı gir" (the `kafe-modu` sheet, which has its own picker).
+ * - BU TELEFON: what lives on this phone — the "Ses" switch (the new-order chime; off shows the
+ *   "Ses kapalı" banner on Tezgâh) and "Personel anahtarını unut" (the café is remembered for
+ *   next time; every tab then asks for a key).
  * - "Müşteri moduna dön" (secondary, 56pt): sends any bump still waiting, sets the mode to
  *   customer and lands on "/".
  */
@@ -15,7 +17,7 @@ import { errorCopy, staffCopy } from "@peni/brand/copy";
 import { SEP } from "@peni/brand/format";
 import { router } from "expo-router";
 import { Check, CircleAlert, KeyRound } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { BACK_TO_CUSTOMER, flushBumps, GATE_ACTION, StaffScreen } from "@/components/staff";
 import { Banner, Button, Card, Icon, PressableScale, Row, RowGroup, Skeleton, Spinner, SwitchRow, T } from "@/components/ui";
@@ -27,9 +29,10 @@ import { space, useTokens } from "@/lib/theme";
 import { useLoad } from "@/lib/use-load";
 
 const CAFE_LEGEND = "Kafe";
-const BOARD_LEGEND = "Tezgâh";
+const DEVICE_LEGEND = "Bu telefon";
 const SOUND = "Ses";
 const SOUND_HINT = "Yeni sipariş gelince ses çalar.";
+const SOUND_OFF_HINT = "Yeni sipariş gelince ses çalmaz.";
 const FORGET = "Personel anahtarını unut";
 const FORGET_HINT = "Bu telefonda kayıtlı anahtar silinir.";
 const NO_KEY = "Personel anahtarı kayıtlı değil.";
@@ -37,10 +40,16 @@ const OTHER_KEY = "Bu kafe için başka bir anahtar gir.";
 
 export default function Ayarlar() {
   const t = useTokens();
-  const { api, staffKey, staffSlug, setStaff, setStaffKey } = useSession();
+  const { api, staffKey, staffSlug, staffCafes, setStaff, setStaffKey } = useSession();
   const { setMode } = useMode();
   const [soundOn, setSoundOn] = useStaffSound();
   const { data, error: listError, refresh } = useLoad(useCallback(() => api.cafes.list(), [api]));
+  // The staff's own cafés [G19] first, then the rest in the list's order.
+  const cafes = useMemo(() => {
+    const own = new Set(staffCafes.map((c) => c.slug));
+    const list = data?.cafes ?? [];
+    return [...list.filter((c) => own.has(c.slug)), ...list.filter((c) => !own.has(c.slug))];
+  }, [data, staffCafes]);
   const [checking, setChecking] = useState<string | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
@@ -85,7 +94,14 @@ export default function Ayarlar() {
           <T variant="legend" color="ink2" accessibilityRole="header">
             {CAFE_LEGEND}
           </T>
-          {listError && !data ? (
+          {!staffKey ? (
+            <Banner
+              tone="info"
+              icon={KeyRound}
+              title={NO_KEY}
+              action={<Button title={GATE_ACTION} size="sm" onPress={() => router.push("/kafe-modu")} />}
+            />
+          ) : listError && !data ? (
             <Banner
               tone="danger"
               title={errorCopy.cafesLoad}
@@ -107,14 +123,14 @@ export default function Ayarlar() {
           ) : (
             <Card padding="none" role="radiogroup" aria-label={CAFE_LEGEND} accessibilityState={!data ? { busy: true } : undefined}>
               {data
-                ? data.cafes.map((c, i) => (
+                ? cafes.map((c, i) => (
                     <CafeChoice
                       key={c.slug}
                       cafe={c}
                       first={i === 0}
                       selected={c.slug === staffSlug}
                       checking={checking === c.slug}
-                      disabled={!staffKey || (checking != null && checking !== c.slug)}
+                      disabled={checking != null && checking !== c.slug}
                       onPress={() => void pick(c)}
                     />
                   ))
@@ -128,7 +144,7 @@ export default function Ayarlar() {
                   ))}
             </Card>
           )}
-          {pickError ? (
+          {staffKey && pickError ? (
             <View accessibilityRole="alert" accessibilityLiveRegion="assertive" style={styles.error}>
               <View style={styles.errorIcon}>
                 <Icon icon={CircleAlert} size={20} color={t.danger} />
@@ -148,21 +164,13 @@ export default function Ayarlar() {
               ) : null}
             </View>
           ) : null}
-          {!staffKey ? (
-            <Banner
-              tone="info"
-              icon={KeyRound}
-              title={NO_KEY}
-              action={<Button title={GATE_ACTION} size="sm" onPress={() => router.push("/kafe-modu")} />}
-            />
-          ) : null}
         </View>
 
-        {/* TEZGÂH */}
-        <RowGroup title={BOARD_LEGEND}>
+        {/* BU TELEFON */}
+        <RowGroup title={DEVICE_LEGEND}>
           <SwitchRow
             label={SOUND}
-            hint={soundOn ? SOUND_HINT : staffCopy.soundOff}
+            hint={soundOn ? SOUND_HINT : SOUND_OFF_HINT}
             checked={soundOn}
             onCheckedChange={setSoundOn}
             style={styles.switchRow}

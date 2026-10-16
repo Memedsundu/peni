@@ -37,6 +37,7 @@ import {
   StaffTicketSkeleton,
   TezgahStrip,
   useBoard,
+  useCafeHue,
   useNow,
   useSettling,
   type BoardColumn,
@@ -55,6 +56,16 @@ const LABEL: Record<BoardColumn, string> = {
   ready: staffCopy.columns.ready,
 };
 
+/**
+ * "Yeni sipariş yok. Gelince ses çalar." promises a chime; with "Ses" off (the banner above says
+ * so) the column only says what is true: "Yeni sipariş yok."
+ */
+function emptyText(column: BoardColumn, soundOn: boolean): string {
+  const text = staffCopy.columnEmpty[COLUMN_KEY[column]];
+  if (column !== "submitted" || soundOn) return text;
+  return text.slice(0, text.indexOf(".") + 1);
+}
+
 const ticketMotion = {
   layout: LinearTransition.duration(durations.move).reduceMotion(ReduceMotion.System),
   entering: FadeIn.duration(durations.ui).reduceMotion(ReduceMotion.System),
@@ -71,6 +82,7 @@ export default function Tezgah() {
   const settling = useSettling(board.movedAt);
   const [soundOn, setSoundOn] = useStaffSound();
   const [resuming, setResuming] = useState(false);
+  const hue = useCafeHue(slug);
 
   const cols = useMemo(() => (data ? boardColumns(data.orders, overrides) : null), [data, overrides]);
 
@@ -154,14 +166,14 @@ export default function Tezgah() {
       top={hasBanners ? banners : undefined}
       sticky={
         !data && !loading ? undefined : (
-        <Segmented
-          id="tezgah"
-          label={staffCopy.sections.tezgah}
-          items={items}
-          value={column}
-          onChange={(id) => setColumn(id as BoardColumn)}
-          style={styles.segmented}
-        />
+          <Segmented
+            id="tezgah"
+            label={staffCopy.sections.tezgah}
+            items={items}
+            value={column}
+            onChange={(id) => setColumn(id as BoardColumn)}
+            style={styles.segmented}
+          />
         )
       }
       onRefresh={refresh}
@@ -181,7 +193,7 @@ export default function Tezgah() {
           {orders.length === 0 ? (
             <Animated.View entering={ticketMotion.entering} style={[styles.empty, { backgroundColor: t.surface2 }]}>
               <T variant="meta" color="ink2" align="center">
-                {staffCopy.columnEmpty[COLUMN_KEY[column]]}
+                {emptyText(column, soundOn)}
               </T>
             </Animated.View>
           ) : null}
@@ -191,6 +203,7 @@ export default function Tezgah() {
                 <StaffTicket
                   order={order}
                   slug={slug}
+                  hue={hue}
                   posKind={data!.cafe.posKind}
                   now={now}
                   arrivedAt={arrivals.get(order.id)}

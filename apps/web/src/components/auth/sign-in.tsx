@@ -15,13 +15,22 @@ type Step = "phone" | "code" | "name";
 /** "Kodu tekrar gönder" waits this long after each code (§9.2). */
 const RESEND_SECONDS = 60;
 
+/** Where focus goes after a failed try: the first code box, the main button, or the name. */
+type FocusTarget = "box" | "submit" | "name";
+const FOCUS_SELECTOR: Record<FocusTarget, string> = {
+  box: "[role=group] input",
+  submit: "button[type=submit]",
+  name: "input[name=given-name]",
+};
+
 /**
  * Sign-in (design-system.md §9.2): a centred raised card, max 400px, with the generic coin
  * and "Hoş geldin", then three steps in place:
  *
  * 1. Phone: "+90" fixed outside the field, mask `5xx xxx xx xx`, "Kod gönder".
  * 2. Code: six boxes (paste and SMS autofill fill them all and submit), "Kodu tekrar gönder
- *    (0:42)" counting down 60s, and "Numarayı değiştir".
+ *    (0:42)" counting down 60s, and "Numarayı değiştir". After too many wrong codes the boxes
+ *    rest and "Kodu tekrar gönder" is the main button, at once.
  * 3. Name, only for a new customer [G8]: "Adın ne?" → POST /me/profile [G18].
  *
  * Then `router.replace(returnTo ?? "/")` (returnTo is already checked to be a same-origin
@@ -38,6 +47,8 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
   const [devCode, setDevCode] = useState<string | null>(null);
   const [resent, setResent] = useState(false);
   const [resendAt, setResendAt] = useState(0);
+  /** Too many wrong codes: the server dropped this one, so only a new code can help. */
+  const [locked, setLocked] = useState(false);
   const [demoBusy, setDemoBusy] = useState<DemoPersonaId | null>(null);
   const [demoError, setDemoError] = useState<string | null>(null);
   const verifying = useRef(false);
@@ -48,6 +59,13 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
     router.replace(returnTo ?? "/");
     router.refresh();
   };
+
+  // Focus moves after the render that enables its target (a code box is disabled while locked).
+  const [focusRequest, setFocusRequest] = useState<{ target: FocusTarget; n: number } | null>(null);
+  const focusSoon = (target: FocusTarget) => setFocusRequest((r) => ({ target, n: (r?.n ?? 0) + 1 }));
+  useEffect(() => {
+    if (focusRequest) formRef.current?.querySelector<HTMLElement>(FOCUS_SELECTOR[focusRequest.target])?.focus();
+  }, [focusRequest]);
 
   /* ---------------- 1. phone ---------------- */
 
@@ -64,7 +82,10 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
       setCode("");
       setResent(Boolean(opts.resend));
       setResendAt(Date.now() + RESEND_SECONDS * 1000);
+      setLocked(false);
       setStep("code");
+      // A new code on the same screen: the boxes don't remount, so their autoFocus won't fire.
+      if (opts.resend) focusSoon("box");
     } catch (e) {
       setError(messageFor(e, "phone"));
     } finally {
@@ -92,14 +113,20 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
         finish();
       }
     } catch (e) {
-      const locked = e instanceof PeniApiError && e.code === "RATE_LIMITED";
+      const tooMany = e instanceof PeniApiError && e.code === "RATE_LIMITED";
       setError(messageFor(e, "code"));
       setCode("");
-      // Too many tries: the server dropped the code, so a new one can be asked for at once.
-      if (locked) setResendAt(0);
       setBusy(false);
-      // Back to the first box, ready for the next try.
-      requestAnimationFrame(() => formRef.current?.querySelector<HTMLInputElement>("[role=group] input")?.focus());
+      if (tooMany) {
+        // The server dropped the code: the boxes rest and "Kodu tekrar gönder" becomes the
+        // main button, available at once.
+        setLocked(true);
+        setResendAt(0);
+        focusSoon("submit");
+      } else {
+        // Back to the first box, ready for the next try.
+        focusSoon("box");
+      }
     } finally {
       verifying.current = false;
     }
@@ -110,6 +137,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
     setCode("");
     setError(null);
     setDevCode(null);
+    setLocked(false);
   };
 
   /* ---------------- 3. name [G8] ---------------- */
@@ -118,6 +146,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
     const value = name.trim();
     if (!value) {
       setError("Adını yazar mısın?");
+      focusSoon("name");
       return;
     }
     setBusy(true);
@@ -154,7 +183,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
     event.preventDefault();
     if (busy) return;
     if (step === "phone") void sendCode();
-    else if (step === "code") void verify(code);
+    else if (step === "code") void (locked ? sendCode({ resend: true }) : verify(code));
     else void saveName();
   };
 
@@ -207,6 +236,7 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
                   autoFocus
                   name="code"
                   className="mx-auto"
+                  disabled={locked}
                   value={code}
                   onValueChange={(v) => {
                     setCode(v);
@@ -215,24 +245,33 @@ export function SignIn({ returnTo, demo }: { returnTo: string | null; demo: bool
                   onComplete={(v) => void verify(v)}
                 />
               </Field>
-              <Button type="submit" fullWidth loading={busy} loadingLabel="Kontrol ediliyor…" className="mt-5">
-                {actionCopy.signIn}
-              </Button>
-              <div className="mt-3 flex flex-col items-center gap-1">
-                <Button
-                  variant="quiet"
-                  size="sm"
-                  disabled={remaining > 0 || busy}
-                  onClick={() => void sendCode({ resend: true })}
-                >
-                  {remaining > 0 ? (
-                    <>
-                      Kodu tekrar gönder <span className="tabular-nums">({clock(remaining)})</span>
-                    </>
-                  ) : (
-                    "Kodu tekrar gönder"
-                  )}
+              {locked ? (
+                // The error above says why the boxes rest: "… Yeni bir kod iste."
+                <Button type="submit" fullWidth loading={busy} className="mt-5">
+                  Kodu tekrar gönder
                 </Button>
+              ) : (
+                <Button type="submit" fullWidth loading={busy} loadingLabel="Kontrol ediliyor…" className="mt-5">
+                  {actionCopy.signIn}
+                </Button>
+              )}
+              <div className="mt-3 flex flex-col items-center gap-1">
+                {!locked && (
+                  <Button
+                    variant="quiet"
+                    size="sm"
+                    disabled={remaining > 0 || busy}
+                    onClick={() => void sendCode({ resend: true })}
+                  >
+                    {remaining > 0 ? (
+                      <>
+                        Kodu tekrar gönder <span className="tabular-nums">({clock(remaining)})</span>
+                      </>
+                    ) : (
+                      "Kodu tekrar gönder"
+                    )}
+                  </Button>
+                )}
                 <Button variant="quiet" size="sm" onClick={changeNumber}>
                   Numarayı değiştir
                 </Button>

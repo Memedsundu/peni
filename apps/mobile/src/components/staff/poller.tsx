@@ -1,18 +1,22 @@
 /**
  * Polls the Kafe modu board every 4s while the app is in the foreground (§9.10 "Polling"),
  * from the staff tab layout, so new orders ring and badge from any tab:
- * - a new order plays the `warning` haptic and, with "Ses" on, the chime (§10.10);
+ * - a new order plays the `warning` haptic and, with "Ses" on, the chime (§10.10), and is
+ *   announced to screen readers;
  * - the Tezgâh badge follows the number of new orders (`lib/staff-badge`);
  * - going to the background stops polling and sends any bump still waiting for its undo toast
  *   (the phone's `pagehide`); coming back reloads at once.
+ * It also loads the café's own page once (its colourway and the till's menu, `cafe-detail`).
  * Renders nothing.
  */
+import { formatNumber } from "@peni/brand/format";
 import { useEffect } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { AccessibilityInfo, AppState, type AppStateStatus } from "react-native";
 import { haptic } from "@/lib/haptics";
 import { useSession } from "@/lib/session";
 import { staffSoundEnabled } from "@/lib/staff-prefs";
 import { flushBumps, loadBoard, onNewOrders, selectCafe } from "./board-store";
+import { loadCafeDetail } from "./cafe-detail";
 import { useNewOrderChime } from "./chime";
 
 /** §9.10: every 4s. */
@@ -27,6 +31,10 @@ export function StaffBoardPoller() {
     selectCafe(slug);
   }, [slug]);
 
+  useEffect(() => {
+    if (slug) void loadCafeDetail(api, slug);
+  }, [api, slug]);
+
   // Leaving Kafe modu: whatever is waiting goes out, and the board is cleared.
   useEffect(
     () => () => {
@@ -38,9 +46,11 @@ export function StaffBoardPoller() {
 
   useEffect(
     () =>
-      onNewOrders(() => {
+      onNewOrders((count) => {
         haptic("warning");
         if (staffSoundEnabled()) chime();
+        // Screen-reader users hear it too, wherever focus is ("2 yeni sipariş").
+        AccessibilityInfo.announceForAccessibility(`${formatNumber(count)} yeni sipariş`);
       }),
     [chime],
   );

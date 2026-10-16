@@ -13,8 +13,14 @@ import {
   whenLabel,
   withOverlay,
   eventIcs,
+  eventWhen,
   icsFilename,
+  INTENT_NOTE_TTL_MS,
+  intentChangesTable,
   masaMoreCopy,
+  masaReturnTo,
+  noteVouches,
+  parseMasaIntent,
 } from "./masa-model";
 
 const post = (over: Partial<PostDTO> = {}): PostDTO => ({
@@ -147,4 +153,49 @@ it("says how full a table was, and how many are coming to an open one", () => {
   expect(masaMoreCopy.came(8)).toBe("8 kişi geldi");
   expect(masaMoreCopy.attending(8)).toBe("8 kişi geliyor");
   expect(masaMoreCopy.attending(8, true)).toBe("8 kişi geliyor · sen de geliyorsun");
+});
+
+it("keeps 'sen de geliyorsun' on a full table when one of the chairs is mine", () => {
+  expect(masaMoreCopy.seats(6, 14, true)).toBe("6/14 yer dolu · sen de geliyorsun");
+  expect(masaMoreCopy.seats(14, 14)).toBe("Masa doldu");
+  expect(masaMoreCopy.seats(14, 14, true)).toBe("Masa doldu · sen de geliyorsun");
+});
+
+it("shares the day with the time, and adds nothing to the café's name", () => {
+  expect(eventWhen("2026-10-22T16:00:00.000Z")).toBe("22 Ekim Perşembe 19:00");
+  expect(masaMoreCopy.shareText("Moda Kahvesi", "2026-10-22T16:00:00.000Z")).toBe(
+    "Moda Kahvesi · Peni masası · 22 Ekim Perşembe 19:00",
+  );
+});
+
+describe("a Masa action kept through sign-in", () => {
+  it("comes back joined, to the card, with the action named", () => {
+    expect(masaReturnTo("moda", { kind: "rsvp", postId: "post_event_1" })).toBe(
+      "/k/moda?katil=1&masa=rsvp%3Apost_event_1#post-post_event_1",
+    );
+  });
+
+  it("reads only the four actions and plain post ids", () => {
+    expect(parseMasaIntent("kalp:post_1")).toEqual({ kind: "kalp", postId: "post_1" });
+    expect(parseMasaIntent("cevap:q-1")).toEqual({ kind: "cevap", postId: "q-1" });
+    expect(parseMasaIntent("yorum:post_2")).toEqual({ kind: "yorum", postId: "post_2" });
+    expect(parseMasaIntent("sil:post_1")).toBeNull();
+    expect(parseMasaIntent("rsvp:")).toBeNull();
+    expect(parseMasaIntent(":post_1")).toBeNull();
+    expect(parseMasaIntent("rsvp:post_1/../x")).toBeNull();
+    expect(parseMasaIntent(null)).toBeNull();
+  });
+
+  it("replays a seat or a heart only with this tab's fresh note", () => {
+    const intent = { kind: "rsvp" as const, postId: "post_1" };
+    const note = { ...intent, slug: "moda", at: 1_000_000 };
+    expect(intentChangesTable("rsvp")).toBe(true);
+    expect(intentChangesTable("kalp")).toBe(true);
+    expect(intentChangesTable("cevap")).toBe(false);
+    expect(noteVouches(note, "moda", intent, 1_000_000 + 60_000)).toBe(true);
+    expect(noteVouches(note, "moda", intent, 1_000_000 + INTENT_NOTE_TTL_MS)).toBe(false);
+    expect(noteVouches(note, "kuzguncuk", intent, 1_000_060)).toBe(false);
+    expect(noteVouches(note, "moda", { kind: "kalp", postId: "post_1" }, 1_000_060)).toBe(false);
+    expect(noteVouches(null, "moda", intent, 1_000_060)).toBe(false);
+  });
 });

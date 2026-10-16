@@ -3,11 +3,11 @@
 import type { PostDTO } from "@peni/api";
 import { masaCopy } from "@peni/brand/copy";
 import { Check } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { Button, cx } from "@/components/ui";
 import { useCafe } from "./cafe-context";
-import { ANSWERS_SHOWN, masaMoreCopy, newestFirst, postDomId, whenLabel } from "./masa-model";
-import { CommentForm, Reveal, useJoinLabel } from "./masa-shared";
+import { ANSWERS_SHOWN, masaMoreCopy, newestFirst, postDomId, whenLabel, type MasaIntentKind } from "./masa-model";
+import { clearOfBars, CommentForm, Reveal, revealSoon, useJoinFor, useJoinLabel } from "./masa-shared";
 
 const cardScroll = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)]";
 
@@ -18,10 +18,23 @@ const cardScroll = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)]";
  * - The three newest answers as notes on `surface`: "Ayşe K. · 09:12" and the body. A quiet
  *   "12 cevabın hepsini gör" opens the rest in place.
  * - Members: "Sen de cevapla" reveals `Field label="Cevabın"` + "Gönder"; once they have
- *   answered today: "Bugünkü cevabın masada." [G13]. Non-members: "Cevap yazmak için kafeye katıl."
+ *   answered today: "Bugünkü cevabın masada." [G13]. Non-members: "Cevap yazmak için kafeye
+ *   katıl." + "Katıl" (signed out: "Giriş yap ve katıl", and the field opens on return).
  */
-export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
-  const { member, requireJoin } = useCafe();
+export function QuestionCard({
+  post,
+  now,
+  intent = null,
+  onIntentDone,
+}: {
+  post: PostDTO;
+  now: Date;
+  /** An action brought back from /giris for this card (only "cevap" applies here). */
+  intent?: MasaIntentKind | null;
+  onIntentDone?: () => void;
+}) {
+  const { member } = useCafe();
+  const joinFor = useJoinFor();
   const joinLabel = useJoinLabel();
   const titleId = useId();
   const restId = useId();
@@ -50,6 +63,21 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
     refocusAnswer.current = false;
     answerButton.current?.focus();
   }, [composing]);
+
+  // Back from /giris (and the join the page finished): open the answer field, or, when today's
+  // answer is already in, show that line.
+  const replay = useEffectEvent(() => {
+    onIntentDone?.();
+    if (!answered) {
+      setComposing(true);
+      return;
+    }
+    answeredRef.current?.focus({ preventScroll: true });
+    revealSoon(answeredRef.current);
+  });
+  useEffect(() => {
+    if (intent === "cevap" && member) replay();
+  }, [intent, member]);
 
   return (
     <article
@@ -104,19 +132,25 @@ export function QuestionCard({ post, now }: { post: PostDTO; now: Date }) {
         {!member ? (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <p className="text-body text-ink">{masaCopy.answerJoin}</p>
-            <Button variant="secondary" size="sm" onClick={() => requireJoin(() => setComposing(true))}>
+            <Button variant="secondary" size="sm" onClick={() => joinFor({ kind: "cevap", postId: post.id }, () => setComposing(true))}>
               {joinLabel}
             </Button>
           </div>
         ) : answered ? (
-          <p ref={answeredRef} tabIndex={-1} role="status" className="flex items-center gap-2 text-body text-ink outline-none">
+          <p
+            ref={answeredRef}
+            tabIndex={-1}
+            role="status"
+            className={cx("flex items-center gap-2 text-body text-ink outline-none", clearOfBars)}
+          >
             <Check aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0 text-ink" />
             {masaCopy.answered}
           </p>
         ) : composing ? (
           <CommentForm
-            postId={post.id}
+            intent={{ kind: "cevap", postId: post.id }}
             label={masaCopy.answerLabel}
+            emptyText={masaMoreCopy.emptyAnswer}
             autoFocus
             onSent={() => {
               setComposing(false);

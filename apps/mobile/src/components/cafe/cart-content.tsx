@@ -3,8 +3,9 @@
  *
  * 1. Lines: "1 × Latte", `₺120`, and a 44pt stepper per line.
  * 2. The ikram line, if one was taken: "İkram · Çay" and "−₺30", styled exactly like the peni
- *    line, with no colour (§17). A quiet "İkramı çıkar" takes it out without touching the paid
- *    units of the same product (the stepper can't tell them apart).
+ *    line, with no colour (§17). "İkramı çıkar" takes out the ikram and its one unit, and only
+ *    that: "2 × Çay" with an ikram becomes "1 × Çay", paid, never a free tea turned into a
+ *    paid one (§9.3: remove the ikram line, keep everything else).
  * 3. The peni toggle (only with `usablePeni > 0`): an RN `Switch` row, copper when on, showing
  *    the capped amount (D13), with the cap hint when it is below the balance.
  * 4. "Not (isteğe bağlı)", 2 rows, max 200.
@@ -27,6 +28,18 @@ import { BlockedBanner } from "./menu-section";
 import { InlineError } from "./sheet";
 
 const LINE_MIN = 56;
+
+/**
+ * Takes the ikram out with its unit. `lib/cart` keeps the ikram as one unit of its product's
+ * line, so clearing the mark alone would leave that unit behind as a paid item. At one unit the
+ * line goes, and the mark with it.
+ */
+export function removeIkram(cart: Pick<Cart, "ikramProductId" | "add" | "setIkram">): void {
+  const id = cart.ikramProductId;
+  if (!id) return;
+  cart.add(id, -1);
+  cart.setIkram(null);
+}
 
 export function CartBody({ cafe, cart, sum }: { cafe: CafeDetailDTO; cart: Cart; sum: CartSummary }) {
   const t = useTokens();
@@ -64,7 +77,7 @@ export function CartBody({ cafe, cart, sum }: { cafe: CafeDetailDTO; cart: Cart;
             {`${MINUS}${formatTL(sum.askidaKurus)}`}
           </T>
           <View style={{ width: 116, alignItems: "flex-end" }}>
-            <IconButton variant="secondary" icon={X} label="İkramı çıkar" onPress={() => cart.setIkram(null)} />
+            <IconButton variant="secondary" icon={X} label="İkramı çıkar" onPress={() => removeIkram(cart)} />
           </View>
         </View>
       ) : null}

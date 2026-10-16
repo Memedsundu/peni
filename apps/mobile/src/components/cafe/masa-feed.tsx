@@ -7,7 +7,7 @@
 import type { PostDTO } from "@peni/api";
 import { masaCopy } from "@peni/brand/copy";
 import { MessageCircle } from "lucide-react-native";
-import { useRef } from "react";
+import { useRef, type ComponentRef } from "react";
 import { View } from "react-native";
 import { Masthead } from "@/components/brand";
 import { EmptyState, T } from "@/components/ui";
@@ -17,7 +17,15 @@ import { feedOrder } from "./masa-model";
 import { CafePost } from "./masa-post";
 import { QuestionCard } from "./masa-question";
 
-export function MasaFeed({ onPostY }: { onPostY?: (postId: string, y: number) => void }) {
+export function MasaFeed({
+  onPostY,
+  onPostNode,
+}: {
+  /** Each card's top inside the feed (from onLayout). */
+  onPostY?: (postId: string, y: number) => void;
+  /** Each card's view (react-native-web reads positions from the DOM instead). */
+  onPostNode?: (postId: string, node: ComponentRef<typeof View> | null) => void;
+}) {
   const { cafe, now } = useCafe();
   const posts = feedOrder(cafe.posts);
   const listY = useRef(0);
@@ -27,6 +35,7 @@ export function MasaFeed({ onPostY }: { onPostY?: (postId: string, y: number) =>
     const y = cardY.current.get(id);
     if (y != null) onPostY?.(id, listY.current + y);
   };
+  // Zero-height layouts come from a hidden screen (web, under a sheet): keep the real ones.
 
   return (
     <View>
@@ -39,6 +48,7 @@ export function MasaFeed({ onPostY }: { onPostY?: (postId: string, y: number) =>
         <View
           style={{ marginTop: 24, gap: 16 }}
           onLayout={(e) => {
+            if (e.nativeEvent.layout.height === 0) return;
             listY.current = e.nativeEvent.layout.y;
             for (const id of cardY.current.keys()) report(id);
           }}
@@ -46,7 +56,9 @@ export function MasaFeed({ onPostY }: { onPostY?: (postId: string, y: number) =>
           {posts.map((post) => (
             <View
               key={post.id}
+              ref={(node) => onPostNode?.(post.id, node)}
               onLayout={(e) => {
+                if (e.nativeEvent.layout.height === 0) return;
                 cardY.current.set(post.id, e.nativeEvent.layout.y);
                 report(post.id);
               }}

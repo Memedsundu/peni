@@ -6,6 +6,10 @@
  *   the 96pt scrim; the cover is the iOS zoom target (`Link.AppleZoomTarget`). Once the cover
  *   has scrolled under it, the header turns to paper with an ink tint, and the café name
  *   appears as its title once the masthead's own name has gone.
+ * - The hero's colourway [G9] is the café's own, and links can hand it over before the detail
+ *   arrives (`?hue=lacivert`), so the zoom lands on the real plate. With no hue known yet the
+ *   loading hero is a plain `surface2` plate (never a guessed colourway) that the plate fades
+ *   into once the café is read.
  * - Masthead, meta, membership row, "Bugün masada".
  * - "Menü · Askı · Masa", sticky through `stickyHeaderIndices` just under the header; tapping
  *   scrolls to the section (measured with `onLayout`), and scrolling moves the indicator.
@@ -17,10 +21,11 @@
  */
 import type { MenuItemDTO, PostDTO } from "@peni/api";
 import { greeting } from "@peni/brand/format";
-import { plateText } from "@peni/brand/tokens";
+import { cafeHues, plateText, type CafeHue } from "@peni/brand/tokens";
 import { Link, router, Stack, useFocusEffect, useIsFocused, useLocalSearchParams } from "expo-router";
+import { HeaderHeightContext } from "expo-router/react-navigation";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentRef } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentRef, type RefObject } from "react";
 import {
   PixelRatio,
   Platform,
@@ -32,7 +37,7 @@ import {
   type NativeSyntheticEvent,
   type ViewStyle,
 } from "react-native";
-import { LayoutAnimationConfig } from "react-native-reanimated";
+import Animated, { FadeIn, LayoutAnimationConfig } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CafeCover, Masthead } from "@/components/brand";
 import { orderingBlocked } from "@/components/cafe/aski-model";
@@ -54,9 +59,9 @@ import { CartBar, useCartBarSpace } from "@/components/cafe/cart-bar";
 import { MasaFeed } from "@/components/cafe/masa-feed";
 import { MenuSection } from "@/components/cafe/menu-section";
 import { Segmented, toast } from "@/components/ui";
-import { summarizeCart, useCart } from "@/lib/cart";
+import { summarizeCart, useCart, type CartLine } from "@/lib/cart";
 import { haptic } from "@/lib/haptics";
-import { useMotionReduced } from "@/lib/motion";
+import { durations, useMotionReduced } from "@/lib/motion";
 import { useSession } from "@/lib/session";
 import { isDark, space, useTokens } from "@/lib/theme";
 
@@ -71,17 +76,45 @@ const LAND = 24;
 
 type SectionId = "menu" | "aski" | "masa";
 
-/** Section top padding: Menü sits close under the bar; Askı and Masa get a section gap. */
-const PAD: Record<SectionId, number> = { menu: 24, aski: 40, masa: 40 };
+/** Section top padding: Menü sits close under the bar; Askı and Masa get the phone section gap (§5: 32). */
+const PAD: Record<SectionId, number> = { menu: 24, aski: 32, masa: 32 };
 
-/** The native header's height (the same arithmetic the stack uses). */
-function headerHeight(top: number): number {
+/**
+ * The header's height until the stack has measured it (the stack's own defaults: the iOS
+ * Dynamic Island arithmetic, Android's 56dp, the web header's 64).
+ */
+function defaultHeaderHeight(top: number): number {
   if (Platform.OS === "ios") {
     // On Dynamic Island phones the status bar is a little shorter than the top inset.
     const status = top > 50 ? top - (5 + 1 / PixelRatio.get()) : top;
     return status + 44;
   }
-  return top + 64;
+  return top + (Platform.OS === "android" ? 56 : 64);
+}
+
+/** `?hue=` from a link that already knows the café's colourway (Kafeler, Siparişler, Cüzdan). */
+function hueParam(raw: string | string[] | undefined): CafeHue | null {
+  return typeof raw === "string" && Object.prototype.hasOwnProperty.call(cafeHues, raw) ? (raw as CafeHue) : null;
+}
+
+/* react-native-web only: onLayout there misses position-only changes and reports zeros while a
+ * sheet hides the screen (`display: none`), so tap and scroll positions are read from the DOM. */
+
+type ViewNode = ComponentRef<typeof View>;
+
+type WebNode = { getBoundingClientRect: () => { top: number }; clientHeight: number; scrollTop: number; scrollHeight: number };
+
+function scrollNodeOf(ref: RefObject<ComponentRef<typeof ScrollView> | null>): WebNode | null {
+  if (!WEB) return null;
+  const node = (ref.current as unknown as { getScrollableNode?: () => WebNode | null } | null)?.getScrollableNode?.();
+  return node ?? null;
+}
+
+/** A node's top inside the scroll content; null while the screen is hidden. */
+function domTop(root: WebNode | null, node: unknown): number | null {
+  const el = node as Partial<WebNode> | null | undefined;
+  if (!root || root.clientHeight === 0 || typeof el?.getBoundingClientRect !== "function") return null;
+  return el.getBoundingClientRect().top - root.getBoundingClientRect().top + root.scrollTop;
 }
 
 /** `?sepet=latte:1,simit:1` → [["latte", 1], ["simit", 1]]. */
@@ -94,8 +127,9 @@ function parseSepet(raw: string): [string, number][] {
 }
 
 export default function CafeScreen() {
-  const params = useLocalSearchParams<{ slug: string; sepet?: string }>();
+  const params = useLocalSearchParams<{ slug: string; sepet?: string; hue?: string }>();
   const slug = params.slug ?? "";
+  const linkHue = hueParam(params.hue);
   const t = useTokens();
   const insets = useSafeAreaInsets();
   const reduced = useMotionReduced();
@@ -105,8 +139,15 @@ export default function CafeScreen() {
   const cafe = entry.cafe;
   const cart = useCart(slug);
   const [now] = useState(() => new Date());
+  /** The plain loading plate was on screen, so the real plate fades in over it. */
+  const showedNeutral = useRef(false);
 
-  const headerH = headerHeight(insets.top);
+  // The stack's measured header (56dp + inset on Android, not a guess). Keep the last real value:
+  // the web header reports 0 while a sheet hides the screen.
+  const measuredHeader = useContext(HeaderHeightContext);
+  const lastHeader = useRef(0);
+  if (measuredHeader != null && measuredHeader > 0) lastHeader.current = measuredHeader;
+  const headerH = lastHeader.current || defaultHeaderHeight(insets.top);
   const coverH = COVER + insets.top;
   const cartBarSpace = useCartBarSpace();
 
@@ -182,7 +223,9 @@ export default function CafeScreen() {
   const [skipCartEnter, setSkipCartEnter] = useState(() => showCart);
   if (skipCartEnter && !showCart && cafe) setSkipCartEnter(false);
 
-  // "Her zamanki" / "Yeniden sipariş ver": `?sepet=latte:1,simit:1`, once.
+  // "Her zamanki" / "Yeniden sipariş ver": `?sepet=latte:1,simit:1`, once. The cart becomes
+  // exactly that order (nothing stale stays from before); sold-out items are named in a banner.
+  // If nothing of it can be ordered now, the cart is left as it was.
   const [dropped, setDropped] = useState<string[]>([]);
   const sepetHandled = useRef(false);
   useEffect(() => {
@@ -190,14 +233,15 @@ export default function CafeScreen() {
     sepetHandled.current = true;
     if (!cafe.membership || blocked) return;
     const byId = new Map(cafe.menu.map((m) => [m.productId, m]));
-    const wanted = parseSepet(params.sepet);
+    const lines: CartLine[] = [];
     const gone: string[] = [];
-    for (const [id, qty] of wanted) {
-      const item = byId.get(id);
+    for (const [productId, quantity] of parseSepet(params.sepet)) {
+      const item = byId.get(productId);
       if (!item) continue;
-      if (item.available) cart.setQuantity(id, qty);
+      if (item.available) lines.push({ productId, quantity });
       else gone.push(item.name);
     }
+    if (lines.length > 0) cart.replaceLines(lines);
     setDropped(gone);
     router.setParams({ sepet: undefined });
   }, [cafe, params.sepet, blocked, cart]);
@@ -207,8 +251,13 @@ export default function CafeScreen() {
   const scroller = useRef<ComponentRef<typeof ScrollView>>(null);
   const [solid, setSolid] = useState(false);
   const [titled, setTitled] = useState(false);
+  /** Section tops in the scroll content, from onLayout (native). */
   const sectionY = useRef<Partial<Record<SectionId, number>>>({});
+  /** The section views themselves (react-native-web reads their tops from the DOM). */
+  const sectionNode = useRef<Partial<Record<SectionId, ViewNode | null>>>({});
+  /** Masa cards: their offset in the feed (native) and their views (web). */
   const postY = useRef(new Map<string, number>());
+  const postNode = useRef(new Map<string, ViewNode>());
   const viewH = useRef(0);
   const contentH = useRef(0);
   const [active, setActive] = useState<SectionId>("menu");
@@ -216,20 +265,32 @@ export default function CafeScreen() {
 
   const sectionIds: SectionId[] = cafe?.askida.enabled === false ? ["menu", "masa"] : ["menu", "aski", "masa"];
 
+  const sectionTop = (id: SectionId): number | null =>
+    domTop(scrollNodeOf(scroller), sectionNode.current[id]) ?? sectionY.current[id] ?? null;
+
   /** Where a section lands: LAND pt under the stuck segmented bar. */
-  const landing = useCallback((id: SectionId) => {
-    const y = sectionY.current[id];
+  const landing = (id: SectionId) => {
+    const y = sectionTop(id);
     return y == null ? null : Math.max(0, y + PAD[id] - LAND - headerH - SEG_H);
-  }, [headerH]);
+  };
+
+  /** The scroll position and sizes the spy works from; null while a sheet hides the screen (web). */
+  const metrics = (y: number) => {
+    const root = scrollNodeOf(scroller);
+    if (root) return root.clientHeight > 0 ? { y: root.scrollTop, view: root.clientHeight, content: root.scrollHeight } : null;
+    return { y, view: viewH.current, content: contentH.current };
+  };
 
   const spy = (y: number) => {
     if (Date.now() < spyLock.current) return;
+    const m = metrics(y);
+    if (!m) return;
     let next: SectionId = sectionIds[0]!;
     for (const id of sectionIds) {
       const at = landing(id);
-      if (at != null && at <= y + 8) next = id;
+      if (at != null && at <= m.y + 8) next = id;
     }
-    if (viewH.current > 0 && y + viewH.current >= contentH.current - 8) next = sectionIds[sectionIds.length - 1]!;
+    if (m.view > 0 && m.content > m.view && m.y + m.view >= m.content - 8) next = sectionIds[sectionIds.length - 1]!;
     if (next !== active) setActive(next);
   };
 
@@ -243,28 +304,38 @@ export default function CafeScreen() {
   };
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const y = e.nativeEvent.contentOffset.y;
-    viewH.current = e.nativeEvent.layoutMeasurement.height;
-    contentH.current = e.nativeEvent.contentSize.height;
-    syncHeader(y);
-    spy(y);
+    const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
+    // A hidden screen (web, under a sheet) reports a scroll to 0 with no size: not a real scroll.
+    if (layoutMeasurement.height === 0) return;
+    viewH.current = layoutMeasurement.height;
+    contentH.current = contentSize.height;
+    syncHeader(contentOffset.y);
+    spy(contentOffset.y);
   };
 
-  // react-native-web hides a covered screen with `display: none`, which can report a scroll to 0
-  // on the way out and restore the offset silently on the way back: re-read it on focus.
-  const syncRef = useRef<(y: number) => void>(() => {});
-  syncRef.current = (y: number) => {
-    syncHeader(y);
-    spy(y);
+  // react-native-web hides a covered screen with `display: none` and gives it back with its
+  // offset restored but no scroll event: once it is visible again (two frames, then once more
+  // after late layouts), re-read the offset for the header and the spy.
+  const syncRef = useRef<() => void>(() => {});
+  syncRef.current = () => {
+    const root = scrollNodeOf(scroller);
+    if (!root || root.clientHeight === 0) return;
+    syncHeader(root.scrollTop);
+    spy(root.scrollTop);
   };
   useFocusEffect(
     useCallback(() => {
       if (!WEB) return;
-      const raf = requestAnimationFrame(() => {
-        const node = (scroller.current as unknown as { getScrollableNode?: () => HTMLElement | null } | null)?.getScrollableNode?.();
-        if (node) syncRef.current(node.scrollTop);
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => syncRef.current());
       });
-      return () => cancelAnimationFrame(raf);
+      const late = setTimeout(() => syncRef.current(), 350);
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+        clearTimeout(late);
+      };
     }, []),
   );
 
@@ -281,22 +352,37 @@ export default function CafeScreen() {
   };
 
   const goPost = (post: PostDTO) => {
-    const masa = sectionY.current.masa;
-    const y = postY.current.get(post.id);
     setActive("masa");
-    if (masa == null || y == null) return goSection("masa");
-    scrollTo(Math.max(0, masa + PAD.masa + y - 16 - headerH - SEG_H));
+    const web = domTop(scrollNodeOf(scroller), postNode.current.get(post.id));
+    const masa = sectionY.current.masa;
+    const inFeed = postY.current.get(post.id);
+    const top = web ?? (masa != null && inFeed != null ? masa + PAD.masa + inFeed : null);
+    if (top == null) return goSection("masa");
+    scrollTo(Math.max(0, top - 16 - headerH - SEG_H));
   };
 
+  // Zero-height layouts come from a hidden screen (web), never from a real section.
   const measure = (id: SectionId) => (e: LayoutChangeEvent) => {
-    sectionY.current[id] = e.nativeEvent.layout.y;
+    if (e.nativeEvent.layout.height > 0) sectionY.current[id] = e.nativeEvent.layout.y;
+  };
+  const sectionRef = (id: SectionId) => (node: ViewNode | null) => {
+    sectionNode.current[id] = node;
+  };
+  const postRef = (id: string, node: ViewNode | null) => {
+    if (node) postNode.current.set(id, node);
+    else postNode.current.delete(id);
   };
 
   /* ------------------------------------------------------------------------------ render */
 
   const firstName = customer?.displayName.trim().split(/\s+/)[0] || null;
   const failed = !cafe && (entry.status === "not_found" || entry.status === "error");
+  /** The header floats over the hero. */
   const overCover = !failed && !solid;
+  /** No colourway known yet: the hero is the plain loading plate. */
+  const neutralPlate = !cafe && !linkHue;
+  /** Over a colourway plate (or photo) the chrome is cream; over the plain plate it stays ink. */
+  const onPlate = overCover && !neutralPlate;
   const dark = isDark(t);
 
   const header = (
@@ -304,15 +390,15 @@ export default function CafeScreen() {
       options={{
         headerTransparent: !failed,
         headerStyle: { backgroundColor: overCover ? "transparent" : t.bg },
-        headerTintColor: overCover ? plateText : t.ink,
+        headerTintColor: onPlate ? plateText : t.ink,
         headerTitleStyle: { color: t.ink },
         headerShadowVisible: false,
-        headerUserInterfaceStyle: overCover || dark ? "dark" : "light",
+        headerUserInterfaceStyle: onPlate || dark ? "dark" : "light",
         title: titled && cafe ? cafe.name : "",
       }}
     />
   );
-  const statusBar = focused ? <StatusBar style={overCover ? "light" : "auto"} /> : null;
+  const statusBar = focused ? <StatusBar style={onPlate ? "light" : "auto"} /> : null;
 
   if (failed) {
     return (
@@ -328,15 +414,29 @@ export default function CafeScreen() {
     );
   }
 
-  const coverEl = (
+  // The hero: the café's plate in its own colourway (the link's `?hue=` until the detail is in),
+  // or, with no colourway known, a plain plate that the real one fades into once it is read
+  // (200ms; 150ms under reduced motion, a fade either way).
+  if (neutralPlate) showedNeutral.current = true;
+  const plate = neutralPlate ? (
+    <View aria-hidden style={{ height: coverH, backgroundColor: t.surface2 }} />
+  ) : (
     <CafeCover
-      cafe={{ slug, name: cafe?.name ?? "", coverImageUrl: cafe?.coverImageUrl ?? null, hue: cafe?.hue ?? null }}
+      cafe={{ slug, name: cafe?.name ?? "", coverImageUrl: cafe?.coverImageUrl ?? null, hue: cafe ? cafe.hue : linkHue }}
       size="hero"
       height={coverH}
       bleed
       scrim
     />
   );
+  const coverEl =
+    cafe && showedNeutral.current ? (
+      <View style={{ height: coverH, backgroundColor: t.surface2 }}>
+        <Animated.View entering={FadeIn.duration(reduced ? durations.reduced : durations.ui)}>{plate}</Animated.View>
+      </View>
+    ) : (
+      plate
+    );
   const cover = Platform.OS === "ios" ? <Link.AppleZoomTarget>{coverEl}</Link.AppleZoomTarget> : coverEl;
 
   if (!cafe || !sum) {
@@ -424,20 +524,20 @@ export default function CafeScreen() {
           </View>
 
           {/* 3 */}
-          <View onLayout={measure("menu")} style={{ paddingHorizontal: space.gutter, paddingTop: PAD.menu }}>
+          <View ref={sectionRef("menu")} onLayout={measure("menu")} style={{ paddingHorizontal: space.gutter, paddingTop: PAD.menu }}>
             <MenuSection menu={cafe.menu} cart={cart} member={member} blocked={blocked} dropped={dropped} onJoinAdd={joinAdd} />
           </View>
 
           {/* 4 */}
           {cafe.askida.enabled ? (
-            <View onLayout={measure("aski")} style={{ paddingHorizontal: space.gutter, paddingTop: PAD.aski }}>
+            <View ref={sectionRef("aski")} onLayout={measure("aski")} style={{ paddingHorizontal: space.gutter, paddingTop: PAD.aski }}>
               <AskiPanel donation={donation} ikramProductId={member ? cart.ikramProductId : null} />
             </View>
           ) : null}
 
           {/* 5 */}
-          <View onLayout={measure("masa")} style={{ paddingHorizontal: space.gutter, paddingTop: PAD.masa }}>
-            <MasaFeed onPostY={(id, y) => postY.current.set(id, y)} />
+          <View ref={sectionRef("masa")} onLayout={measure("masa")} style={{ paddingHorizontal: space.gutter, paddingTop: PAD.masa }}>
+            <MasaFeed onPostY={(id, y) => postY.current.set(id, y)} onPostNode={postRef} />
           </View>
         </ScrollView>
 

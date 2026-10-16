@@ -2,19 +2,20 @@
 
 import { PeniApiError, type CafeSummaryDTO, type FullWalletDTO, type GiftDTO } from "@peni/api";
 import { actionCopy, errorCopy, peniCopy } from "@peni/brand/copy";
+import { dativeName, formatPeni } from "@peni/brand/format";
 import { QrCode, Store } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { signInHref } from "@/components/auth/return-to";
 import { Coin } from "@/components/brand";
 import { usePeniKodu } from "@/components/chrome/peni-kodu";
 import { Banner, Button, EmptyState, Skeleton, toast } from "@/components/ui";
 import { peni } from "@/lib/client";
-import { GiftInvite } from "./gift-invite";
+import { focusTargetClass, GiftInvite } from "./gift-invite";
 import { GiftSheet } from "./gift-sheet";
 import { HistoryList, HistoryListSkeleton } from "./history-list";
 import { primePeniKodu } from "./peni-kodu-dialog";
 import { markBalanceSeen, WalletCoinCard, WalletCoinCardSkeleton } from "./wallet-coin-card";
-import { buildHistory } from "./wallet-model";
+import { buildHistory, firstName } from "./wallet-model";
 
 /*
  * Cüzdan `/cuzdan` (design-system.md §9.6, D19).
@@ -25,14 +26,26 @@ import { buildHistory } from "./wallet-model";
  *   JETON KESESİ   one raised coin card per membership
  *   HAREKETLER     the history, by day, as sentences
  *
- * From 1024px the history moves to a right column. The first paint comes from the server
- * (no loading flash); actions reload the wallet in place and never wipe the page. Signed out,
- * empty, loading and error each have their own state. `?ismarla=moda` opens the gift sheet on
- * that café; `#peni-kodum` opens the Peni kodum dialog.
+ * Phones read top to bottom in that order. From 768px two or more fişes sit two by two. From
+ * 1024px the coin purse holds the left column and the fişes head the right one, above the
+ * history: however many gifts are waiting, the purse is never pushed below the fold, and an
+ * accepted gift's coin flip and the card's balance roll are seen together.
+ *
+ * The first paint comes from the server (no loading flash); actions reload the wallet in place
+ * and never wipe the page. Signed out, empty, loading and error each have their own state.
+ * `?ismarla=moda` opens the gift sheet on that café; `#peni-kodum` opens the Peni kodum dialog.
+ * Focus never falls to the page when something leaves (a declined fiş, a "Geri al"), and each
+ * such change is read out once through the page's status line.
  */
 
 export type WalletInitial =
-  | { kind: "ok"; wallet: FullWalletDTO; cafes: CafeSummaryDTO[] }
+  | {
+      kind: "ok";
+      wallet: FullWalletDTO;
+      cafes: CafeSummaryDTO[];
+      /** Balances this device last showed, per café (the `peni_seen` cookie): A6's first frame. */
+      seen?: Readonly<Record<string, number>>;
+    }
   | { kind: "signed_out" }
   /** The server could not read it: the client loads it. */
   | { kind: "client" };
@@ -43,6 +56,15 @@ type State =
   | { kind: "signed_out" }
   | { kind: "ok"; wallet: FullWalletDTO };
 
+const NO_SEEN: Readonly<Record<string, number>> = {};
+
+const subscribeHash = (onChange: () => void) => {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+};
+const readHash = () => window.location.hash;
+const noHash = () => "";
+
 export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismarla: string | null }) {
   const kodu = usePeniKodu();
   const [state, setState] = useState<State>(
@@ -51,11 +73,30 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
   const [cities, setCities] = useState<Record<string, string | null>>(() =>
     initial.kind === "ok" ? Object.fromEntries(initial.cafes.map((c) => [c.slug, c.city])) : {},
   );
+  const seen = initial.kind === "ok" ? (initial.seen ?? NO_SEEN) : NO_SEEN;
   /** Gifts accepted on this screen keep their fiş (now "Afiyet olsun!") until the page is left. */
   const [acceptedHere, setAcceptedHere] = useState<GiftDTO[]>([]);
-  const [sheet, setSheet] = useState<{ open: boolean; slug: string | null }>({ open: ismarla !== null, slug: ismarla || null });
+  /** Gifts declined on this screen leave at once, before the reload confirms it. */
+  const [declinedHere, setDeclinedHere] = useState<readonly string[]>([]);
+  const [sheet, setSheet] = useState<{ open: boolean; slug: string | null; fromUrl: boolean }>({
+    open: ismarla !== null,
+    slug: ismarla || null,
+    fromUrl: ismarla !== null,
+  });
+  const hash = useSyncExternalStore(subscribeHash, readHash, noHash);
 
   const wallet = state.kind === "ok" ? state.wallet : null;
+
+  /* ---------- the status line (one polite region for the whole page) ---------- */
+  const [announcement, setAnnouncement] = useState("");
+  const sayTimer = useRef<number | undefined>(undefined);
+  const say = useCallback((text: string) => {
+    // Cleared first, so the same words twice in a row are still read twice.
+    setAnnouncement("");
+    window.clearTimeout(sayTimer.current);
+    sayTimer.current = window.setTimeout(() => setAnnouncement(text), 60);
+  }, []);
+  useEffect(() => () => window.clearTimeout(sayTimer.current), []);
 
   /* ---------- loading ---------- */
   const load = useCallback(async (mode: "first" | "refresh") => {
@@ -104,6 +145,32 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
     }
   }, [wallet, kodu]);
 
+  /* ---------- derived ---------- */
+  const incoming = useMemo(() => {
+    if (!wallet) return [];
+    const pending = wallet.gifts.filter((g) => g.direction === "in" && g.status === "pending" && !declinedHere.includes(g.id));
+    const ids = new Set(pending.map((g) => g.id));
+    // Newest first, and an accepted fiş keeps its place (nothing jumps when one is accepted).
+    return [...acceptedHere.filter((g) => !ids.has(g.id)).map((g) => ({ gift: g, accepted: true })), ...pending.map((g) => ({ gift: g, accepted: false }))].sort(
+      (a, b) => b.gift.createdAt.localeCompare(a.gift.createdAt),
+    );
+  }, [wallet, acceptedHere, declinedHere]);
+  const lines = useMemo(() => (wallet ? buildHistory(wallet) : []), [wallet]);
+
+  /* ---------- focus targets ---------- */
+  const giftsRef = useRef<HTMLDivElement>(null);
+  const purseTitleRef = useRef<HTMLHeadingElement>(null);
+  /** Where the declined fiş stood: the fiş that takes its place gets the focus. */
+  const refocusAt = useRef<number | null>(null);
+  useEffect(() => {
+    const at = refocusAt.current;
+    if (at === null) return;
+    refocusAt.current = null;
+    const titles = giftsRef.current?.querySelectorAll<HTMLElement>("[data-gift-title]");
+    const next = titles && titles.length > 0 ? titles[Math.min(at, titles.length - 1)] : purseTitleRef.current;
+    next?.focus();
+  }, [incoming]);
+
   /* ---------- actions ---------- */
   const onAccepted = useCallback(
     (gift: GiftDTO) => {
@@ -116,46 +183,47 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
     [wallet, load],
   );
 
-  const onDeclined = useCallback(() => void load("refresh"), [load]);
+  const onDeclined = useCallback(
+    (gift: GiftDTO) => {
+      refocusAt.current = Math.max(0, incoming.findIndex((x) => x.gift.id === gift.id));
+      setDeclinedHere((ids) => (ids.includes(gift.id) ? ids : [...ids, gift.id]));
+      say(`Geri çevirdin. Peni ${dativeName(firstName(gift.fromName))} döndü.`);
+      void load("refresh");
+    },
+    [incoming, load, say],
+  );
 
   const onCancelGift = useCallback(
-    async (giftId: string) => {
+    async (giftId: string): Promise<boolean> => {
       try {
         await peni.gifts.cancel(giftId);
       } catch (e) {
         toast.error(e instanceof Error ? e.message : errorCopy.generic);
-        return;
+        return false;
       }
       const gift = wallet?.gifts.find((g) => g.id === giftId);
       const before = gift ? wallet?.cafes.find((c) => c.cafeSlug === gift.cafeSlug)?.balancePeni : undefined;
+      // The peni coming home is not an earn moment: the card just rolls.
       if (gift && before != null) markBalanceSeen(gift.cafeSlug, before + gift.peni);
       await load("refresh");
+      if (gift) say(`${formatPeni(gift.peni)} cüzdanına döndü.`);
+      return true;
     },
-    [wallet, load],
+    [wallet, load, say],
   );
 
-  const openGift = useCallback((slug: string | null) => setSheet({ open: true, slug }), []);
-
-  /* ---------- derived ---------- */
-  const incoming = useMemo(() => {
-    if (!wallet) return [];
-    const pending = wallet.gifts.filter((g) => g.direction === "in" && g.status === "pending");
-    const ids = new Set(pending.map((g) => g.id));
-    // Newest first, and an accepted fiş keeps its place (nothing jumps when one is accepted).
-    return [...acceptedHere.filter((g) => !ids.has(g.id)).map((g) => ({ gift: g, accepted: true })), ...pending.map((g) => ({ gift: g, accepted: false }))].sort(
-      (a, b) => b.gift.createdAt.localeCompare(a.gift.createdAt),
-    );
-  }, [wallet, acceptedHere]);
-  const lines = useMemo(() => (wallet ? buildHistory(wallet) : []), [wallet]);
+  const openGift = useCallback((slug: string | null) => setSheet({ open: true, slug, fromUrl: false }), []);
 
   /* ---------- render ---------- */
   if (state.kind === "signed_out") {
+    // After signing in, come back to what was asked for: the gift sheet, or the Peni kodu.
+    const back = `/cuzdan${ismarla ? `?ismarla=${encodeURIComponent(ismarla)}` : ""}${hash === "#peni-kodum" ? hash : ""}`;
     return (
       <div className="mx-auto flex w-full max-w-[400px] flex-col items-center pt-6 text-center md:pt-12">
         <Coin size={96} />
         <h1 className="mt-6 font-display text-h2 text-ink">Cüzdan</h1>
         <p className="mt-2 text-body-lg text-ink-2">Cüzdanını görmek için giriş yap.</p>
-        <Button href={signInHref("/cuzdan")} fullWidth className="mt-6">
+        <Button href={signInHref(back)} fullWidth className="mt-6">
           {actionCopy.signIn}
         </Button>
       </div>
@@ -172,10 +240,14 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
           tone="danger"
           title="Cüzdanın yüklenemedi."
           action={
-            <Button size="sm" variant="secondary" onClick={() => {
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
                 setState({ kind: "loading" });
                 void load("first");
-              }}>
+              }}
+            >
               {errorCopy.retry}
             </Button>
           }
@@ -201,10 +273,14 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
     );
   }
 
+  const hasGifts = incoming.length > 0;
+  // "2 kafede peni biriktirdin." counts only cafés where there is peni to speak of.
+  const withPeni = w.cafes.filter((c) => c.balancePeni >= 1).length;
+
   return (
     <div className="flex flex-col gap-8 md:gap-10">
       <PageHeader
-        meta={peniCopy.walletSummary(w.cafes.length)}
+        meta={withPeni > 0 ? peniCopy.walletSummary(withPeni) : undefined}
         action={
           kodu.available ? (
             <Button variant="secondary" size="sm" iconStart={QrCode} onClick={() => kodu.show()}>
@@ -214,10 +290,15 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
         }
       />
 
-      <div className="grid gap-8 md:gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-12">
-        <div className="flex min-w-0 flex-col gap-8 md:gap-10">
-          {incoming.length > 0 && (
-            <section aria-label="Sana ısmarlananlar" className="flex flex-col gap-4">
+      <div className="grid gap-8 md:gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-x-12">
+        {hasGifts && (
+          // From 1024px: 28px down (the "JETON KESESİ" legend's line), so the first fiş starts
+          // level with the coin cards beside it.
+          <section aria-labelledby="sana-ismarlananlar" className="min-w-0 lg:col-start-2 lg:row-start-1 lg:pt-7">
+            <h2 id="sana-ismarlananlar" className="sr-only">
+              Sana ısmarlananlar
+            </h2>
+            <div ref={giftsRef} className={incoming.length > 1 ? "grid gap-4 md:grid-cols-2 lg:grid-cols-1" : "grid gap-4"}>
               {incoming.map(({ gift, accepted }) => {
                 const c = w.cafes.find((x) => x.cafeSlug === gift.cafeSlug);
                 return (
@@ -232,22 +313,37 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
                   />
                 );
               })}
-            </section>
-          )}
-
-          <section aria-labelledby="jeton-kesesi">
-            <h2 id="jeton-kesesi" className="mb-3 legend text-ink-2">
-              {peniCopy.coinPurse}
-            </h2>
-            <div className={w.cafes.length > 1 ? "-mb-4 grid gap-x-4 sm:grid-cols-2" : "-mb-4 grid sm:max-w-[420px]"}>
-              {w.cafes.map((c) => (
-                <WalletCoinCard key={c.membershipId} cafe={c} city={cities[c.cafeSlug] ?? null} onGift={openGift} />
-              ))}
             </div>
           </section>
-        </div>
+        )}
 
-        <section aria-labelledby="hareketler" className="min-w-0">
+        {/* The cards sit two by two once the purse itself is 34rem wide (a container query, so
+            the narrow left column at 1024px stacks them instead of squeezing them). From 1280px,
+            with one row of cards, the purse stays in view while the right column scrolls: accept
+            a gift further down and its café's balance still rolls in sight. */}
+        <section
+          aria-labelledby="jeton-kesesi"
+          className={`@container min-w-0 lg:col-start-1 lg:row-start-1 lg:self-start ${hasGifts ? "lg:row-span-2" : ""} ${
+            w.cafes.length <= 2 ? "xl:sticky xl:top-[calc(var(--header-h)+2rem)]" : ""
+          }`}
+        >
+          <h2 id="jeton-kesesi" ref={purseTitleRef} tabIndex={-1} className={`mb-3 w-fit legend text-ink-2 ${focusTargetClass}`}>
+            {peniCopy.coinPurse}
+          </h2>
+          <div className={w.cafes.length > 1 ? "-mb-4 grid gap-x-4 @[34rem]:grid-cols-2" : "-mb-4 grid @[34rem]:max-w-[420px]"}>
+            {w.cafes.map((c) => (
+              <WalletCoinCard
+                key={c.membershipId}
+                cafe={c}
+                city={cities[c.cafeSlug] ?? null}
+                seen={seen[c.cafeSlug] ?? null}
+                onGift={openGift}
+              />
+            ))}
+          </div>
+        </section>
+
+        <section aria-labelledby="hareketler" className={`min-w-0 lg:col-start-2 ${hasGifts ? "lg:row-start-2" : "lg:row-start-1"}`}>
           <h2 id="hareketler" className="mb-3 legend text-ink-2">
             {peniCopy.movements}
           </h2>
@@ -255,12 +351,18 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
         </section>
       </div>
 
+      <p role="status" className="sr-only">
+        {announcement}
+      </p>
+
       <GiftSheet
         open={sheet.open}
         onOpenChange={(open) => setSheet((s) => ({ ...s, open }))}
         wallet={w}
         cities={cities}
         cafeSlug={sheet.slug}
+        // Opened from a link (`?ismarla=`), nothing on this page opened it: land on the purse.
+        finalFocus={sheet.fromUrl ? purseTitleRef : undefined}
         onSent={() => void load("refresh")}
         onClosed={() => {
           // Drop `?ismarla=` so a reload doesn't open the sheet again.
@@ -295,10 +397,10 @@ export function WalletSkeleton() {
         </div>
         <Skeleton radius={10} className="h-11 w-36" />
       </div>
-      <div className="grid gap-8 md:gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-12">
-        <div aria-hidden>
+      <div className="grid gap-8 md:gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:gap-x-12">
+        <div aria-hidden className="@container">
           <Skeleton className="mb-3 h-4 w-28" />
-          <div className="-mb-4 grid gap-x-4 sm:grid-cols-2">
+          <div className="-mb-4 grid gap-x-4 @[34rem]:grid-cols-2">
             <WalletCoinCardSkeleton />
             <WalletCoinCardSkeleton />
           </div>

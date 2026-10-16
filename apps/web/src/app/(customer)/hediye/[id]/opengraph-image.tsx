@@ -1,6 +1,6 @@
 import type { GiftPreviewDTO } from "@peni/api";
 import { cafeHue, SEP, trUpper } from "@peni/brand/format";
-import { cafeHues } from "@peni/brand/tokens";
+import { type CafeHue, cafeHues } from "@peni/brand/tokens";
 import { ImageResponse } from "next/og";
 import { coinDataUri, OG, OG_FONT, OG_SIZE, ogFonts } from "@/components/home/og-art";
 import { getApp } from "@/server/runtime";
@@ -24,7 +24,7 @@ export default async function GiftOpengraphImage({ params }: { params: Promise<{
   const [fonts, gift] = await Promise.all([ogFonts(), read(id)]);
 
   const { title, line } = giftShareCopy(gift);
-  const band = gift ? cafeHues[cafeHue(gift.cafeSlug)] : OG.ink;
+  const band = gift ? cafeHues[await hueOf(gift.cafeSlug)] : OG.ink;
 
   return new ImageResponse(
     (
@@ -57,5 +57,16 @@ async function read(id: string): Promise<GiftPreviewDTO | null> {
     return await app.giftPreview(id, null);
   } catch {
     return null;
+  }
+}
+
+/** The café's own colourway [G9] (the gift preview doesn't carry it), else the slug's. */
+async function hueOf(slug: string): Promise<CafeHue> {
+  try {
+    const app = await getApp();
+    const cafe = (await app.listCafes(null)).find((c) => c.slug === slug);
+    return cafe?.hue ?? cafeHue(slug);
+  } catch {
+    return cafeHue(slug);
   }
 }

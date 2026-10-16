@@ -26,6 +26,7 @@
 import type { OrderDTO } from "@peni/api";
 import { askiCopy, cartCopy, elapsedChip, staffCopy } from "@peni/brand/copy";
 import { formatTL } from "@peni/brand/format";
+import type { CafeHue } from "@peni/brand/tokens";
 import { AlarmClock, Clock, Info, StickyNote, Timer } from "lucide-react-native";
 import { memo, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
@@ -41,6 +42,8 @@ const ELAPSED_ICON = { Clock, Timer, AlarmClock } as const;
 export interface StaffTicketProps {
   order: OrderDTO;
   slug: string;
+  /** The café's own colourway [G9]; null falls back to `cafeHue(slug)`. */
+  hue: CafeHue | null;
   posKind: "standalone" | "shelby";
   /** The board's clock (ms), ticking every few seconds: elapsed chips and "Gelmedi" follow it. */
   now: number;
@@ -50,7 +53,7 @@ export interface StaffTicketProps {
   onReject: (order: OrderDTO) => void;
 }
 
-export const StaffTicket = memo(function StaffTicket({ order, slug, posKind, now, arrivedAt, onBump, onReject }: StaffTicketProps) {
+export const StaffTicket = memo(function StaffTicket({ order, slug, hue, posKind, now, arrivedAt, onBump, onReject }: StaffTicketProps) {
   const t = useTokens();
   const code = ticketCode(order);
   const name = firstName(order.customerName);
@@ -63,7 +66,7 @@ export const StaffTicket = memo(function StaffTicket({ order, slug, posKind, now
 
   return (
     <View accessibilityRole="summary" accessibilityLabel={`${code}, ${name}`}>
-      <Fis variant="ticket" slug={slug} contentStyle={styles.body}>
+      <Fis variant="ticket" slug={slug} hue={hue} contentStyle={styles.body}>
         {arrivedAt != null ? <NewBar arrivedAt={arrivedAt} /> : null}
 
         <View style={styles.head}>

@@ -16,11 +16,12 @@ export {
   useBoard,
   type BoardSnapshot,
 } from "./board-store";
+export { loadCafeDetail, useCafeDetail, useCafeHue, type CafeDetailEntry } from "./cafe-detail";
 export { StaffGate, GATE_ACTION, GATE_TEXT, BACK_TO_CUSTOMER } from "./gate";
 export { KeepAwakeWhileFocused, useNow, useSettling } from "./hooks";
 export * from "./model";
 export { StaffBoardPoller, POLL_MS } from "./poller";
-export { PausePill, PressClock, TezgahStrip } from "./press-strip";
+export { PausePill, PressClock, PressNameplate, TezgahStrip } from "./press-strip";
 export { ReportList, TRENDS_NOTE } from "./report-list";
 export { StaffScreen, type StaffScreenProps } from "./staff-screen";
 export { StaffTicket, StaffTicketSkeleton, type StaffTicketProps } from "./ticket";

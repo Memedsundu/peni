@@ -4,7 +4,7 @@ import { newIdempotencyKey, PeniApiError, type FullWalletDTO, type GiftDTO, type
 import { actionCopy, errorCopy } from "@peni/brand/copy";
 import { dativeName, formatNumber, formatPeni, SEP } from "@peni/brand/format";
 import { Check, CircleAlert, Share2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Coin, type CoinCafe } from "@/components/brand";
 import {
   Banner,
@@ -88,9 +88,11 @@ export interface GiftSheetProps {
   onSent: (gift: GiftDTO) => void;
   /** The sheet has finished closing. */
   onClosed?: () => void;
+  /** Where focus goes on close, when nothing on the page opened the sheet (`?ismarla=`). */
+  finalFocus?: RefObject<HTMLElement | null>;
 }
 
-export function GiftSheet({ open, onOpenChange, wallet, cities, cafeSlug, onSent, onClosed }: GiftSheetProps) {
+export function GiftSheet({ open, onOpenChange, wallet, cities, cafeSlug, onSent, onClosed, finalFocus }: GiftSheetProps) {
   /* ---------- everything resets each time the sheet opens ---------- */
   const [wasOpen, setWasOpen] = useState(false);
   const [skipCafe, setSkipCafe] = useState(false);
@@ -327,6 +329,7 @@ export function GiftSheet({ open, onOpenChange, wallet, cities, cafeSlug, onSent
       dismissible={step === "cafe" || step === "done"}
       // The step's body, not the close button: the title is announced, and nothing lights up.
       initialFocus={bodyRef}
+      finalFocus={finalFocus}
       eyebrow={eyebrow}
       title={title}
       description={description}

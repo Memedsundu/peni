@@ -87,6 +87,21 @@ export function TezgahStrip({ paused }: { paused: boolean | null }) {
   );
 }
 
+/**
+ * The café's nameplate under a tab title ("MODA KAHVESİ" in `plate`, `onPress2`), so Askı and
+ * Rapor always say which café they show — a staff member may work at two. Nothing while the
+ * name is unknown.
+ */
+export function PressNameplate({ name }: { name: string | null | undefined }) {
+  const t = useTokens();
+  if (!name) return null;
+  return (
+    <T variant="plate" numberOfLines={1} style={[styles.nameplate, { color: t.onPress2 }]}>
+      {name}
+    </T>
+  );
+}
+
 const styles = StyleSheet.create({
   row: {
     minHeight: 44,
@@ -110,4 +125,5 @@ const styles = StyleSheet.create({
   },
   dot: { width: 8, height: 8, borderRadius: radius.full },
   pillText: { fontFamily: fonts.sansSemiBold, flexShrink: 1 },
+  nameplate: { marginTop: -2 },
 });

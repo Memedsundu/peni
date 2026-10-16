@@ -2,9 +2,10 @@
  * `askiya-birak` sheet (design-system.md §9.3 "Give sheet", §10.2, A8, G12): formSheet,
  * detents [0.75, 1]. Opened with `?kafe=<slug>` (members only; non-members join first).
  *
- * - "Askıya bırak", the balance, then "Ne bırakıyorsun?": one chip per askı item
- *   ("1 çay · 30 peni"), disabled with "Bakiyen 25" when the balance can't cover it, and "Başka",
- *   which reveals a peni stepper (step 5, min 1, max the balance).
+ * - "Askıya bırak", the balance, then "Ne bırakıyorsun?": one column of full-width choice
+ *   chips, one per askı item ("1 çay · 30 peni"), disabled with "Bakiyen 25" when the balance
+ *   can't cover it, and "Başka" last, which reveals a peni stepper (step 5, min 1, max the
+ *   balance).
  * - With a café match [G12]: "Kafe her bağışa %50 ekliyor."
  * - "Adım askıda görünsün", off by default, hint "Kapalıyken bağışın adsız görünür."
  * - Primary (ink): "1 çay bırak · 30 peni" / "45 peni bırak".
@@ -17,7 +18,7 @@ import { askiCopy, peniCopy } from "@peni/brand/copy";
 import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { View } from "react-native";
-import { Coin, DeviceGlyph, SimitGlyph } from "@/components/brand";
+import { Coin, CoinGlyph, DeviceGlyph, SimitGlyph } from "@/components/brand";
 import { askiItems, itemPeni, referenceItem } from "@/components/cafe/aski-model";
 import { loadCafe, messageOf, pushDonation, useCafeEntry } from "@/components/cafe/cafe-store";
 import { InlineError, SheetFrame } from "@/components/cafe/sheet";
@@ -28,6 +29,9 @@ import { radius, useTokens } from "@/lib/theme";
 
 const OTHER = "other";
 const STEP = 5;
+
+/** A full-width option in the "Ne bırakıyorsun?" column. */
+const OPTION = { alignSelf: "stretch" } as const;
 
 /** With nothing to leave: why the button rests. */
 const NO_BALANCE = "Penin biriktikçe sen de askıya bırakabilirsin.";
@@ -146,7 +150,8 @@ export default function AskiyaBirakSheet() {
         <T variant="button" aria-hidden>
           {askiCopy.giveSheet.what}
         </T>
-        <ChipGroup label={askiCopy.giveSheet.what}>
+        {/* One calm column of choices, "Başka" last. */}
+        <ChipGroup label={askiCopy.giveSheet.what} style={{ flexDirection: "column", flexWrap: "nowrap" }}>
           {items.map((it) => {
             const reason = affordable(it) ? undefined : askiCopy.giveSheet.balance(balance);
             return (
@@ -160,7 +165,7 @@ export default function AskiyaBirakSheet() {
                   setChoice(it.productId);
                   setError(null);
                 }}
-                style={{ flexGrow: 1 }}
+                style={OPTION}
               >
                 {askiCopy.giveSheet.chip(it.name, itemPeni(it))}
               </Chip>
@@ -168,13 +173,15 @@ export default function AskiyaBirakSheet() {
           })}
           <Chip
             kind="choice"
+            // A peni amount of your own: the coin glyph keeps the labels in one column.
+            icon={<CoinGlyph size={20} color={balance >= 1 ? t.ink : t.ink2} />}
             selected={isOther}
             disabledReason={balance >= 1 ? undefined : askiCopy.giveSheet.balance(balance)}
             onPress={() => {
               setChoice(OTHER);
               setError(null);
             }}
-            style={{ flexGrow: 1 }}
+            style={OPTION}
           >
             {askiCopy.giveSheet.other}
           </Chip>

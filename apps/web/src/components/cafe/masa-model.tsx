@@ -1,4 +1,5 @@
 import type { CafeDetailDTO, PostDTO } from "@peni/api";
+import { masaCopy } from "@peni/brand/copy";
 import { formatNumber, formatTime, relDay, SEP, TIME_ZONE } from "@peni/brand/format";
 import { buildIcs } from "@/server/ics";
 
@@ -6,6 +7,14 @@ import { buildIcs } from "@/server/ics";
  * Pure helpers for the Masa feed (design-system.md §9.3 "Masa", §6.5). No React, no DOM:
  * everything here is unit-tested in masa-model.test.ts.
  */
+
+/** "22 Ekim Perşembe 19:00": an event's day and time, for words that travel without the date block. */
+export function eventWhen(eventStartsAt: string): string {
+  const day = new Intl.DateTimeFormat("tr-TR", { timeZone: TIME_ZONE, weekday: "long", day: "numeric", month: "long" }).format(
+    new Date(eventStartsAt),
+  );
+  return `${day} ${formatTime(eventStartsAt)}`;
+}
 
 /**
  * Masa strings that `@peni/brand` `masaCopy` doesn't carry yet. They live here, in one place,
@@ -19,14 +28,27 @@ export const masaMoreCopy = {
   answersLabel: "Cevaplar",
   olderAnswersLabel: "Önceki cevaplar",
   commentsLabel: "Yorumlar",
+  /** Under a post's comments, for someone who isn't a member yet (the answer card's pattern). */
+  commentJoin: "Yorum yazmak için kafeye katıl.",
+  /** Read out once a comment is in (an answer says `masaCopy.answered`). */
+  commentSent: "Yorumun masada.",
+  /** "Gönder" with nothing typed: the reason nothing was sent. */
+  emptyAnswer: "Önce cevabını yaz.",
+  emptyComment: "Önce yorumunu yaz.",
+  /**
+   * The seats line. `masaCopy.seats` says a bare "Masa doldu" once the table is full; when one of
+   * the chairs is mine it keeps " · sen de geliyorsun", as it does below capacity.
+   */
+  seats: (count: number, capacity: number, me = false) =>
+    count >= capacity && me ? `${masaCopy.full}${SEP}sen de geliyorsun` : masaCopy.seats(count, capacity, me),
   /** An open table (no capacity): "8 kişi geliyor" / "8 kişi geliyor · sen de geliyorsun". */
   attending: (n: number, me = false) => `${formatNumber(n)} kişi geliyor${me ? `${SEP}sen de geliyorsun` : ""}`,
   /** A table that's over: "9/12 yer doluydu". */
   seatsPast: (n: number, capacity: number) => `${formatNumber(n)}/${formatNumber(capacity)} yer doluydu`,
   /** An open table that's over: "8 kişi geldi". */
   came: (n: number) => `${formatNumber(n)} kişi geldi`,
-  /** What "Paylaş" sends with the link: "Moda Kahvesi · Peni masası · 19:00". */
-  shareText: (cafeName: string, time: string) => `${cafeName}${SEP}Peni masası${SEP}${time}`,
+  /** What "Paylaş" sends with the link: "Moda Kahvesi · Peni masası · 22 Ekim Perşembe 19:00". */
+  shareText: (cafeName: string, eventStartsAt: string) => `${cafeName}${SEP}Peni masası${SEP}${eventWhen(eventStartsAt)}`,
 } as const;
 
 /** A Peni masası lasts two hours (the same length the .ics file uses). */
@@ -174,4 +196,70 @@ export function eventIcs(
 /** The DOM id of a card, which the "Bugün masada" strip and shared links scroll to. */
 export function postDomId(postId: string): string {
   return `post-${postId}`;
+}
+
+/*
+ * Keeping a Masa action through sign-in (§9.3, like the menu's `?ekle=` and the askı's
+ * `?aski=`). A signed-out "Geliyorum", heart, "Giriş yap ve katıl" under the question or under
+ * a post's comments goes to /giris with a return address that joins (`katil=1`, which the page
+ * shell finishes) and names the action: `masa=rsvp:post_1`. Back on the page, the feed reads the
+ * marker once, removes it, and replays the action as soon as the visitor is a member.
+ */
+
+/** rsvp: "Geliyorum". kalp: the heart. cevap: open the answer field. yorum: open the comment field. */
+export type MasaIntentKind = "rsvp" | "kalp" | "cevap" | "yorum";
+
+export interface MasaIntent {
+  kind: MasaIntentKind;
+  postId: string;
+}
+
+export const MASA_INTENT_PARAM = "masa";
+
+const INTENT_KINDS: readonly MasaIntentKind[] = ["rsvp", "kalp", "cevap", "yorum"];
+
+/** "/k/moda?katil=1&masa=rsvp%3Apost_1#post-post_1": joins, replays, and lands on the card. */
+export function masaReturnTo(slug: string, intent: MasaIntent): string {
+  const query = new URLSearchParams({ katil: "1", [MASA_INTENT_PARAM]: `${intent.kind}:${intent.postId}` });
+  return `/k/${encodeURIComponent(slug)}?${query.toString()}#${encodeURIComponent(postDomId(intent.postId))}`;
+}
+
+/** "rsvp:post_1" → { kind: "rsvp", postId: "post_1" }; anything else → null. */
+export function parseMasaIntent(raw: string | null | undefined): MasaIntent | null {
+  if (!raw) return null;
+  const at = raw.indexOf(":");
+  if (at <= 0) return null;
+  const kind = raw.slice(0, at) as MasaIntentKind;
+  const postId = raw.slice(at + 1);
+  if (!INTENT_KINDS.includes(kind) || !/^[\w-]{1,80}$/.test(postId)) return null;
+  return { kind, postId };
+}
+
+/**
+ * A seat or a heart is seen by everyone at the table, so it is replayed only when this browser
+ * tab started it (a stored note, see masa-shared). A link someone else crafted never takes a seat
+ * for you. Opening an empty answer or comment field changes nothing, so it needs no note.
+ */
+export function intentChangesTable(kind: MasaIntentKind): boolean {
+  return kind === "rsvp" || kind === "kalp";
+}
+
+/** How long a stored note vouches for a marker: long enough to receive and type an SMS code. */
+export const INTENT_NOTE_TTL_MS = 30 * 60 * 1000;
+
+export interface IntentNote extends MasaIntent {
+  slug: string;
+  at: number;
+}
+
+/** Whether the note this tab stored before /giris vouches for `intent` on this café, now. */
+export function noteVouches(note: IntentNote | null, slug: string, intent: MasaIntent, now: number): boolean {
+  return (
+    !!note &&
+    note.slug === slug &&
+    note.kind === intent.kind &&
+    note.postId === intent.postId &&
+    now - note.at >= 0 &&
+    now - note.at < INTENT_NOTE_TTL_MS
+  );
 }

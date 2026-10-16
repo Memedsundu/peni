@@ -105,11 +105,16 @@ export default function AskidanAlSheet() {
     const id = pending.current;
     pending.current = null;
     if (!id) return;
-    // Switching the ikram to another item: the unit that was the ikram leaves with it, so the
-    // paid quantity of the old item stays what it was.
     const previous = cart.ikramProductId;
-    if (previous && previous !== id) cart.add(previous, -1);
-    cart.setIkram(id);
+    if (previous !== id) {
+      // Switching the ikram to another item: the unit that was the ikram leaves with it, so the
+      // paid quantity of the old item stays what it was.
+      if (previous) cart.add(previous, -1);
+      // The ikram is always one more unit, never a paid one relabelled: with a Çay already in
+      // the cart, "Siparişime ekle" makes it "2 × Çay", one of them the ikram (§9.3).
+      if (cart.quantityOf(id) > 0) cart.add(id);
+      cart.setIkram(id);
+    }
     if (router.canGoBack()) router.back();
   };
 
@@ -194,7 +199,6 @@ export default function AskidanAlSheet() {
                   selected={item.productId === chosenId}
                   disabledReason={reason}
                   onPress={() => !taking && setSelected(item.productId)}
-                  style={{ flexGrow: 1 }}
                 >
                   {item.name}
                 </Chip>

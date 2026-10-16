@@ -4,7 +4,7 @@ import { PeniApiError, type GiftDTO, type RefItemDTO } from "@peni/api";
 import { actionCopy, errorCopy } from "@peni/brand/copy";
 import { dativeName, formatNumber, formatPeni, SEP } from "@peni/brand/format";
 import { Check, Heart } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Coin, Fis, type CoinCafe } from "@/components/brand";
 import { Banner, Button, Sheet } from "@/components/ui";
 import { peni } from "@/lib/client";
@@ -22,7 +22,12 @@ import { firstName, giftDeadline, giftInviteTitle, giftLegend, giftWhat } from "
  * "Kabul et" flips the 56px coin (A7, the back reads "+30 / PENİ"); the words become
  * "Afiyet olsun! 30 peni cüzdanında." and the café card's balance rolls (the page reloads the
  * wallet). Then "Teşekkür et" [G15]. "Geri çevir" asks first, in a sheet: "Geri çevirelim mi?"
- * / "Peni Ayşe'ye döner." Errors stay inline on the fiş; nothing is lost.
+ * / "Peni Ayşe'ye döner." Once that sheet has closed, the page drops the fiş and moves focus
+ * to what took its place. Errors stay inline on the fiş; nothing is lost.
+ *
+ * The h3 names the fiş (`article`), and both answers carry it in their names, so three fişes
+ * waiting never read as three bare "Kabul et" buttons. The h3 is also the focus target the
+ * page uses when a fiş above it is declined (`data-gift-title`).
  */
 
 export interface GiftInviteProps {
@@ -32,10 +37,15 @@ export interface GiftInviteProps {
   /** Already accepted on this screen (the page keeps the fiş until it is left). */
   accepted?: boolean;
   onAccepted: (gift: GiftDTO) => void;
+  /** Declined, and the confirm sheet has finished closing: drop the fiş and place focus. */
   onDeclined: (gift: GiftDTO) => void;
 }
 
+/** A focus target that is not a control: a ring only for keyboard users, clear of the top bar. */
+export const focusTargetClass = "rounded-[4px] scroll-mt-[calc(var(--header-h)+1rem)]";
+
 export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = false, onAccepted, onDeclined }: GiftInviteProps) {
+  const titleId = useId();
   const [accepted, setAccepted] = useState(acceptedProp);
   const [flips, setFlips] = useState(0);
   const [thanked, setThanked] = useState(gift.thankedAt != null);
@@ -43,10 +53,12 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
   const [error, setError] = useState<string | null>(null);
   const [declineOpen, setDeclineOpen] = useState(false);
   const [declineError, setDeclineError] = useState<string | null>(null);
+  const [declined, setDeclined] = useState<GiftDTO | null>(null);
   const thankRef = useRef<HTMLButtonElement>(null);
   const thankedRef = useRef<HTMLParagraphElement>(null);
   const [thankedHere, setThankedHere] = useState(false);
   const from = firstName(gift.fromName);
+  const title = giftInviteTitle(gift, refItems);
 
   // "Kabul et" leaves the DOM on success: hand focus to what replaced it.
   useEffect(() => {
@@ -56,8 +68,27 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
     if (thankedHere) thankedRef.current?.focus({ preventScroll: true });
   }, [thankedHere]);
 
+  // Declined: tell the page once the sheet is down (or after a second, should it never say so,
+  // or as the fiş leaves, should a reload take it away first). Exactly once.
+  const reported = useRef(false);
+  const reportDeclined = useCallback(() => {
+    if (!declined || reported.current) return;
+    reported.current = true;
+    onDeclined(declined);
+  }, [declined, onDeclined]);
+  useEffect(() => {
+    if (!declined) return;
+    const t = setTimeout(reportDeclined, 1000);
+    return () => clearTimeout(t);
+  }, [declined, reportDeclined]);
+  const reportOnLeave = useRef(reportDeclined);
+  useEffect(() => {
+    reportOnLeave.current = reportDeclined;
+  }, [reportDeclined]);
+  useEffect(() => () => reportOnLeave.current(), []);
+
   const accept = async () => {
-    if (busy) return;
+    if (busy || declined) return;
     setBusy("accept");
     setError(null);
     try {
@@ -93,8 +124,8 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
     setDeclineError(null);
     try {
       const done = await peni.gifts.decline(gift.id);
+      setDeclined(done);
       setDeclineOpen(false);
-      onDeclined(done);
     } catch (e) {
       setDeclineError(messageOf(e));
     } finally {
@@ -103,8 +134,8 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
   };
 
   return (
-    <>
-      <Fis variant="gift" as="article" legend={giftLegend(gift.cafeName)}>
+    <article aria-labelledby={titleId}>
+      <Fis variant="gift" legend={giftLegend(gift.cafeName)}>
         <div className="mt-4 flex items-start gap-4">
           <Coin
             key={flips}
@@ -114,21 +145,20 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
             animate={flips > 0 ? "flip" : null}
           />
           <div aria-live="polite" className="flex min-w-0 flex-1 flex-col gap-2 pt-1">
+            <h3 id={titleId} tabIndex={-1} data-gift-title="" className={`font-display text-h3 text-ink ${focusTargetClass}`}>
+              {accepted ? "Afiyet olsun!" : title}
+            </h3>
             {accepted ? (
-              <>
-                <h3 className="font-display text-h3 text-ink">Afiyet olsun!</h3>
-                <p className="text-body-lg text-ink">
-                  <span className="font-semibold text-peni-ink tabular-nums">{formatPeni(gift.peni)}</span> cüzdanında.
-                </p>
-              </>
+              <p className="text-body-lg text-ink">
+                <span className="font-semibold text-peni-ink tabular-nums">{formatPeni(gift.peni)}</span> cüzdanında.
+              </p>
             ) : (
               <>
-                <h3 className="font-display text-h3 text-ink">{giftInviteTitle(gift, refItems)}</h3>
                 {gift.message && (
                   <p className="font-display text-[17px] leading-6 font-medium text-ink italic">
-                    {"\u201C"}
+                    {"“"}
                     {gift.message}
-                    {"\u201D"}
+                    {"”"}
                   </p>
                 )}
                 <p className="text-meta text-ink-2">{giftDeadline(gift.expiresAt)}</p>
@@ -139,23 +169,52 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
 
         {error && <Banner tone="danger" title={error} className="mt-4" />}
 
+        {/* Each branch is keyed: "Teşekkür et" mounts fresh instead of fading in from the ink
+            "Kabul et" fill it would otherwise reuse. */}
         <div className="mt-5 flex flex-wrap items-center gap-2">
           {!accepted ? (
-            <>
-              <Button variant="primary" loading={busy === "accept"} loadingLabel="Kabul ediliyor…" onClick={() => void accept()}>
+            <Fragment key="answer">
+              <Button
+                variant="primary"
+                loading={busy === "accept"}
+                loadingLabel="Kabul ediliyor…"
+                aria-label={`Kabul et: ${title}`}
+                onClick={() => void accept()}
+              >
                 Kabul et
               </Button>
-              <Button variant="quiet" disabled={busy === "accept"} onClick={() => setDeclineOpen(true)}>
+              <Button
+                variant="quiet"
+                aria-label={`Geri çevir: ${title}`}
+                // Ignored while "Kabul et" is in flight or the decline is done (no grey flash).
+                onClick={() => {
+                  if (!busy && !declined) setDeclineOpen(true);
+                }}
+              >
                 Geri çevir
               </Button>
-            </>
+            </Fragment>
           ) : thanked ? (
-            <p ref={thankedRef} tabIndex={-1} className="flex min-h-12 items-center gap-2 text-body text-success-ink outline-none" role="status">
+            <p
+              key="thanked"
+              ref={thankedRef}
+              tabIndex={-1}
+              className="flex min-h-12 items-center gap-2 rounded-[4px] text-body text-success-ink"
+              role="status"
+            >
               <Check aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0" />
               {`Teşekkürün ${dativeName(from)} iletildi.`}
             </p>
           ) : (
-            <Button ref={thankRef} variant="secondary" iconStart={Heart} loading={busy === "thank"} onClick={() => void thank()}>
+            <Button
+              key="thank"
+              ref={thankRef}
+              variant="secondary"
+              iconStart={Heart}
+              loading={busy === "thank"}
+              aria-label={`${dativeName(from)} teşekkür et`}
+              onClick={() => void thank()}
+            >
               Teşekkür et
             </Button>
           )}
@@ -169,6 +228,11 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
           setDeclineOpen(next);
           if (!next) setDeclineError(null);
         }}
+        onOpenChangeComplete={(isOpen) => {
+          if (!isOpen) reportDeclined();
+        }}
+        // Declined: "Geri çevir" is about to leave with its fiş, so the page places focus.
+        finalFocus={declined ? false : undefined}
         title="Geri çevirelim mi?"
         description={`Peni ${dativeName(from)} döner.`}
         footer={
@@ -195,7 +259,7 @@ export function GiftInvite({ gift, cafe, refItems, accepted: acceptedProp = fals
           {declineError && <Banner tone="danger" title={declineError} />}
         </div>
       </Sheet>
-    </>
+    </article>
   );
 }
 

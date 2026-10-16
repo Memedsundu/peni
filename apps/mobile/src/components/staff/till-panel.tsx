@@ -13,12 +13,12 @@
  *
  * Dignity (§17): nothing here names or counts anyone who takes.
  */
-import { newIdempotencyKey, type AskidaDTO, type MenuItemDTO } from "@peni/api";
+import { newIdempotencyKey, type AskidaDTO } from "@peni/api";
 import { askiCopy, errorCopy } from "@peni/brand/copy";
 import { formatPeni, SEP } from "@peni/brand/format";
 import { askiItemFor } from "@peni/brand/shapes";
 import { CircleAlert } from "lucide-react-native";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { AskiCaption, AskiRail, HookGlyph, type HangSignal } from "@/components/brand";
 import { Banner, Button, Card, Icon, Skeleton, Stepper, T, toast, withAlpha } from "@/components/ui";
@@ -26,40 +26,38 @@ import { haptic } from "@/lib/haptics";
 import { useSession } from "@/lib/session";
 import { space, useTokens } from "@/lib/theme";
 import { applyTillDonation, messageOf } from "./board-store";
+import { loadCafeDetail, useCafeDetail } from "./cafe-detail";
 import { itemsFor, tillItems, tillSelection, tillSubmitLabel, tillToastText } from "./model";
 
 const TILL_HINT = "Kasada askı için ödeme alınca buradan ekle.";
 const PICK_FIRST = "Önce adet seç.";
 const ADDING = "Ekleniyor…";
 const NO_ITEMS = "Menüde askıya konabilen ürün yok.";
+const MENU_ERROR = "Menü yüklenemedi.";
 
 export function TillPanel({ slug, askida }: { slug: string; askida: AskidaDTO }) {
   const t = useTokens();
   const { api } = useSession();
-  const [menu, setMenu] = useState<MenuItemDTO[] | null>(null);
-  const [menuError, setMenuError] = useState<string | null>(null);
-  const [retrying, setRetrying] = useState(false);
+  // The menu comes from the café's page, loaded once with the board (`cafe-detail`).
+  const { detail, error: menuError, loading: menuLoading } = useCafeDetail(slug);
+  const menu = detail?.menu ?? null;
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hang, setHang] = useState<HangSignal>({ n: 0 });
   const idemKey = useRef<string | null>(null);
 
-  const loadMenu = useCallback(async () => {
-    setMenuError(null);
-    try {
-      const cafe = await api.cafes.get(slug);
-      setMenu(cafe.menu);
-    } catch (e) {
-      setMenuError(messageOf(e));
-    }
-  }, [api, slug]);
-
+  // Another café: start from zero.
   useEffect(() => {
-    setMenu(null);
     setCounts({});
-    void loadMenu();
-  }, [loadMenu]);
+    setError(null);
+    idemKey.current = null;
+  }, [slug]);
+
+  // Opened before the poller asked (or after a failure): ask now.
+  useEffect(() => {
+    if (!detail && !menuLoading && !menuError) void loadCafeDetail(api, slug);
+  }, [api, detail, menuError, menuLoading, slug]);
 
   const items = useMemo(() => (menu ? tillItems(menu) : []), [menu]);
   const selection = tillSelection(items, counts);
@@ -111,26 +109,24 @@ export function TillPanel({ slug, askida }: { slug: string; askida: AskidaDTO })
       <Card padding="none" accessibilityState={menu == null && !menuError ? { busy: true } : undefined}>
         <TillHead />
 
-        {menuError ? (
+        {menu == null && menuError ? (
           <View style={styles.pad}>
             <Banner
               tone="danger"
-              title={menuError}
+              title={MENU_ERROR}
               action={
                 <Button
                   title={errorCopy.retry}
                   variant="secondary"
                   size="sm"
-                  loading={retrying}
+                  loading={menuLoading}
                   loadingLabel={errorCopy.retry}
-                  onPress={async () => {
-                    setRetrying(true);
-                    await loadMenu();
-                    setRetrying(false);
-                  }}
+                  onPress={() => void loadCafeDetail(api, slug, { force: true })}
                 />
               }
-            />
+            >
+              {menuError}
+            </Banner>
           </View>
         ) : (
           <>

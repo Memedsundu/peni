@@ -2,7 +2,7 @@
 
 import { formatPeni, formatTime, SEP } from "@peni/brand/format";
 import { Check, Clock, Undo2 } from "lucide-react";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Button, Chip, RowGroup, Row, Skeleton } from "@/components/ui";
 import { groupByDay, sentence, type HistoryChip, type HistoryItem, type Piece } from "./wallet-model";
 
@@ -14,6 +14,10 @@ import { groupByDay, sentence, type HistoryChip, type HistoryItem, type Piece } 
  * sent has a quiet "Geri al". Order lines open their fiş.
  *
  * The first PAGE lines show; "Daha eskileri göster" adds more. Askı claims never appear.
+ *
+ * Focus never falls to the page: after "Geri al" it lands on the same line's sentence (now
+ * "geri aldın"), and when "Daha eskileri göster" leaves, on the first line it revealed. Days
+ * are headed groups, not landmarks (a landmark per day would crowd landmark navigation).
  */
 
 const PAGE = 12;
@@ -25,13 +29,27 @@ export interface HistoryListProps {
   items: readonly HistoryItem[];
   /** More than one café: say which one on each line. */
   showCafe: boolean;
-  /** "Geri al" on a pending gift. Resolves when the wallet has reloaded. */
-  onCancelGift: (giftId: string) => Promise<void>;
+  /** "Geri al" on a pending gift. Resolves to true once it is taken back and the wallet has reloaded. */
+  onCancelGift: (giftId: string) => Promise<boolean>;
+}
+
+/** The DOM id of a line's sentence: the focus target after "Geri al" and "Daha eskileri göster". */
+function lineDomId(id: string): string {
+  return `hareket-${id.replace(/[^\w-]/g, "-")}`;
 }
 
 export function HistoryList({ items, showCafe, onCancelGift }: HistoryListProps) {
   const [shown, setShown] = useState(PAGE);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [focusLine, setFocusLine] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusLine) return;
+    setFocusLine(null);
+    const el = document.getElementById(lineDomId(focusLine));
+    // A line that opens its order is a link: focus the link, not the words inside it.
+    (el?.closest<HTMLElement>("a") ?? el)?.focus();
+  }, [focusLine]);
 
   if (items.length === 0) {
     return (
@@ -44,20 +62,28 @@ export function HistoryList({ items, showCafe, onCancelGift }: HistoryListProps)
   const days = groupByDay(items.slice(0, shown));
   const rest = items.length - shown;
 
-  const cancel = async (giftId: string) => {
+  const cancel = async (giftId: string, lineId: string) => {
     if (cancelling) return;
     setCancelling(giftId);
     try {
-      await onCancelGift(giftId);
+      // "Geri al" leaves with the pending state: the line's sentence takes the focus.
+      if (await onCancelGift(giftId)) setFocusLine(lineId);
     } finally {
       setCancelling(null);
     }
   };
 
+  const showMore = () => {
+    const firstNew = items[shown]?.id;
+    setShown((n) => n + MORE);
+    // The button leaves when everything is shown: focus the first line it revealed.
+    if (firstNew && items.length <= shown + MORE) setFocusLine(firstNew);
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {days.map((day) => (
-        <section key={day.label + day.items[0]!.id} aria-label={day.label}>
+        <div key={day.label + day.items[0]!.id}>
           <h3 className="mb-2 text-meta font-semibold text-ink-2">{day.label}</h3>
           <RowGroup>
             {day.items.map((item) => (
@@ -66,15 +92,14 @@ export function HistoryList({ items, showCafe, onCancelGift }: HistoryListProps)
                 item={item}
                 showCafe={showCafe}
                 cancelling={cancelling === item.cancelGiftId && item.cancelGiftId != null}
-                cancelDisabled={cancelling != null}
                 onCancel={cancel}
               />
             ))}
           </RowGroup>
-        </section>
+        </div>
       ))}
       {rest > 0 && (
-        <Button variant="secondary" className="self-start" onClick={() => setShown((n) => n + MORE)}>
+        <Button variant="secondary" className="self-start" onClick={showMore}>
           Daha eskileri göster
         </Button>
       )}
@@ -86,14 +111,13 @@ function HistoryRow({
   item,
   showCafe,
   cancelling,
-  cancelDisabled,
   onCancel,
 }: {
   item: HistoryItem;
   showCafe: boolean;
   cancelling: boolean;
-  cancelDisabled: boolean;
-  onCancel: (giftId: string) => void;
+  /** One at a time: a second "Geri al" while one is in flight is ignored (no grey flash). */
+  onCancel: (giftId: string, lineId: string) => void;
 }) {
   const meta = [formatTime(item.at), showCafe ? item.cafeName : null].filter(Boolean).join(SEP);
   const body = (
@@ -103,7 +127,8 @@ function HistoryRow({
       {item.note && <span className="basis-full text-meta text-ink-2">{item.note}</span>}
     </span>
   );
-  const title = <Sentence pieces={item.pieces} />;
+  // Lines that open their order are links already; any other line's words take focus themselves.
+  const title = <Sentence id={lineDomId(item.id)} focusable={item.orderId == null} pieces={item.pieces} />;
 
   if (item.cancelGiftId) {
     return (
@@ -116,9 +141,8 @@ function HistoryRow({
             className="-mr-2"
             loading={cancelling}
             loadingLabel="Geri alınıyor…"
-            disabled={cancelDisabled && !cancelling}
             aria-label={`${sentence(item.pieces)}: geri al`}
-            onClick={() => onCancel(item.cancelGiftId!)}
+            onClick={() => onCancel(item.cancelGiftId!, item.id)}
           >
             Geri al
           </Button>
@@ -139,9 +163,13 @@ function HistoryRow({
 }
 
 /** The sentence, with every peni amount in `peni-ink` (never broken inside "30 peni"). */
-function Sentence({ pieces }: { pieces: readonly Piece[] }) {
+function Sentence({ id, focusable, pieces }: { id: string; focusable: boolean; pieces: readonly Piece[] }) {
   return (
-    <span className="text-body text-ink">
+    <span
+      id={id}
+      tabIndex={focusable ? -1 : undefined}
+      className="rounded-[4px] text-body text-ink scroll-mt-[calc(var(--header-h)+1rem)]"
+    >
       {pieces.map((p, i) =>
         typeof p === "string" ? (
           <Fragment key={i}>{p}</Fragment>

@@ -7,21 +7,25 @@
  * - The body, the long table and its seats line ("6/14 yer dolu · sen de geliyorsun").
  * - "Geliyorum" (primary) takes a seat at once (A14 and its `tap` haptic play inside
  *   `LongTable`); then "Geliyorsun" (secondary, `Check`) gives it back with no confirm.
- *   "Takvime ekle" opens the café's .ics with `Linking` [G22]; "Paylaş" is the system share
- *   sheet (`Share.share`).
+ *   "Takvime ekle" opens the café's .ics with `Linking` [G22]; "Paylaş", a quiet `Share2`
+ *   IconButton (§9.3), is the system share sheet (`Share.share`). On the web preview without
+ *   `navigator.share` it copies the link instead: "Bağlantı kopyalandı." (as on web).
  * - Full: "Geliyorum" is disabled with the reason "Masa doldu". Past: a "GEÇTİ" tag, no actions.
  */
 import type { PostDTO } from "@peni/api";
 import { errorCopy, masaCopy } from "@peni/brand/copy";
 import { dateBlock, formatNumber, formatTime, SEP } from "@peni/brand/format";
 import { CalendarPlus, Check, Share2 } from "lucide-react-native";
-import { Linking, Share, View } from "react-native";
+import { Linking, Platform, Share, View } from "react-native";
 import { DateBlock, LongTable } from "@/components/brand";
 import { Button, Card, Chip, IconButton, T, toast } from "@/components/ui";
 import { API_URL, useSession } from "@/lib/session";
 import { cafeSheets, useCafe } from "./cafe-context";
 import { eventBody, eventIsFull, eventIsPast, eventTopic, toggledRsvp } from "./masa-model";
 import { usePostToggle } from "./masa-shared";
+
+/** What the share fallback needs from the browser (react-native-web only). */
+type WebNavigator = { share?: unknown; clipboard?: { writeText: (text: string) => Promise<void> } };
 
 /** The café's web page, scrolled to this card: what "Paylaş" hands out. */
 export function postUrl(slug: string, postId: string): string {
@@ -47,9 +51,24 @@ export function EventInvite({ post }: { post: PostDTO }) {
 
   const share = async () => {
     const url = postUrl(slug, post.id);
+    const message = `${topic}\n${cafe.name}${SEP}Peni masası${SEP}${when}\n${url}`;
+    // react-native-web's Share needs `navigator.share`; without it, copy the link (web §9.3).
+    const nav = Platform.OS === "web" ? (globalThis as { navigator?: WebNavigator }).navigator : undefined;
+    if (Platform.OS === "web" && !nav?.share) {
+      try {
+        if (!nav?.clipboard) throw new Error("no clipboard");
+        await nav.clipboard.writeText(url);
+        toast(masaCopy.linkCopied);
+      } catch {
+        toast(errorCopy.generic, { tone: "danger" });
+      }
+      return;
+    }
     try {
-      await Share.share({ message: `${topic}\n${cafe.name}${SEP}Peni masası${SEP}${when}\n${url}`, url, title: topic });
-    } catch {
+      await Share.share({ message, url, title: topic });
+    } catch (e) {
+      // Closing the share sheet is not an error.
+      if ((e as { name?: string } | null)?.name === "AbortError") return;
       toast(errorCopy.generic, { tone: "danger" });
     }
   };
@@ -99,7 +118,10 @@ export function EventInvite({ post }: { post: PostDTO }) {
       <View style={{ marginTop: 18 }}>
         {capacity != null && capacity > 0 ? (
           <>
-            <LongTable capacity={capacity} seats={post.attendees} count={shown.rsvpCount} rsvpedByMe={shown.rsvpedByMe} caption={false} />
+            {/* The table sits centred in the card; its line stays left with the text. */}
+            <View style={{ alignItems: "center" }}>
+              <LongTable capacity={capacity} seats={post.attendees} count={shown.rsvpCount} rsvpedByMe={shown.rsvpedByMe} caption={false} />
+            </View>
             {!blockedByFull && !past ? (
               <T variant="meta" tabular style={{ marginTop: 8 }}>
                 {masaCopy.seats(shown.rsvpCount, capacity, shown.rsvpedByMe)}
@@ -149,7 +171,7 @@ export function EventInvite({ post }: { post: PostDTO }) {
               onPress={() => void calendar()}
               style={{ flex: 1 }}
             />
-            <IconButton variant="secondary" size={48} icon={Share2} label={masaCopy.share} onPress={() => void share()} />
+            <IconButton variant="quiet" size={48} icon={Share2} label={masaCopy.share} onPress={() => void share()} />
           </View>
         </View>
       ) : null}

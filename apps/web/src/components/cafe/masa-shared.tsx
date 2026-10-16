@@ -3,8 +3,11 @@
 import { Popover } from "@base-ui/react/popover";
 import { PeniApiError } from "@peni/api";
 import { actionCopy, errorCopy } from "@peni/brand/copy";
+import { useRouter } from "next/navigation";
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useRef,
@@ -13,19 +16,39 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { signInHref } from "@/components/auth/return-to";
 import { Button, cx, Field, focusRing, Textarea, toast } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { useCafe } from "./cafe-context";
-import { COMMENT_MAX, masaMoreCopy, withOverlay, type Overlay } from "./masa-model";
+import {
+  COMMENT_MAX,
+  intentChangesTable,
+  MASA_INTENT_PARAM,
+  masaMoreCopy,
+  masaReturnTo,
+  noteVouches,
+  parseMasaIntent,
+  sameFields,
+  withOverlay,
+  type IntentNote,
+  type MasaIntent,
+  type Overlay,
+} from "./masa-model";
 
 /*
  * Pieces the three Masa cards share: the act() wrapper (optimistic state, rollback, toast), the
- * in-place reveal, the answer / comment form and the "join to take part" popover.
+ * way a signed-out action survives /giris, the in-place reveal, the answer / comment form and the
+ * "join to take part" popover.
  */
 
-/** Errors whose fix is to join (or sign in), not to read a message. */
-function needsJoin(e: unknown): boolean {
-  return e instanceof PeniApiError && (e.status === 401 || e.code === "NOT_A_MEMBER" || e.code === "UNAUTHENTICATED");
+/** The session is gone (or never was): the fix is to sign in. */
+function isSignedOutError(e: unknown): boolean {
+  return e instanceof PeniApiError && (e.status === 401 || e.code === "UNAUTHENTICATED");
+}
+
+/** Signed in, but not at this café's table: the fix is to join. */
+function isNotMemberError(e: unknown): boolean {
+  return e instanceof PeniApiError && e.code === "NOT_A_MEMBER";
 }
 
 function messageOf(e: unknown): string {
@@ -33,16 +56,134 @@ function messageOf(e: unknown): string {
   return errorCopy.generic;
 }
 
+/** Keeps a control clear of the sticky header + section bar and of the bottom nav or cart bar when scrolled to. */
+export const clearOfBars =
+  "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)] scroll-mb-[calc(var(--nav-h)+16px)] lg:scroll-mb-6";
+
+/* ------------------------------------------------------------------- through sign-in */
+
+const NOTE_KEY = "peni.masa.intent";
+const DRAFT_KEY = "peni.masa.draft";
+
+/**
+ * Where "Giriş yap ve katıl" goes. The page uses the router; the kit (/kit/masa) provides a
+ * function that logs the address instead, so its states can be reviewed without leaving.
+ */
+export const MasaSignInNavigate = createContext<((href: string) => void) | null>(null);
+
+/**
+ * Signed out: off to /giris with the way back to this card and the action to finish there
+ * (`masaReturnTo`). The tab also keeps a short note of the action, which is what lets a seat or a
+ * heart be replayed on return (`takeMasaIntent`).
+ */
+export function useSignInFor(): (intent: MasaIntent) => void {
+  const { cafe } = useCafe();
+  const router = useRouter();
+  const navigate = useContext(MasaSignInNavigate);
+  return useCallback(
+    (intent: MasaIntent) => {
+      try {
+        const note: IntentNote = { ...intent, slug: cafe.slug, at: Date.now() };
+        window.sessionStorage.setItem(NOTE_KEY, JSON.stringify(note));
+      } catch {
+        // Without the note a seat or a heart isn't replayed; the visitor still lands on the card.
+      }
+      const href = signInHref(masaReturnTo(cafe.slug, intent));
+      if (navigate) navigate(href);
+      else router.push(href);
+    },
+    [cafe.slug, router, navigate],
+  );
+}
+
+/**
+ * A Masa action that needs a member. Signed out: /giris, keeping the action (it is replayed on
+ * return). Signed in but not a member: the join sheet, then `then`. A member: `then` at once.
+ */
+export function useJoinFor(): (intent: MasaIntent, then?: () => void) => void {
+  const { signedIn, requireJoin } = useCafe();
+  const signIn = useSignInFor();
+  return useCallback(
+    (intent: MasaIntent, then?: () => void) => {
+      if (!signedIn) signIn(intent);
+      else requireJoin(then);
+    },
+    [signedIn, requireJoin, signIn],
+  );
+}
+
+/**
+ * The action a visitor brought back from /giris (`?masa=rsvp:post_1`), read once: the marker
+ * leaves the address bar, so a reload or a shared link doesn't replay it. A seat or a heart also
+ * needs this tab's note (`intentChangesTable`).
+ */
+export function takeMasaIntent(slug: string): MasaIntent | null {
+  if (typeof window === "undefined") return null;
+  const here = new URL(window.location.href);
+  const raw = here.searchParams.get(MASA_INTENT_PARAM);
+  if (raw == null) return null;
+  here.searchParams.delete(MASA_INTENT_PARAM);
+  try {
+    // `null`, not `history.state`: Next.js then copies its own entry state over and takes the new
+    // address as its own, so a later router refresh doesn't write the marker back.
+    window.history.replaceState(null, "", here.pathname + here.search + here.hash);
+  } catch {
+    // The marker stays in the address bar; harmless, it has been read (and a seat or a heart
+    // isn't replayed twice: the tab's note went with the first read).
+  }
+  let note: IntentNote | null = null;
+  try {
+    note = JSON.parse(window.sessionStorage.getItem(NOTE_KEY) ?? "null") as IntentNote | null;
+    window.sessionStorage.removeItem(NOTE_KEY);
+  } catch {
+    note = null;
+  }
+  const intent = parseMasaIntent(raw);
+  if (!intent) return null;
+  if (intentChangesTable(intent.kind) && !noteVouches(note, slug, intent, Date.now())) return null;
+  return intent;
+}
+
+/** Keeps an unsent answer or comment while its writer signs in again. */
+function keepDraft(postId: string, text: string) {
+  try {
+    window.sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ postId, text }));
+  } catch {
+    // The text is lost with the page; the field said why it couldn't be sent.
+  }
+}
+
+function takeDraft(postId: string): string | null {
+  try {
+    const raw = window.sessionStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const draft = JSON.parse(raw) as { postId?: unknown; text?: unknown } | null;
+    if (draft?.postId !== postId || typeof draft.text !== "string") return null;
+    window.sessionStorage.removeItem(DRAFT_KEY);
+    return draft.text.slice(0, COMMENT_MAX);
+  } catch {
+    return null;
+  }
+}
+
+/* ------------------------------------------------------------------------ toggles */
+
 /**
  * An optimistic toggle against one post (§9.3: heart, RSVP). `act(next, request)` shows `next`
  * at once and sends the request, one at a time. On success the café is re-read and the server's
  * picture takes over; on failure the old state comes back and `toast.error(message)` says why
- * (§9.3 "Errors from act()"). A missing membership opens the join sheet instead, and `retry`
- * runs after a successful join.
+ * (§9.3 "Errors from act()"). A missing membership opens the join sheet instead (`retry` runs
+ * after a successful join); a lapsed session goes to /giris with `intent`, which is replayed.
  */
-export function usePostToggle<T extends object>(server: T) {
+export function usePostToggle<T extends object>(server: T, intent: MasaIntent) {
   const { refresh, requireJoin } = useCafe();
+  const signIn = useSignInFor();
   const [overlay, setOverlay] = useState<Overlay<T> | null>(null);
+  // Once the server's picture has moved off the one the tap was made against, the overlay has
+  // done its job. Dropped then, it can't mask a later return to those values (an undo made in
+  // another tab), which would make the next tap flip the wrong way. While the server still shows
+  // the old values (a re-read that failed), the overlay stays.
+  if (overlay && !sameFields(overlay.base, server)) setOverlay(null);
   const inFlight = useRef(false);
   const shown = withOverlay(server, overlay);
 
@@ -56,7 +197,8 @@ export function usePostToggle<T extends object>(server: T) {
         await refresh();
       } catch (e) {
         setOverlay(null);
-        if (needsJoin(e)) requireJoin(retry);
+        if (isSignedOutError(e)) signIn(intent);
+        else if (isNotMemberError(e)) requireJoin(retry);
         else {
           toast.error(messageOf(e));
           // "Masa doldu": let the card catch up with the table it couldn't join.
@@ -66,7 +208,7 @@ export function usePostToggle<T extends object>(server: T) {
         inFlight.current = false;
       }
     },
-    [server, refresh, requireJoin],
+    [server, refresh, requireJoin, signIn, intent],
   );
 
   return { shown, act };
@@ -74,10 +216,12 @@ export function usePostToggle<T extends object>(server: T) {
 
 /**
  * Sends an answer or a comment. Not optimistic: the text stays in the field until the server
- * has it, and a failure is said under the field (the text is kept).
+ * has it, and a failure is said under the field (the text is kept). A lapsed session keeps the
+ * text for this tab and goes to /giris; back here, the field opens with it.
  */
-export function useSendComment(postId: string) {
+export function useSendComment(intent: MasaIntent) {
   const { cafe, refresh, requireJoin } = useCafe();
+  const signIn = useSignInFor();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,21 +232,56 @@ export function useSendComment(postId: string) {
       setBusy(true);
       setError(null);
       try {
-        await peni.cafes.comment(cafe.slug, postId, text);
+        await peni.cafes.comment(cafe.slug, intent.postId, text);
         await refresh();
         return true;
       } catch (e) {
-        if (needsJoin(e)) requireJoin();
+        if (isSignedOutError(e)) {
+          keepDraft(intent.postId, body);
+          signIn(intent);
+        } else if (isNotMemberError(e)) requireJoin();
         else setError(messageOf(e));
         return false;
       } finally {
         setBusy(false);
       }
     },
-    [busy, cafe.slug, postId, refresh, requireJoin],
+    [busy, cafe.slug, intent, refresh, requireJoin, signIn],
   );
 
   return { send, busy, error, clearError: () => setError(null) };
+}
+
+/* ------------------------------------------------------------------------- layout */
+
+/**
+ * Brings `el` (with its scroll margins, see `clearOfBars`) into view once nothing holds the page
+ * still: a closing sheet keeps the page's scroll locked until its exit has played (Base UI marks
+ * `<html>` meanwhile), and an opening `Reveal` grows the page for 250ms, so it looks once more
+ * after that. Does nothing when `el` is already in view. Returns a cancel function.
+ */
+export function revealSoon(el: HTMLElement | null): () => void {
+  if (!el) return () => undefined;
+  let frame = 0;
+  let timer = 0;
+  const started = performance.now();
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const go = () => {
+    if (el.isConnected) el.scrollIntoView({ block: "nearest", behavior: reduce ? "instant" : "smooth" });
+  };
+  const whenFree = () => {
+    if (document.documentElement.hasAttribute("data-base-ui-scroll-locked") && performance.now() - started < 1500) {
+      frame = window.requestAnimationFrame(whenFree);
+      return;
+    }
+    go();
+    timer = window.setTimeout(go, 300);
+  };
+  frame = window.requestAnimationFrame(whenFree);
+  return () => {
+    window.cancelAnimationFrame(frame);
+    window.clearTimeout(timer);
+  };
 }
 
 /**
@@ -138,66 +317,99 @@ export function Reveal({ open, id, children, className }: { open: boolean; id?: 
   );
 }
 
+/* --------------------------------------------------------------------------- form */
+
 /**
- * The answer / comment form: a labelled textarea (max 500) and "Gönder". Enter adds a line;
- * Ctrl/⌘+Enter sends. Escape (or "Vazgeç", when `onCancel` is given) closes it.
+ * The answer / comment form: a labelled textarea (max 500) and "Gönder". Enter adds a line
+ * (the keyboard shows its ordinary return key); Ctrl/⌘+Enter sends. Escape (or "Vazgeç", when
+ * `onCancel` is given) closes it. "Gönder" with nothing typed says why under the field
+ * (`emptyText`). `sentText` is read out once the server has the text (the field empties; the
+ * new comment appears above it).
  */
 export function CommentForm({
-  postId,
+  intent,
   label,
   labelHidden = false,
   placeholder,
   autoFocus = false,
+  emptyText,
+  sentText,
   onSent,
   onCancel,
   className,
 }: {
-  postId: string;
+  /** The post, and what to finish here after a fresh sign-in ("cevap" or "yorum"). */
+  intent: MasaIntent;
   label: string;
   /** When the control that opened the form already says `label` right above it. */
   labelHidden?: boolean;
   placeholder?: string;
+  /** Focus the field and bring the whole form, buttons included, into view. */
   autoFocus?: boolean;
+  emptyText: string;
+  sentText?: string;
   onSent?: () => void;
   onCancel?: () => void;
   className?: string;
 }) {
   const [text, setText] = useState("");
-  const { send, busy, error, clearError } = useSendComment(postId);
+  const [empty, setEmpty] = useState(false);
+  const [announce, setAnnounce] = useState("");
+  const { send, busy, error, clearError } = useSendComment(intent);
   const area = useRef<HTMLTextAreaElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+
+  // Back from /giris after a lapsed session: the text that couldn't be sent.
+  useEffect(() => {
+    const draft = takeDraft(intent.postId);
+    if (draft) setText(draft);
+  }, [intent.postId]);
 
   useEffect(() => {
-    if (autoFocus) area.current?.focus({ preventScroll: false });
+    if (!autoFocus) return;
+    area.current?.focus({ preventScroll: true });
+    return revealSoon(form.current);
   }, [autoFocus]);
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
-    // Nothing to send yet: back to the field (the button stays enabled, so it never needs a reason).
     if (!text.trim()) {
+      setEmpty(true);
       area.current?.focus();
       return;
     }
     if (await send(text)) {
       setText("");
+      setEmpty(false);
+      if (sentText) setAnnounce(sentText);
       onSent?.();
     }
   };
 
   return (
-    <form onSubmit={submit} className={cx("flex flex-col gap-3", className)}>
-      <Field label={label} labelHidden={labelHidden} error={error} counter={text.length > COMMENT_MAX - 100 ? { length: text.length, max: COMMENT_MAX } : undefined}>
+    <form ref={form} onSubmit={submit} noValidate className={cx("flex flex-col gap-3", clearOfBars, className)}>
+      <Field
+        label={label}
+        labelHidden={labelHidden}
+        error={error ?? (empty ? emptyText : null)}
+        counter={text.length > COMMENT_MAX - 100 ? { length: text.length, max: COMMENT_MAX } : undefined}
+      >
         <Textarea
           ref={area}
           value={text}
           maxLength={COMMENT_MAX}
           placeholder={placeholder}
-          enterKeyHint="send"
           onChange={(e) => {
             setText(e.target.value);
             if (error) clearError();
+            if (empty) setEmpty(false);
+            if (announce) setAnnounce("");
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void submit();
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              void submit();
+            }
             if (e.key === "Escape" && onCancel) {
               e.preventDefault();
               onCancel();
@@ -215,9 +427,16 @@ export function CommentForm({
           {masaMoreCopy.send}
         </Button>
       </div>
+      {sentText && (
+        <p role="status" className="sr-only">
+          {announce}
+        </p>
+      )}
     </form>
   );
 }
+
+/* ----------------------------------------------------------------------- joining */
 
 /** The join action's label: "Katıl" for members-to-be, "Giriş yap ve katıl" when signed out. */
 export function useJoinLabel(short = "Katıl"): string {
@@ -278,6 +497,8 @@ export function JoinPopover({
   );
 }
 
+/* -------------------------------------------------------------------------- focus */
+
 /**
  * Keeps a keyboard-focused control clear of the sticky header + section bar above and the fixed
  * bottom nav (or cart bar) below (WCAG 2.2 2.4.11). After the browser has scrolled the control
@@ -316,6 +537,8 @@ export function useFocusClearOfBars() {
     });
   }, []);
 }
+
+/* -------------------------------------------------------------------------- files */
 
 /** Hands the browser a file to save, as if a link with `download` had been followed. */
 export function saveFile(filename: string, blob: Blob) {

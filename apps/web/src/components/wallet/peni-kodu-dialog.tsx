@@ -4,7 +4,7 @@ import { PeniApiError, type WalletCafeDTO } from "@peni/api";
 import { actionCopy, errorCopy, peniCopy } from "@peni/brand/copy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Coin } from "@/components/brand";
-import { Banner, Button, Chip, ChipGroup, Sheet, Skeleton } from "@/components/ui";
+import { Banner, Button, Chip, Sheet, Skeleton } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { QrCode } from "./qr-code";
 
@@ -13,6 +13,10 @@ import { QrCode } from "./qr-code";
  * phones (`Sheet fullScreenOnPhone`). Café chips when there is more than one membership, the
  * QR code (240px, light ink on white, quiet zone 4), the code in Brygada 600 40px, tabular,
  * tracked .08em, "Kasada bu kodu göster, peni kazan." and "Kapat".
+ *
+ * On phones the café chips stack, each as wide as the QR code under them: one even column,
+ * every name whole, however many cafés (a centred wrap gave rows of different widths). In the
+ * desktop dialog they sit in one centred row.
  *
  * The memberships come from the wallet. The Cüzdan page primes them (`primePeniKodu`), so the
  * dialog opens there with no wait; anywhere else it shows the last ones it saw while it
@@ -108,13 +112,13 @@ export function PeniKoduDialog({ open, onOpenChange, cafeSlug }: PeniKoduDialogP
     >
       <div className="my-auto flex flex-col items-center gap-5 py-2 text-center">
         {many && cafes && (
-          <ChipGroup label="Kafe" className="justify-center">
+          <div role="group" aria-label="Kafe" className="flex w-60 flex-col gap-2 md:w-auto md:flex-row md:flex-wrap md:justify-center">
             {cafes.map((c) => (
               <Chip key={c.cafeSlug} kind="choice" selected={c.cafeSlug === current?.cafeSlug} onClick={() => choose(c.cafeSlug)}>
                 {c.cafeName}
               </Chip>
             ))}
-          </ChipGroup>
+          </div>
         )}
 
         {current ? (
@@ -126,7 +130,7 @@ export function PeniKoduDialog({ open, onOpenChange, cafeSlug }: PeniKoduDialogP
               </p>
             )}
             <div className="overflow-hidden rounded-[14px] ring-1 ring-line">
-              <QrCode value={current.memberCode} size={240} className="block" />
+              <QrCode value={current.memberCode} size={240} />
             </div>
             <div className="flex flex-col items-center gap-2" aria-live="polite">
               <p className="font-display text-[40px] leading-none font-semibold tracking-[.08em] text-ink tabular-nums lining-nums">

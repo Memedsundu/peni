@@ -19,7 +19,7 @@ import { useSyncExternalStore } from "react";
 import { dismissToast, toast, UNDO_DURATION } from "@/components/ui/toast";
 import { haptic } from "@/lib/haptics";
 import { setNewOrderCount } from "@/lib/staff-badge";
-import { rememberCafeName } from "@/lib/staff-prefs";
+import { rememberCafe } from "@/lib/staff-prefs";
 import { applyOverride, boardColumns, bumpToastText, statusAfter, type BumpAction, type Override } from "./model";
 
 export interface BoardSnapshot {
@@ -136,7 +136,7 @@ export async function loadBoard(api: PeniClient, slug: string): Promise<void> {
     const data = await api.staff.dashboard(slug);
     if (snap.slug !== slug || generation !== started || id !== requestSeq) return;
     const arrivals = noteArrivals(data);
-    rememberCafeName(slug, data.cafe.name);
+    rememberCafe(slug, { name: data.cafe.name });
     set({ data, error: null, loading: false, unauthorized: false, arrivals: arrivals.map });
     if (arrivals.count > 0) newOrderListeners.forEach((l) => l(arrivals.count));
   } catch (e) {

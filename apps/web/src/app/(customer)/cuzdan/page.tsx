@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { parseSeen, SEEN_COOKIE } from "@/components/wallet/seen-balance";
 import { WalletPage, type WalletInitial } from "@/components/wallet/wallet-page";
 import { SESSION_COOKIE } from "@/server/http";
 import { getApp } from "@/server/runtime";
@@ -22,13 +23,15 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
 
 async function readWallet(): Promise<WalletInitial> {
   // Outside the try: cookies() signals dynamic rendering by throwing during prerender.
-  const token = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
+  const jar = await cookies();
+  const token = jar.get(SESSION_COOKIE)?.value ?? null;
   try {
     const app = await getApp();
     const customer = app.customerForToken(token);
     if (!customer) return { kind: "signed_out" };
     const [wallet, cafes] = await Promise.all([app.wallet(customer), app.listCafes(customer)]);
-    return { kind: "ok", wallet, cafes };
+    // The balances this device showed last time: the coin cards paint A6's first frame from them.
+    return { kind: "ok", wallet, cafes, seen: parseSeen(jar.get(SEEN_COOKIE)?.value) };
   } catch {
     return { kind: "client" };
   }

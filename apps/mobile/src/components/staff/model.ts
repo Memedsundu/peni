@@ -176,8 +176,22 @@ export const COUNTDOWN_MAX_MIN = 90;
 export function pausedBannerText(pausedUntil: string | null | undefined, now: number): string {
   const left = minutesLeft(pausedUntil, now);
   if (left == null) return staffCopy.pausedBanner(null);
-  if (left <= COUNTDOWN_MAX_MIN) return staffCopy.pausedBanner(left);
-  return `${staffCopy.pausedBanner(null)}${SEP}${locativeTime(new Date(pausedUntil!))} açılır`;
+  if (left <= COUNTDOWN_MAX_MIN) return keepTailTogether(staffCopy.pausedBanner(left));
+  return keepTailTogether(`${staffCopy.pausedBanner(null)}${SEP}${locativeTime(new Date(pausedUntil!))} açılır`);
+}
+
+const NBSP = " ";
+
+/**
+ * On a narrow phone the line breaks before the countdown, never inside it: "…durdu ·" /
+ * "12 dk kaldı", not "…durdu · 12 dk" / "kaldı". The "·" stays with the words before it.
+ */
+function keepTailTogether(text: string): string {
+  const at = text.lastIndexOf(SEP);
+  if (at < 0) return text;
+  const head = text.slice(0, at);
+  const tail = text.slice(at + SEP.length);
+  return `${head}${NBSP}· ${tail.replace(/ /g, NBSP)}`;
 }
 
 /* ------------------------------------------------------------------------------------------ */

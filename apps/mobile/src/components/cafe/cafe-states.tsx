@@ -1,11 +1,11 @@
 /**
  * The café screen before it has a café (design-system.md §9.3 "Page states", §10.2):
  *
- * - Loading: the cover (already right: the colourway and device come from the slug alone, so
- *   the zoom lands on the real plate), skeletons for the masthead lines, the segmented bar and
- *   4 menu rows. Static, no shimmer.
+ * - Loading: the screen draws the hero (in the colourway the link passed with `?hue=`, else a
+ *   plain `surface2` plate, never a guessed colourway [G9]); below it, skeletons for the
+ *   masthead lines, the segmented bar and 4 menu rows. Static, no shimmer.
  * - Not found: "Bu kafe masada yok." + "Kafelere dön".
- * - Network error on the first load: a danger banner + "Tekrar dene".
+ * - Network error on the first load: a danger banner ("Bağlantı kurulamadı.") + "Tekrar dene".
  */
 import { errorCopy } from "@peni/brand/copy";
 import { router } from "expo-router";
@@ -81,7 +81,8 @@ export function CafeLoadError({ message, retrying, onRetry }: { message: string;
     <View style={{ paddingHorizontal: space.gutter, paddingTop: 20 }}>
       <Banner
         tone="danger"
-        title={message}
+        // The button says "Tekrar dene"; the sentence doesn't say it too (as on web).
+        title={message.replace(/\s*Tekrar dene\.$/, "") || errorCopy.generic}
         action={<Button size="sm" variant="secondary" title={errorCopy.retry} loading={retrying} loadingLabel={errorCopy.retry} onPress={onRetry} />}
       />
     </View>

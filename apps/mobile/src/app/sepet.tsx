@@ -5,8 +5,9 @@
  *
  * "Siparişi gönder · ₺55" → `orders.create`; on success the `confirm` haptic and
  * `router.replace("/siparis/{id}")`, with NO toast (D15): the fiş says "Kafeye iletildi".
- * On error the message shows inline above the button; the cart and the note are kept. An askı
- * refusal (G3) takes the ikram line out and keeps everything else.
+ * On error the message shows inline above the button; the cart and the note are kept, and a
+ * new idempotency key is drawn (§9.3). An askı refusal (G3) takes the ikram line out with its
+ * unit (`removeIkram`) and keeps everything else, so a quick retry never orders a paid çay.
  */
 import { PeniApiError } from "@peni/api";
 import { cartCopy, errorCopy } from "@peni/brand/copy";
@@ -16,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { View } from "react-native";
 import { orderingBlocked } from "@/components/cafe/aski-model";
 import { loadCafe, messageOf, useCafeEntry } from "@/components/cafe/cafe-store";
-import { CartBody, CartFooter } from "@/components/cafe/cart-content";
+import { CartBody, CartFooter, removeIkram } from "@/components/cafe/cart-content";
 import { InlineError, SheetFrame, StateNote } from "@/components/cafe/sheet";
 import { Skeleton } from "@/components/ui";
 import { refreshActiveOrder } from "@/lib/active-order";
@@ -49,8 +50,12 @@ export default function SepetSheet() {
 
   const [busy, setBusy] = useState(false);
   // The error belongs to the cart it was raised for: once the cart changes, it no longer shows.
-  const [failure, setFailure] = useState<{ message: string; cart: string } | null>(null);
-  const error = failure && failure.cart === cartSig(cart) ? failure.message : null;
+  // A refusal that changes the cart itself (the ikram goes) leaves `cart: null`, and the first
+  // render after it pins the cart as it now is.
+  const [failure, setFailure] = useState<{ message: string; cart: string | null } | null>(null);
+  const sig = cartSig(cart);
+  if (failure && failure.cart === null) setFailure({ ...failure, cart: sig });
+  const error = failure && (failure.cart === null || failure.cart === sig) ? failure.message : null;
 
   // Sent: the cart empties once this sheet has gone, so it never flashes empty on its way out.
   const sent = useRef(false);
@@ -103,19 +108,24 @@ export default function SepetSheet() {
       const code = e instanceof PeniApiError ? e.code : "INTERNAL";
       const message = GENERIC_ERRORS.has(code) || code.startsWith("HTTP_") ? errorCopy.orderSend : messageOf(e);
       if (ASKI_ERRORS.has(code) && cart.ikramProductId) {
-        // The ikram line goes; the message stays with the cart that is left.
-        cart.setIkram(null);
-        setFailure({ message, cart: cartSig({ ...cart, ikramProductId: null }) });
+        // The ikram line goes with its unit (which draws a new key); the message stays with the
+        // cart that is left.
+        removeIkram(cart);
+        setFailure({ message, cart: null });
       } else {
-        setFailure({ message, cart: cartSig(cart) });
+        // Same cart, new key (§9.3).
+        cart.renewKey();
+        setFailure({ message, cart: sig });
       }
       void loadCafe(api, slug);
     }
   };
 
   if (sum.count === 0) {
+    // Empty — possibly because a refused ikram was the only item: then its reason leads.
     return (
       <SheetFrame title={cartCopy.title} mode="scroll">
+        <InlineError message={error} style={{ marginBottom: 20 }} />
         <StateNote icon={Coffee} text={cartCopy.empty} />
       </SheetFrame>
     );

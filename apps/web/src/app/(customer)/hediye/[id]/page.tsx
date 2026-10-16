@@ -1,4 +1,5 @@
 import type { GiftPreviewDTO } from "@peni/api";
+import { isPeniError } from "@peni/core";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
@@ -45,9 +46,9 @@ const readGift = cache(async (id: string): Promise<GiftPreviewDTO | null> => {
   try {
     return await app.giftPreview(id, app.customerForToken(token));
   } catch (error) {
+    // No such gift: the 404 page. Anything else is a real failure for (customer)/error.tsx.
     if (isAppError(error) && (error.status === 404 || error.code === "NOT_FOUND")) return null;
-    // Domain errors (PeniError) carry the code too.
-    if (error instanceof Error && (error as { code?: unknown }).code === "NOT_FOUND") return null;
+    if (isPeniError(error) && error.code === "NOT_FOUND") return null;
     throw error;
   }
 });

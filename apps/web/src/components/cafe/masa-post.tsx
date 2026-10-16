@@ -4,13 +4,13 @@ import type { PostDTO } from "@peni/api";
 import { masaCopy } from "@peni/brand/copy";
 import { formatNumber, relDay } from "@peni/brand/format";
 import { Heart, MessageCircle } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { CafeHueBand, Coin } from "@/components/brand";
-import { cx, focusRing, pressMotion, tappable } from "@/components/ui";
+import { Button, cx, focusRing, pressMotion, tappable } from "@/components/ui";
 import { peni } from "@/lib/client";
 import { useCafe } from "./cafe-context";
-import { masaMoreCopy, newestFirst, postDomId, toggledHeart, whenLabel } from "./masa-model";
-import { CommentForm, JoinPopover, Reveal, useJoinLabel, usePostToggle } from "./masa-shared";
+import { masaMoreCopy, newestFirst, postDomId, toggledHeart, whenLabel, type MasaIntentKind } from "./masa-model";
+import { clearOfBars, CommentForm, JoinPopover, Reveal, revealSoon, useJoinFor, useJoinLabel, usePostToggle } from "./masa-shared";
 
 const cardScroll = "scroll-mt-[calc(var(--header-h)+var(--seg-h)+16px)]";
 
@@ -21,34 +21,73 @@ const footerButton = cx(
   tappable,
   focusRing,
   pressMotion,
+  clearOfBars,
 );
 
 /**
  * Café post (design-system.md §9.3): a raised card with a 3px café-hue left edge.
  *
  * - Head: the 28px café coin, the café name (`text-button`) and `relDay` (`meta`).
- * - The body.
+ * - The body in `text-body`, like every other text in the feed, at most 60ch wide. The padding
+ *   after the edge is 3px shorter, so the text starts on the same line as the other cards'.
  * - Footer: `HeartButton` (optimistic; filled ink when mine; count `tabular-nums`) and "4 yorum",
- *   which opens the comments in place; members get the "Yorum yaz" field there.
+ *   which opens the comments in place. Members get the "Yorum yaz" field there; non-members get
+ *   the answer card's pattern: "Yorum yazmak için kafeye katıl." + "Katıl".
  * - Non-members tapping the heart get a popover: "Kalp bırakmak için kafeye katıl." + "Katıl".
+ * - Signed out, both go to /giris, and the heart or the open field is waiting on return.
  */
-export function CafePost({ post, now }: { post: PostDTO; now: Date }) {
+export function CafePost({
+  post,
+  now,
+  intent = null,
+  onIntentDone,
+}: {
+  post: PostDTO;
+  now: Date;
+  /** An action brought back from /giris for this card: "kalp" or "yorum". */
+  intent?: MasaIntentKind | null;
+  onIntentDone?: () => void;
+}) {
   const { cafe, member } = useCafe();
+  const joinFor = useJoinFor();
+  const joinLabel = useJoinLabel();
   const titleId = useId();
+  const bodyId = useId();
   const commentsId = useId();
   const [open, setOpen] = useState(false);
+  // Set by "Katıl" under the comments (and by a "yorum" brought back from /giris): the field
+  // that appears once the visitor is a member takes focus.
+  const [wantsField, setWantsField] = useState(false);
   const comments = newestFirst(post.comments);
   const count = Math.max(post.commentCount, comments.length);
+
+  const openField = () => {
+    setOpen(true);
+    setWantsField(true);
+  };
+  const toggleComments = () => {
+    setOpen(!open);
+    if (open) setWantsField(false);
+  };
+
+  const replay = useEffectEvent(() => {
+    onIntentDone?.();
+    openField();
+  });
+  useEffect(() => {
+    if (intent === "yorum" && member) replay();
+  }, [intent, member]);
 
   return (
     <article
       id={postDomId(post.id)}
       data-post-id={post.id}
       aria-labelledby={titleId}
+      aria-describedby={bodyId}
       className={cx("flex overflow-hidden rounded-[14px] bg-surface text-ink shadow-raised", cardScroll)}
     >
       <CafeHueBand slug={cafe.slug} hue={cafe.hue} size={3} orientation="vertical" />
-      <div className="min-w-0 flex-1 p-4 md:p-5">
+      <div className="min-w-0 flex-1 py-4 pr-4 pl-[13px] md:py-5 md:pr-5 md:pl-[17px]">
         <header className="flex items-center gap-2.5">
           <Coin size={28} cafe={cafe} />
           <p id={titleId} className="flex min-w-0 flex-wrap items-baseline gap-x-2">
@@ -59,30 +98,20 @@ export function CafePost({ post, now }: { post: PostDTO; now: Date }) {
           </p>
         </header>
 
-        <p className="mt-3 text-body-lg break-words whitespace-pre-line text-ink">{post.body}</p>
+        <p id={bodyId} className="mt-3 max-w-[60ch] text-body break-words whitespace-pre-line text-ink">
+          {post.body}
+        </p>
 
         <div className="-ml-3 mt-2 -mb-2 flex flex-wrap items-center gap-1 md:-mb-3">
-          <HeartButton post={post} />
+          <HeartButton post={post} intent={intent === "kalp" ? "kalp" : null} onIntentDone={onIntentDone} />
           {count > 0 ? (
-            <button
-              type="button"
-              aria-expanded={open}
-              aria-controls={commentsId}
-              onClick={() => setOpen((v) => !v)}
-              className={footerButton}
-            >
+            <button type="button" aria-expanded={open} aria-controls={commentsId} onClick={toggleComments} className={footerButton}>
               <MessageCircle aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0" />
               <span className="tabular-nums">{masaCopy.comments(count)}</span>
             </button>
           ) : (
             member && (
-              <button
-                type="button"
-                aria-expanded={open}
-                aria-controls={commentsId}
-                onClick={() => setOpen((v) => !v)}
-                className={footerButton}
-              >
+              <button type="button" aria-expanded={open} aria-controls={commentsId} onClick={toggleComments} className={footerButton}>
                 <MessageCircle aria-hidden size={20} strokeWidth={1.75} className="size-5 shrink-0" />
                 <span>{masaCopy.commentLabel}</span>
               </button>
@@ -103,20 +132,34 @@ export function CafePost({ post, now }: { post: PostDTO; now: Date }) {
                         {whenLabel(c.createdAt, now)}
                       </time>
                     </p>
-                    <p className="mt-1 text-body break-words whitespace-pre-line text-ink">{c.body}</p>
+                    <p className="mt-1 max-w-[60ch] text-body break-words whitespace-pre-line text-ink">{c.body}</p>
                   </li>
                 ))}
               </ul>
             )}
-            {member && (
+            {member ? (
               <CommentForm
-                postId={post.id}
+                intent={{ kind: "yorum", postId: post.id }}
                 label={masaCopy.commentLabel}
                 // With no comments yet, the "Yorum yaz" toggle right above already names the field.
                 labelHidden={comments.length === 0}
-                autoFocus={open && comments.length === 0}
+                emptyText={masaMoreCopy.emptyComment}
+                sentText={masaMoreCopy.commentSent}
+                autoFocus={wantsField || (open && comments.length === 0)}
                 className={cx(comments.length > 0 ? "border-t border-line pt-4" : "pt-3", "pb-1")}
               />
+            ) : (
+              <div
+                className={cx(
+                  "flex flex-wrap items-center gap-x-4 gap-y-2 pb-1",
+                  comments.length > 0 ? "border-t border-line pt-4" : "pt-3",
+                )}
+              >
+                <p className="text-body text-ink">{masaMoreCopy.commentJoin}</p>
+                <Button variant="secondary" size="sm" onClick={() => joinFor({ kind: "yorum", postId: post.id }, openField)}>
+                  {joinLabel}
+                </Button>
+              </div>
             )}
           </div>
         </Reveal>
@@ -128,12 +171,25 @@ export function CafePost({ post, now }: { post: PostDTO; now: Date }) {
 /**
  * HeartButton (§9.3): 44px, `Heart`, filled ink when mine, the count in `tabular-nums`. The
  * tap shows at once; a failure puts it back and says why in a toast. Non-members get the join
- * popover instead.
+ * popover instead; signed out, its "Giriş yap ve katıl" goes to /giris and the heart is left on
+ * return (`intent="kalp"`).
  */
-export function HeartButton({ post }: { post: PostDTO }) {
-  const { cafe, member, requireJoin } = useCafe();
+export function HeartButton({
+  post,
+  intent = null,
+  onIntentDone,
+}: {
+  post: PostDTO;
+  intent?: "kalp" | null;
+  onIntentDone?: () => void;
+}) {
+  const { cafe, member } = useCafe();
+  const joinFor = useJoinFor();
   const joinLabel = useJoinLabel(masaCopy.heartJoinAction);
-  const { shown, act } = usePostToggle({ reactedByMe: post.reactedByMe, reactionCount: post.reactionCount });
+  const { shown, act } = usePostToggle(
+    { reactedByMe: post.reactedByMe, reactionCount: post.reactionCount },
+    { kind: "kalp", postId: post.id },
+  );
   // Joining swaps the popover trigger for the member's heart: focus follows to the new button.
   const button = useRef<HTMLButtonElement>(null);
   const refocus = useRef(false);
@@ -143,10 +199,18 @@ export function HeartButton({ post }: { post: PostDTO }) {
     button.current?.focus({ preventScroll: true });
   }, [member]);
 
-  const react = () => {
-    const send = () => act(toggledHeart(shown), () => peni.cafes.react(cafe.slug, post.id), send);
-    void send();
-  };
+  const heart = () => act(toggledHeart(shown), () => peni.cafes.react(cafe.slug, post.id), heart);
+
+  // Back from /giris (and the join the page finished): leave the heart, unless it is already there.
+  const replay = useEffectEvent(() => {
+    onIntentDone?.();
+    if (!shown.reactedByMe) void heart();
+    button.current?.focus({ preventScroll: true });
+    revealSoon(button.current);
+  });
+  useEffect(() => {
+    if (intent === "kalp" && member) replay();
+  }, [intent, member]);
 
   const face = (
     <>
@@ -170,7 +234,7 @@ export function HeartButton({ post }: { post: PostDTO }) {
         text={masaCopy.heartJoin}
         action={joinLabel}
         onJoin={() =>
-          requireJoin(() => {
+          joinFor({ kind: "kalp", postId: post.id }, () => {
             refocus.current = true;
             void act(toggledHeart(shown), () => peni.cafes.react(cafe.slug, post.id));
           })
@@ -180,9 +244,8 @@ export function HeartButton({ post }: { post: PostDTO }) {
   }
 
   return (
-    <button ref={button} type="button" aria-pressed={shown.reactedByMe} onClick={react} className={footerButton}>
+    <button ref={button} type="button" aria-pressed={shown.reactedByMe} onClick={() => void heart()} className={footerButton}>
       {face}
     </button>
   );
 }
-
