@@ -102,7 +102,7 @@ const modaFor = (c: ReturnType<typeof ayse> | null) => app.cafeDetail("moda", c)
 describe("café cards and the café page (G1, G2, G9, G12, G14)", () => {
   it("shows members their balance with goods to read it by; others get null", async () => {
     const [moda] = await app.listCafes(ayse());
-    expect(moda).toMatchObject({ slug: "moda", earnRatePercent: 5, hue: null });
+    expect(moda).toMatchObject({ slug: "moda", earnRatePercent: 5, hue: "lacivert" });
     expect(moda!.balancePeni).toBe((await modaFor(ayse())).membership!.balancePeni);
     expect(moda!.refItems).toEqual([
       { name: "Çay", priceKurus: 3_000 },

@@ -65,7 +65,8 @@ export async function seed(app: PeniApp): Promise<void> {
     appOrderingPaused: false,
     pausedUntil: null,
     referenceProductIds: ["cay", "turk"],
-    hue: null,
+    // Moda chose its own colourway (G9); without a choice the hash would give mürekkep.
+    hue: "lacivert",
   });
   app.cafes.set("cafe_kuzguncuk", {
     id: "cafe_kuzguncuk",
