@@ -25,6 +25,12 @@ export interface BannerProps {
   children?: ReactNode;
   /** One small button ("Tekrar dene", "Şimdi aç", "Sesi aç"), e.g. `<Button size="sm" variant="secondary">`. */
   action?: ReactNode;
+  /**
+   * Keeps the action beside the words at any width (they wrap in their own column instead of
+   * pushing it to a line of its own): for stacks of banners over a working surface (the staff
+   * board), where height is the cost.
+   */
+  compact?: boolean;
   className?: string;
 }
 
@@ -33,17 +39,22 @@ export interface BannerProps {
  * status is never colour alone. `role="status"`, or `role="alert"` for danger. The action
  * sits at the right and drops under the text when the line runs out of room.
  */
-export function Banner({ tone, icon, title, children, action, className }: BannerProps) {
+export function Banner({ tone, icon, title, children, action, compact = false, className }: BannerProps) {
   const t = TONE[tone];
   const glyph = tone === "danger" ? CircleAlert : (icon ?? t.fallback);
   return (
     <div
       role={tone === "danger" ? "alert" : "status"}
-      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[10px] p-3 text-ink", t.box, className)}
+      className={cx(
+        "flex items-center gap-x-3 gap-y-2 rounded-[10px] p-3 text-ink",
+        compact ? "flex-nowrap" : "flex-wrap",
+        t.box,
+        className,
+      )}
     >
       {/* Basis `auto`: a short sentence keeps its action on the same line; a long one takes the
           line and the action drops under it, right-aligned. */}
-      <div className="flex min-w-0 flex-auto items-start gap-3">
+      <div className={cx("flex min-w-0 items-start gap-3", compact ? "flex-1" : "flex-auto")}>
         <Icon icon={glyph} size={20} className={cx("mt-px", t.icon)} />
         <div className="min-w-0 flex-1">
           <p className={cx("text-body", children != null && "font-semibold")}>{title}</p>

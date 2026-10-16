@@ -1,7 +1,7 @@
 "use client";
 
 import { newIdempotencyKey, type AskidaDTO, type MenuItemDTO } from "@peni/api";
-import { askiCopy, errorCopy } from "@peni/brand/copy";
+import { askiCopy, errorCopy, staffCopy, withoutRetry } from "@peni/brand/copy";
 import { formatPeni, SEP } from "@peni/brand/format";
 import { askiItemFor } from "@peni/brand/shapes";
 import { CircleAlert } from "lucide-react";
@@ -89,6 +89,15 @@ export function TillPanel({
 
   const item = askiItemFor(askida.referenceItemName);
 
+  // Askı switched off for this café: nothing to hang, nothing to take in at the till.
+  if (!askida.enabled) {
+    return (
+      <div className="max-w-[640px]">
+        <Banner tone="info" icon={HookGlyph} title={staffCopy.tillOff} />
+      </div>
+    );
+  }
+
   return (
     // The rail panel is exactly twelve 28px slots wide (+ padding) from 1024px; the till takes the rest.
     <div className="grid max-w-[640px] items-start gap-6 lg:max-w-[960px] lg:grid-cols-[23.5rem_minmax(0,1fr)] lg:gap-8">
@@ -113,7 +122,7 @@ export function TillPanel({
           <div className="px-4 pb-4 md:px-5 md:pb-5">
             <Banner
               tone="danger"
-              title={menuError}
+              title={withoutRetry(menuError)}
               action={
                 <Button variant="secondary" size="sm" onClick={() => void loadMenu()}>
                   {errorCopy.retry}
@@ -121,6 +130,9 @@ export function TillPanel({
               }
             />
           </div>
+        ) : menu != null && items.length === 0 ? (
+          // A menu with nothing the askı can hold: a sentence, not an empty list and a dead button.
+          <p className="border-t border-line px-4 py-4 text-meta text-ink-2 md:px-5 md:py-5">{staffCopy.tillNoItems}</p>
         ) : (
           <>
             <ul className="divide-y divide-line border-y border-line">

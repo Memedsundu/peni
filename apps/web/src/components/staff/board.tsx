@@ -5,7 +5,7 @@ import { staffCopy } from "@peni/brand/copy";
 import type { CafeHue } from "@peni/brand/tokens";
 import { AnimatePresence, LayoutGroup, useIsPresent, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { useState, type ReactNode, type Ref } from "react";
+import { useRef, useState, type ReactNode, type Ref } from "react";
 import { MD_UP, Segmented, Skeleton, cx, segmentedPanelId, segmentedTabId, useMediaQuery } from "@/components/ui";
 import { tween } from "@/lib/motion";
 import { BOARD_COLUMNS, COLUMN_KEY, type BoardColumn, type BumpAction } from "./model";
@@ -35,6 +35,10 @@ const SEG_ID = "tezgah-kolon";
  *   ticket ignores taps until its own move has finished. (No shared `layoutId` glide between
  *   columns: motion holds the old copy in place for the whole glide, which delays the slide
  *   of the tickets under it.) Under reduced motion (MotionConfig "user") moves are instant.
+ * - From 768px each column's header stays in view (under the sticky section bar) through a
+ *   rush, when every ticket looks alike.
+ * - A bump made from the keyboard keeps the place: focus moves to the next ticket's primary in
+ *   the same column, or to the column itself when it has emptied.
  */
 export function StaffBoard(props: StaffBoardProps) {
   const wide = useMediaQuery(MD_UP);
@@ -47,10 +51,14 @@ export function StaffBoard(props: StaffBoardProps) {
         <div className="grid grid-cols-3 items-start gap-4 lg:gap-6">
           {BOARD_COLUMNS.map((c) => (
             <section key={c} aria-labelledby={`kolon-${c}`} className="min-w-0">
-              <h2 id={`kolon-${c}`} className="mb-4 flex min-h-11 items-end border-b border-line pb-3 legend text-ink">
+              <h2
+                id={`kolon-${c}`}
+                tabIndex={-1}
+                className="sticky top-[calc(var(--header-h)+var(--section-bar-h,0px))] z-10 mb-4 flex min-h-11 items-end border-b border-line pb-3 legend text-ink outline-none [background:var(--grain),var(--bg)]"
+              >
                 {staffCopy.columnHeader(label(c), props.columns[c].length)}
               </h2>
-              <Column column={c} {...props} />
+              <Column column={c} {...props} fallbackId={`kolon-${c}`} />
             </section>
           ))}
         </div>
@@ -71,9 +79,15 @@ export function StaffBoard(props: StaffBoardProps) {
           variant="track"
         />
       </div>
-      <section id={segmentedPanelId(SEG_ID, tab)} role="tabpanel" aria-labelledby={segmentedTabId(SEG_ID, tab)} className="pt-4">
+      <section
+        id={segmentedPanelId(SEG_ID, tab)}
+        role="tabpanel"
+        tabIndex={-1}
+        aria-labelledby={segmentedTabId(SEG_ID, tab)}
+        className="pt-4 outline-none"
+      >
         {/* Keyed by tab: switching tabs swaps the list outright, with no exit animations. */}
-        <Column key={tab} column={tab} {...props} twoUp />
+        <Column key={tab} column={tab} {...props} twoUp fallbackId={segmentedPanelId(SEG_ID, tab)} />
       </section>
     </LayoutGroup>
   );
@@ -83,6 +97,7 @@ function Column({
   column,
   columns,
   twoUp = false,
+  fallbackId,
   slug,
   hue,
   posKind,
@@ -90,8 +105,19 @@ function Column({
   arrivals,
   onBump,
   onReject,
-}: StaffBoardProps & { column: BoardColumn; twoUp?: boolean }) {
+}: StaffBoardProps & { column: BoardColumn; twoUp?: boolean; fallbackId: string }) {
   const orders = columns[column];
+  const list = useRef<HTMLUListElement>(null);
+
+  const bump = (order: OrderDTO, action: BumpAction) => {
+    const active = document.activeElement;
+    const byKeyboard = active instanceof HTMLElement && list.current?.contains(active) && active.matches(":focus-visible");
+    const index = orders.findIndex((o) => o.id === order.id);
+    onBump(order, action);
+    // Once the board has re-rendered without the ticket.
+    if (byKeyboard) requestAnimationFrame(() => requestAnimationFrame(() => focusAfterBump(list.current, index, fallbackId)));
+  };
+
   return (
     <>
       {orders.length === 0 && (
@@ -99,7 +125,7 @@ function Column({
           {staffCopy.columnEmpty[COLUMN_KEY[column]]}
         </p>
       )}
-      <ul className={cx("relative grid gap-4", twoUp && "sm:grid-cols-2", orders.length === 0 && "hidden")}>
+      <ul ref={list} className={cx("relative grid gap-4", twoUp && "sm:grid-cols-2", orders.length === 0 && "hidden")}>
         {/* A ticket that leaves fades out of the flow at once (popLayout) while the ones under it
             slide up; one that arrives (a bump from another column, or a new order) fades in. */}
         <AnimatePresence mode="popLayout" initial={false}>
@@ -112,7 +138,7 @@ function Column({
                 posKind={posKind}
                 now={now}
                 arrivedAt={arrivals.get(order.id)}
-                onBump={(action) => onBump(order, action)}
+                onBump={(action) => bump(order, action)}
                 onReject={() => onReject(order)}
               />
             </BoardItem>
@@ -146,11 +172,20 @@ function BoardItem({ ref, children }: { ref?: Ref<HTMLLIElement>; children: Reac
       onLayoutAnimationComplete={() => setMoving(false)}
       // Taps never land on a moving ticket (A12).
       style={{ pointerEvents: moving || !present ? "none" : undefined }}
+      data-leaving={present ? undefined : ""}
       className="min-w-0"
     >
       {children}
     </m.li>
   );
+}
+
+/** The next ticket's primary (the one that slid into the bumped ticket's place), else the column. */
+function focusAfterBump(list: HTMLUListElement | null, index: number, fallbackId: string) {
+  const items = list ? [...list.children].filter((li) => !li.hasAttribute("data-leaving")) : [];
+  const next = items[Math.min(Math.max(index, 0), items.length - 1)];
+  const target = next?.querySelector<HTMLElement>("[data-primary]") ?? document.getElementById(fallbackId);
+  target?.focus();
 }
 
 /** Loading: skeleton columns with the real geometry (aria-busy sits on the region). */
@@ -160,10 +195,9 @@ export function BoardSkeleton() {
   if (!wide) {
     return (
       <div aria-hidden>
-        <div className="flex h-12 items-center gap-6 shadow-[inset_0_-1px_0_var(--line)]">
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="h-4 w-16" />
+        {/* The column switcher is the `track` Segmented: a 48px rounded well. */}
+        <div className="py-2">
+          <Skeleton radius={10} className="h-12 w-full" />
         </div>
         <div className="grid gap-4 pt-4 sm:grid-cols-2">
           {ticket(1, "h-[264px]")}

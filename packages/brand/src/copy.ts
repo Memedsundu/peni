@@ -361,6 +361,8 @@ export const staffCopy = {
   newOrdersTitle: (n: number) => `(${formatNumber(n)}) Yeni sipariş${SEP}Tezgâh`,
   ordersOpen: "Uygulama siparişleri: Açık",
   ordersPaused: "Uygulama siparişleri: Durdu",
+  /** The pill's qualifier on phones, where "Uygulama siparişleri:" doesn't fit. */
+  ordersShort: "Uygulama:",
   pauseSheet: {
     title: "Uygulama siparişlerini durdur",
     question: "Ne kadar durduralım?",
@@ -379,8 +381,16 @@ export const staffCopy = {
     body: "Yeni sipariş gelince ses çalsın diye bir kez dokun.",
     action: "Vardiyayı başlat",
   },
-  gate: { title: "Kafe paneli", keyLabel: "Personel anahtarı", submit: "Gir" },
+  gate: { title: "Kafe paneli", keyLabel: "Personel anahtarı", submit: "Gir", empty: "Önce anahtarı yaz." },
   logout: "Çıkış",
+  logoutConfirm: {
+    title: "Panelden çıkmak istiyor musun?",
+    body: "Geri girmek için personel anahtarı gerekecek.",
+  },
+  /** Under a failed poll's banner: the board below is the last good one. */
+  staleBoard: "Gördüğün liste güncel olmayabilir.",
+  tillOff: "Askı bu kafede kapalı.",
+  tillNoItems: "Menüde askıya uygun ürün yok.",
   report: {
     title: "Son 30 gün",
     issued: "Dağıtılan peni",
@@ -401,6 +411,16 @@ export const staffCopy = {
 /* ========================================================================================== */
 /* Errors and common actions                                                                  */
 /* ========================================================================================== */
+
+/**
+ * An error for a banner that has its own "Tekrar dene" button: the sentence without its
+ * trailing "Tekrar dene." ("Bağlantı kurulamadı. Tekrar dene." → "Bağlantı kurulamadı."), so the
+ * action is never said twice.
+ */
+export function withoutRetry(message: string): string {
+  const stripped = message.replace(/\s*Tekrar dene\.$/u, "").trim();
+  return stripped || message;
+}
 
 /** Error fallbacks used when the API gives no message of its own. Always shown with `CircleAlert`. */
 export const errorCopy = {

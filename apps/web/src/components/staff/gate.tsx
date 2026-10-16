@@ -22,7 +22,7 @@ export function StaffGate({ notice }: { notice?: string | null }) {
     event.preventDefault();
     const candidate = key.trim();
     if (!candidate) {
-      setError(errorCopy.staffKey);
+      setError(staffCopy.gate.empty);
       return;
     }
     setBusy(true);

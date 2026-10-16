@@ -1,7 +1,7 @@
 "use client";
 
 import type { OrderDTO, PauseDuration } from "@peni/api";
-import { errorCopy, staffCopy } from "@peni/brand/copy";
+import { errorCopy, staffCopy, withoutRetry } from "@peni/brand/copy";
 import { CirclePause, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePress } from "@/components/chrome/press-header";
@@ -33,6 +33,9 @@ const SECTION_SEG = "kafe-bolum";
 export function StaffPanel() {
   const { keyed } = usePress();
   const [notice, setNotice] = useState<string | null>(null);
+  // The "Anahtar tutmadı." notice is for the gate right after a rejected key, not for a later
+  // "Çıkış" once a key has worked again.
+  if (keyed && notice !== null) setNotice(null);
 
   if (keyed === null) return <PanelSkeleton />;
   if (!keyed) return <StaffGate notice={notice} />;
@@ -112,20 +115,21 @@ function Panel({ onKeyRejected }: { onKeyRejected: () => void }) {
   };
 
   // After a reload the card doesn't come back: the first tap anywhere wakes the sound again.
+  // Browsers only let audio start on an activation (pointerup, touchend, click, keydown), never on
+  // pointerdown, so a tablet's first tap needs those.
   const soundOnRef = useRef(soundOn);
   useEffect(() => {
     soundOnRef.current = soundOn;
   }, [soundOn]);
   useEffect(() => {
+    const events = ["pointerup", "touchend", "click", "keydown"] as const;
     const onGesture = () => {
       if (soundOnRef.current && !audioReady()) void unlockAudio();
       void requestWakeLock();
     };
-    window.addEventListener("pointerdown", onGesture, true);
-    window.addEventListener("keydown", onGesture, true);
+    for (const e of events) window.addEventListener(e, onGesture, true);
     return () => {
-      window.removeEventListener("pointerdown", onGesture, true);
-      window.removeEventListener("keydown", onGesture, true);
+      for (const e of events) window.removeEventListener(e, onGesture, true);
     };
   }, []);
 
@@ -224,21 +228,25 @@ function Panel({ onKeyRejected }: { onKeyRejected: () => void }) {
       </h1>
 
       {(showSoundBanner || paused || board.error) && (
-        <div className="flex flex-col gap-3 pt-4">
+        <div className="flex flex-col gap-2 pt-4">
           {board.error && (
             <Banner
               tone="danger"
-              title={board.error}
+              compact
+              title={withoutRetry(board.error)}
               action={
                 <Button variant="secondary" size="sm" onClick={() => void board.refresh()}>
                   {errorCopy.retry}
                 </Button>
               }
-            />
+            >
+              {data ? staffCopy.staleBoard : null}
+            </Banner>
           )}
           {paused && data && (
             <Banner
               tone="warning"
+              compact
               icon={CirclePause}
               title={pausedBannerText(data.cafe.pausedUntil, Math.max(now, Date.now()))}
               action={
@@ -251,6 +259,7 @@ function Panel({ onKeyRejected }: { onKeyRejected: () => void }) {
           {showSoundBanner && (
             <Banner
               tone="warning"
+              compact
               icon={VolumeX}
               title={staffCopy.soundOffBanner}
               action={
@@ -284,8 +293,11 @@ function Panel({ onKeyRejected }: { onKeyRejected: () => void }) {
         role="tabpanel"
         aria-labelledby={segmentedTabId(SECTION_SEG, section)}
         aria-busy={board.loading || undefined}
-        className="pt-4 md:pt-6"
+        // The sticky section bar's height: the board's column headers stick just under it.
+        className="pt-4 md:pt-6 md:[--section-bar-h:3rem]"
       >
+        {/* Until there is a board (loading, or a first load that failed under its banner) the
+            section keeps its shape: the skeleton holds the place of what will come. */}
         {section === "tezgah" &&
           (data ? (
             <StaffBoard
@@ -298,9 +310,9 @@ function Panel({ onKeyRejected }: { onKeyRejected: () => void }) {
               onBump={bumps.bump}
               onReject={setRejecting}
             />
-          ) : board.loading ? (
+          ) : (
             <BoardSkeleton />
-          ) : null)}
+          ))}
         {section === "aski" &&
           (data ? (
             <TillPanel
@@ -319,10 +331,10 @@ function Panel({ onKeyRejected }: { onKeyRejected: () => void }) {
                 }));
               }}
             />
-          ) : board.loading ? (
+          ) : (
             <TillSkeleton />
-          ) : null)}
-        {section === "rapor" && (data ? <ReportList data={data} /> : board.loading ? <ReportSkeleton /> : null)}
+          ))}
+        {section === "rapor" && (data ? <ReportList data={data} /> : <ReportSkeleton />)}
       </div>
 
       <ShiftStart open={shift === "pending" && data != null} onStart={startShift} onDismiss={dismissShift} />

@@ -146,7 +146,7 @@ export function StaffTicket({ order, slug, hue, posKind, now, arrivedAt, onBump,
 
         {primary &&
           (primary.action ? (
-            <Button size="lg" fullWidth onClick={() => onBump(primary.action)} aria-describedby={headingId} className="mt-1">
+            <Button size="lg" fullWidth onClick={() => onBump(primary.action)} aria-describedby={headingId} className="mt-1" data-primary="">
               {primary.label}
             </Button>
           ) : (

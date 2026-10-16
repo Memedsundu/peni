@@ -1,12 +1,12 @@
 "use client";
 
-import { staffCopy } from "@peni/brand/copy";
+import { actionCopy, staffCopy } from "@peni/brand/copy";
 import { formatTime } from "@peni/brand/format";
 import { dark, type CafeHue } from "@peni/brand/tokens";
 import { CirclePause, LogOut, Volume2, VolumeX } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceGlyph } from "@/components/brand";
-import { cx, focusRing, pressMotion, tappable } from "@/components/ui";
+import { Button, cx, focusRing, pressMotion, Sheet, tappable } from "@/components/ui";
 import { unlockAudio, useAudioReady } from "@/components/staff/sound";
 import { clearStaffKey, readStaffKey, STAFF_KEY, writeStaffKey } from "@/lib/client";
 
@@ -186,6 +186,9 @@ const pressButton = cx(
 function PressHeader({ onPausePress }: { onPausePress: () => void }) {
   const { slug, cafeName, hue, keyed, pause, audible, turnSoundOn, setSoundOn, signOut } = usePress();
   const soundLabel = audible ? staffCopy.soundOn : staffCopy.soundOff;
+  // "Çıkış" asks first: one stray tap at a busy counter would otherwise lock the board until
+  // someone with the staff key comes.
+  const [confirmOut, setConfirmOut] = useState(false);
 
   return (
     <header className="sticky top-0 z-30 bg-press text-on-press" style={pressVars}>
@@ -216,12 +219,18 @@ function PressHeader({ onPausePress }: { onPausePress: () => void }) {
                 <VolumeX size={20} strokeWidth={1.75} aria-hidden className="text-on-press-2" />
               )}
             </button>
-            <button type="button" onClick={signOut} className={cx(pressButton, "min-w-11 rounded-[10px] px-2.5 text-button sm:px-3")}>
+            <button
+              type="button"
+              onClick={() => setConfirmOut(true)}
+              aria-haspopup="dialog"
+              className={cx(pressButton, "min-w-11 rounded-[10px] px-2.5 text-button sm:px-3")}
+            >
               <LogOut size={20} strokeWidth={1.75} aria-hidden />
               <span className="sr-only sm:not-sr-only">{staffCopy.logout}</span>
             </button>
           </div>
         )}
+        <LogoutSheet open={confirmOut} onOpenChange={setConfirmOut} onConfirm={signOut} />
       </div>
       <div aria-hidden className="h-0.5 shadow-[0_0_0_1px_var(--plate-ring)]" style={{ background: `var(--hue-${hue})` }} />
     </header>
@@ -230,7 +239,8 @@ function PressHeader({ onPausePress }: { onPausePress: () => void }) {
 
 /**
  * "Uygulama siparişleri: Açık" (success dot) / "Uygulama siparişleri: Durdu" (CirclePause, on a
- * warning plate). Phones show the value only; the label stays for screen readers.
+ * warning plate). Phones shorten the qualifier to "Uygulama: Açık" — a bare "Açık" on a café
+ * screen would read as "the café is open" — and screen readers always hear the whole label.
  */
 function PausePill({ paused, onPress }: { paused: boolean; onPress: () => void }) {
   const [label, value] = splitLabel(paused ? staffCopy.ordersPaused : staffCopy.ordersOpen);
@@ -256,10 +266,41 @@ function PausePill({ paused, onPress }: { paused: boolean; onPress: () => void }
         )}
         <span>
           <span className="sr-only md:not-sr-only">{label} </span>
+          <span aria-hidden className="md:hidden">
+            {staffCopy.ordersShort}{" "}
+          </span>
           {value}
         </span>
       </span>
     </button>
+  );
+}
+
+/** "Panelden çıkmak istiyor musun?": "Çıkış yap" (ink) and "Vazgeç" (quiet). */
+function LogoutSheet({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: () => void }) {
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title={staffCopy.logoutConfirm.title}
+      description={staffCopy.logoutConfirm.body}
+      footer={
+        <div className="flex flex-col gap-2">
+          <Button
+            fullWidth
+            onClick={() => {
+              onOpenChange(false);
+              onConfirm();
+            }}
+          >
+            {actionCopy.signOut}
+          </Button>
+          <Button variant="quiet" fullWidth onClick={() => onOpenChange(false)}>
+            {actionCopy.cancel}
+          </Button>
+        </div>
+      }
+    />
   );
 }
 

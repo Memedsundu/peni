@@ -1,6 +1,6 @@
 /** Shared copy builders reproduce the spec's strings exactly (§6.2, §9, §11). */
 import { describe, expect, it } from "vitest";
-import { askiCaption, askiCopy, cartCopy, elapsedChip, masaCopy, orderCopy, staffCopy, statusWords } from "../src/copy";
+import { askiCaption, askiCopy, cartCopy, elapsedChip, masaCopy, orderCopy, staffCopy, statusWords, withoutRetry } from "../src/copy";
 
 describe("status words (§11)", () => {
   it("match the table", () => {
@@ -94,6 +94,12 @@ describe("masa and staff", () => {
     // A ready cup waits for its customer: never "gecikiyor", never danger.
     expect(elapsedChip(7, "ready")).toEqual({ label: "7 dk", icon: "Clock", tone: "neutral" });
     expect(elapsedChip(27, "ready")).toEqual({ label: "27 dk bekliyor", icon: "Clock", tone: "warning" });
+  });
+
+  it("drops a trailing retry when the banner has its own button", () => {
+    expect(withoutRetry("Bağlantı kurulamadı. Tekrar dene.")).toBe("Bağlantı kurulamadı.");
+    expect(withoutRetry("Bulunamadı.")).toBe("Bulunamadı.");
+    expect(withoutRetry("Tekrar dene.")).toBe("Tekrar dene.");
   });
   it("staff strings", () => {
     expect(staffCopy.payment(5500)).toBe("Kasada ₺55");
