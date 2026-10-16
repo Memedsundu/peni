@@ -35,6 +35,12 @@ export interface PendingOrderRef {
   orderNumber: string;
 }
 
+/**
+ * Who to credit for a walk-in purchase. The till sends either the membership id
+ * or the Peni kodu it scanned or typed ("M7K-42Q"; see `memberCode`).
+ */
+export type MembershipHint = { membershipId: string } | { memberCode: string };
+
 /** Events the POS sends back to Peni. */
 export type PosEvent =
   | {
@@ -45,7 +51,7 @@ export type PosEvent =
        * For walk-in orders not placed in the app: the member whose Peni code the till
        * scanned, so they still earn peni. (Phone digits are not used — they are not unique.)
        */
-      membershipHint: { membershipId: string } | null;
+      membershipHint: MembershipHint | null;
       paidTotalKurus: Kurus;
       paidAt: string;
     }

@@ -64,8 +64,8 @@ export function AskidaCard({
           <p className="mt-1">{joinOr(covers)} için yeter.</p>
         )}
         <p className="mt-2 text-sm text-ink-2">
-          Son 7 günde {askida.claimedLast7Days} kişi askıdan aldı. İhtiyacın varsa menüde <strong>Askıdan al</strong>
-          &apos;ı seç; günde {askida.claimsPerDay} kez alabilirsin ve adın kimseye görünmez.
+          {askida.claimedLast7Days >= 3 && <>Son 7 günde {askida.claimedLast7Days} kişi askıdan aldı. </>}
+          Menüde <strong>Askıdan al</strong>&apos;ı seç; günde {askida.claimsPerDay} kez alabilirsin ve adın kimseye görünmez.
         </p>
       </div>
 

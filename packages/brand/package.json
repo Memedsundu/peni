@@ -1,0 +1,26 @@
+{
+  "name": "@peni/brand",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Peni \"İlan\" design system: colour tokens, signature shapes, Turkish text helpers and shared copy. Rendered by both web and mobile.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens": "./src/tokens.ts",
+    "./shapes": "./src/shapes.ts",
+    "./format": "./src/format.ts",
+    "./copy": "./src/copy.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build-css": "node --experimental-strip-types scripts/build-css.ts",
+    "make-assets": "node --experimental-strip-types scripts/make-assets.ts"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

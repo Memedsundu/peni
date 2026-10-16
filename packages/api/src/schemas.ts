@@ -64,6 +64,30 @@ export const tillDonationSchema = z.object({
 
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(500) });
 
+/** `POST /cafes/:slug/members/lookup` [G6] */
+export const memberLookupSchema = z.object({ phone: phoneSchema });
+
+/** `POST /me/profile` [G18]. Send only what changes. */
+export const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(1).max(40).optional(),
+  profileVisible: z.boolean().optional(),
+});
+
+/** How long to pause app orders: a number of minutes, or until local midnight. [G20] */
+export const pauseDurationSchema = z.union([
+  z.object({ minutes: z.number().int().min(1).max(24 * 60) }),
+  z.literal("end_of_day"),
+]);
+
+/**
+ * `POST /staff/:slug/pause`. Either the original `{ paused: boolean }` (true pauses
+ * with no end), or `{ pause: { minutes } | "end_of_day" | null }` where null resumes.
+ */
+export const pauseSchema = z.union([
+  z.object({ paused: z.boolean() }),
+  z.object({ pause: pauseDurationSchema.nullable() }),
+]);
+
 export type RequestCodeInput = z.input<typeof requestCodeSchema>;
 export type VerifyCodeInput = z.input<typeof verifyCodeSchema>;
 export type CreateOrderInput = z.input<typeof createOrderSchema>;
@@ -71,6 +95,10 @@ export type SendGiftInput = z.input<typeof sendGiftSchema>;
 export type DonateAskidaInput = z.input<typeof donateAskidaSchema>;
 export type StaffTransitionInput = z.input<typeof staffTransitionSchema>;
 export type TillDonationInput = z.input<typeof tillDonationSchema>;
+export type MemberLookupInput = z.input<typeof memberLookupSchema>;
+export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
+export type PauseDuration = z.input<typeof pauseDurationSchema>;
+export type PauseInput = z.input<typeof pauseSchema>;
 
 /** Parsed (server-side) shapes, with defaults applied. */
 export type CreateOrderRequest = z.output<typeof createOrderSchema>;

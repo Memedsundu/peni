@@ -10,6 +10,18 @@ export function startOfLocalMonth(now: Date, timeZone: string): Date {
   return fromLocal(year, month, 1, now, timeZone);
 }
 
+/** UTC instant of the next local midnight after `now` in `timeZone` ("until the end of the day"). */
+export function startOfNextLocalDay(now: Date, timeZone: string): Date {
+  // 36 h past local midnight always lands inside the next local day, DST or not.
+  return startOfLocalDay(addHours(startOfLocalDay(now, timeZone), 36), timeZone);
+}
+
+/** The local calendar date as "YYYY-MM-DD" (for per-day counters and grouping). */
+export function localDateKey(date: Date, timeZone: string): string {
+  const { year, month, day } = localParts(date, timeZone);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export function addHours(date: Date, hours: number): Date {
   return new Date(date.getTime() + hours * 3_600_000);
 }

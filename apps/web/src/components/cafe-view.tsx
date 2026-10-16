@@ -1,9 +1,11 @@
 "use client";
 
 import { newIdempotencyKey, PeniApiError, type CafeDetailDTO, type MenuItemDTO } from "@peni/api";
+import { Check } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useChromeSession } from "@/components/chrome/session";
 import { peni } from "@/lib/client";
 import { formatKurus, formatPeni } from "@/lib/format";
 import { AskidaCard } from "./askida-card";
@@ -14,7 +16,9 @@ type Cart = Record<string, number>;
 export function CafeView({ slug }: { slug: string }) {
   const router = useRouter();
   const [cafe, setCafe] = useState<CafeDetailDTO | null>(null);
-  const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  // The customer layout already knows whether the visitor is signed in; probing
+  // the wallet for a guest only produced a 401 in the console.
+  const signedIn = useChromeSession() !== null;
   const [error, setError] = useState<string | null>(null);
   const [cart, setCart] = useState<Cart>({});
   const [usePeni, setUsePeni] = useState(0);
@@ -27,10 +31,6 @@ export function CafeView({ slug }: { slug: string }) {
   const load = useCallback(async () => {
     try {
       setCafe(await peni.cafes.get(slug));
-      peni.wallet.get().then(
-        () => setSignedIn(true),
-        () => setSignedIn(false),
-      );
     } catch (e) {
       setError((e as Error).message);
     }
@@ -114,7 +114,7 @@ export function CafeView({ slug }: { slug: string }) {
                 <span className="ml-2 text-berry">· Uygulamadan sipariş özelliğin kapalı</span>
               )}
             </p>
-          ) : signedIn === false ? (
+          ) : !signedIn ? (
             <Link href="/giris" className="btn btn-primary">
               Katılmak için giriş yap
             </Link>
@@ -255,7 +255,13 @@ function MenuRow({
       </div>
       {item.askida && canOrder && askidaAvailable && (
         <button className={`btn text-xs ${fromAskida ? "btn-leaf" : "btn-ghost"}`} onClick={onToggleAskida} aria-pressed={fromAskida}>
-          {fromAskida ? "Askıdan ✓" : "Askıdan al"}
+          {fromAskida ? (
+            <>
+              Askıdan <Check aria-hidden size={14} strokeWidth={1.75} className="inline-block" />
+            </>
+          ) : (
+            "Askıdan al"
+          )}
         </button>
       )}
       {canOrder && (

@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { errorResponse } from "@/server/http";
 import { getApp } from "@/server/runtime";
 
-/** Shelby → Peni: order.paid / order.refunded / order.cancelled. Signed with SHELBY_WEBHOOK_SECRET. */
+/** Shelby to Peni: order.paid / order.refunded / order.cancelled. Signed with SHELBY_WEBHOOK_SECRET. */
 export async function POST(req: NextRequest) {
   const secret = process.env.SHELBY_WEBHOOK_SECRET;
   if (!secret) return NextResponse.json({ error: { code: "NOT_CONFIGURED", message: "Webhook secret not set" } }, { status: 503 });

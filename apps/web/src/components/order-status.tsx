@@ -14,14 +14,23 @@ export function OrderStatus({ id }: { id: string }) {
 
   useEffect(() => {
     let alive = true;
+    // Push notifications do this on the phone; the web page polls, and stops
+    // once the order is settled or can't be read (no endless 401/404 loop).
+    const t = setInterval(() => void tick(), 3000);
     const tick = () =>
       peni.orders.get(id).then(
-        (o) => alive && setOrder(o),
-        (e) => alive && setError((e as Error).message),
+        (o) => {
+          if (!alive) return;
+          setOrder(o);
+          if ((["collected", "rejected", "cancelled", "no_show"] as const).some((s) => s === o.status)) clearInterval(t);
+        },
+        (e) => {
+          if (!alive) return;
+          setError((e as Error).message);
+          clearInterval(t);
+        },
       );
     void tick();
-    // Push notifications do this on the phone; the web page polls.
-    const t = setInterval(tick, 3000);
     return () => {
       alive = false;
       clearInterval(t);

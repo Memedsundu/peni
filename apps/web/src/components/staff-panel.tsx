@@ -2,6 +2,7 @@
 
 import { newIdempotencyKey, PeniApiError, type OrderDTO, type StaffDashboardDTO } from "@peni/api";
 import { useCallback, useEffect, useState } from "react";
+import { Approx } from "@/components/brand/glyphs";
 import { peni, readStaffKey, writeStaffKey } from "@/lib/client";
 import { formatKurus, formatPeni, timeAgo } from "@/lib/format";
 
@@ -120,7 +121,13 @@ export function StaffPanel({ slug }: { slug: string }) {
           <h2 className="font-serif text-xl font-semibold">Askı</h2>
           <p>
             Askıda <strong>{formatPeni(data.askida.balancePeni)}</strong> var
-            {data.askida.referenceItemName && ` (≈ ${data.askida.itemsAvailable} ${data.askida.referenceItemName.toLocaleLowerCase("tr")})`}.
+            {data.askida.referenceItemName && (
+              <>
+                {" ("}
+                <Approx /> {data.askida.itemsAvailable} {data.askida.referenceItemName.toLocaleLowerCase("tr")})
+              </>
+            )}
+            .
           </p>
           <p className="text-sm text-ink-2">Kasada biri askı için nakit ödediyse buraya gir; aynı askıya eklenir.</p>
           <div className="flex flex-wrap items-center gap-2">

@@ -67,6 +67,47 @@ const NOTIFY: Partial<Record<FulfillmentAction, NotificationTemplate>> = {
 
 export const TERMINAL_STATUSES: readonly FulfillmentStatus[] = ["collected", "rejected", "cancelled", "no_show"];
 
+export interface PrepTimeStats {
+  sampleSize: number;
+  /** Median accept → ready time, whole minutes (at least 1). */
+  medianMinutes: number;
+  /** Interquartile range, whole minutes: "genelde 5–8 dk". `low <= median <= high`. */
+  lowMinutes: number;
+  highMinutes: number;
+}
+
+/** No ETA is ever shown without this much real history. */
+export const MIN_PREP_SAMPLES = 20;
+
+/**
+ * How long a café really takes, from the barista's "accept" tap to their "ready"
+ * tap, over collected orders. Returns null below `minSamples`: Peni never shows
+ * an ETA that is not backed by the café's own taps.
+ */
+export function prepTimeStats(
+  orders: Pick<FulfillmentState, "status" | "acceptedAt" | "readyAt">[],
+  minSamples = MIN_PREP_SAMPLES,
+): PrepTimeStats | null {
+  const minutes = orders
+    .filter((o) => o.status === "collected" && o.acceptedAt && o.readyAt && o.readyAt > o.acceptedAt)
+    .map((o) => (o.readyAt!.getTime() - o.acceptedAt!.getTime()) / 60_000)
+    .sort((a, b) => a - b);
+  if (minutes.length < Math.max(1, minSamples)) return null;
+
+  const median = Math.max(1, Math.round(quantile(minutes, 0.5)));
+  const low = Math.max(1, Math.min(median, Math.floor(quantile(minutes, 0.25))));
+  const high = Math.max(median, Math.ceil(quantile(minutes, 0.75)));
+  return { sampleSize: minutes.length, medianMinutes: median, lowMinutes: low, highMinutes: high };
+}
+
+/** Linear-interpolated quantile of an ascending, non-empty list. */
+function quantile(sorted: number[], q: number): number {
+  const pos = (sorted.length - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (pos - lo);
+}
+
 export function initialFulfillment(now: Date): FulfillmentState {
   return { status: "submitted", rejectionReason: null, submittedAt: now, acceptedAt: null, readyAt: null, closedAt: null };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import type { PostDTO } from "@peni/api";
+import { Check, Heart } from "lucide-react";
 import { useState } from "react";
 import { peni } from "@/lib/client";
 import { eventTime, timeAgo } from "@/lib/format";
@@ -60,7 +61,7 @@ function PostCard({ slug, post, canInteract, onChange }: { slug: string; post: P
           onClick={() => act(() => peni.cafes.react(slug, post.id))}
           aria-pressed={post.reactedByMe}
         >
-          ♥ {post.reactionCount}
+          <Heart aria-hidden size={16} strokeWidth={1.75} className="inline-block" /> {post.reactionCount}
         </button>
         {post.kind === "event" && (
           <button
@@ -68,7 +69,15 @@ function PostCard({ slug, post, canInteract, onChange }: { slug: string; post: P
             disabled={!canInteract || busy || (full && !post.rsvpedByMe)}
             onClick={() => act(() => peni.cafes.rsvp(slug, post.id))}
           >
-            {post.rsvpedByMe ? "Geliyorum ✓" : full ? "Masa dolu" : "Ben de geliyorum"}
+            {post.rsvpedByMe ? (
+              <>
+                Geliyorum <Check aria-hidden size={16} strokeWidth={1.75} className="inline-block" />
+              </>
+            ) : full ? (
+              "Masa dolu"
+            ) : (
+              "Ben de geliyorum"
+            )}
           </button>
         )}
       </div>

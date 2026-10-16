@@ -31,6 +31,43 @@ export type AskidaWallEvent =
   /** Who took from the askı is never exposed. */
   | { type: "claim"; at: Date; productId: string };
 
+/**
+ * Whether one member may take from the askı right now. It describes the person
+ * only; whether the café has an askı and whether the pool can pay are separate.
+ */
+export type AskidaEligibility =
+  | { status: "ok" }
+  | { status: "claimed_today" }
+  /** `daysLeft` is whole days, rounded up: "3 gün kaldı" until the moment it opens. */
+  | { status: "too_new"; daysLeft: number }
+  | { status: "blocked" }
+  | { status: "not_member" };
+
+/**
+ * One line of a member's own peni history. Only movements of their own wallet
+ * appear: what the askı pool pays for an ikram never touches a wallet, so a claim
+ * can never show up in anyone's history, the taker's included.
+ */
+export type MemberHistoryKind =
+  | "earn"
+  | "redeem"
+  | "gift_out"
+  | "gift_in"
+  | "gift_return"
+  | "askida_donate"
+  | "refund";
+
+export interface MemberHistoryEntry {
+  /** The ledger transaction id. */
+  id: string;
+  at: Date;
+  kind: MemberHistoryKind;
+  /** Signed: positive into the wallet, negative out of it. */
+  peni: Peni;
+  orderId: string | null;
+  giftId: string | null;
+}
+
 export interface CafePeniReport {
   cafeId: string;
   since: Date;
@@ -60,6 +97,53 @@ export class PeniService {
 
   walletBalance(membershipId: string): Promise<Peni> {
     return this.ledger.balance(account.member(membershipId));
+  }
+
+  /**
+   * Peni a paid order put in the member's wallet, net of anything a refund took
+   * back. Null when the order earned nothing (not paid yet, or paid nothing at the till).
+   */
+  async earnedForOrder(orderId: string): Promise<Peni | null> {
+    const earn = await this.ledger.findByIdempotencyKey(`earn:${orderId}`);
+    if (!earn) return null;
+    const wallet = earn.entries.find((e) => e.account.startsWith("member:"));
+    if (!wallet) return null;
+    const reversal = await this.ledger.findByIdempotencyKey(`reversal:${earn.id}`);
+    const takenBack = reversal ? -inflow(reversal, wallet.account) : 0;
+    return Math.max(0, wallet.delta - takenBack);
+  }
+
+  /** The member's own wallet history at one café, newest first. */
+  async memberHistory(membershipId: string, limit = 100): Promise<MemberHistoryEntry[]> {
+    const membership = await this.requireMembership(membershipId);
+    const wallet = account.member(membership.id);
+    const txs = await this.ledger.query({ cafeId: membership.cafeId, account: wallet });
+
+    // An order the POS never took leaves no trace: hide its reservation and the release.
+    const failed = new Set(
+      txs.filter((t) => t.kind === "reversal" && t.meta.reason === "order_failed").map((t) => t.reversesId),
+    );
+
+    const entries: MemberHistoryEntry[] = [];
+    for (const t of txs) {
+      if (failed.has(t.id) || (t.kind === "reversal" && failed.has(t.reversesId))) continue;
+      const kind = HISTORY_KIND[t.kind];
+      const peni = inflow(t, wallet);
+      if (!kind || peni === 0) continue;
+      entries.push({
+        id: t.id,
+        at: t.createdAt,
+        kind,
+        peni,
+        orderId: typeof t.meta.orderId === "string" ? t.meta.orderId : null,
+        giftId: typeof t.meta.giftId === "string" ? t.meta.giftId : null,
+      });
+    }
+    // Stable sort over the reversed list keeps same-instant entries newest first too.
+    return entries
+      .reverse()
+      .sort((a, b) => b.at.getTime() - a.at.getTime())
+      .slice(0, limit);
   }
 
   /** Called when the till marks an order paid. Safe to call twice for the same order. */
@@ -271,8 +355,29 @@ export class PeniService {
       if (gift.toMembershipId !== byMembershipId && gift.fromMembershipId !== byMembershipId) {
         throw new PeniError("FORBIDDEN", "Only the sender or recipient can decline a gift");
       }
-      return this.returnGift(gift, "declined");
+      return this.returnGift(gift, "declined", gift.fromMembershipId === byMembershipId);
     });
+  }
+
+  /** "Geri al": the sender takes back a gift that has not been accepted yet. */
+  async cancelGift(giftId: string, byMembershipId: string): Promise<Gift> {
+    return this.ledger.atomically(async () => {
+      const gift = await this.requirePendingGift(giftId);
+      if (gift.fromMembershipId !== byMembershipId) {
+        throw new PeniError("FORBIDDEN", "Only the sender can take a gift back");
+      }
+      if (gift.expiresAt <= this.clock()) {
+        await this.returnGift(gift, "expired");
+        throw new PeniError("GIFT_NOT_PENDING", "This gift has expired and already went back to the sender");
+      }
+      return this.returnGift(gift, "declined", true);
+    });
+  }
+
+  /** True when the sender took the gift back (the recipient did not decline it). */
+  async giftCancelledBySender(giftId: string): Promise<boolean> {
+    const resolution = await this.ledger.findByIdempotencyKey(`gift_resolve:${giftId}`);
+    return resolution?.kind === "gift_return" && resolution.meta.cancelledBySender === true;
   }
 
   /** Background job: returns every expired, unaccepted gift to its sender. */
@@ -358,14 +463,14 @@ export class PeniService {
 
     return this.ledger.atomically(async () => {
       const now = this.clock();
-      if (addDays(membership.joinedAt, settings.askidaMinMembershipDays) > now) {
+      const eligibility = await this.checkAskidaEligibility(membership, settings, now);
+      if (eligibility.status === "too_new") {
         throw new PeniError(
           "ASKIDA_TOO_NEW",
           `Members can take from the askı after ${settings.askidaMinMembershipDays} days`,
         );
       }
-      const claimsToday = await this.countActiveClaims(membership, startOfLocalDay(now, settings.timeZone));
-      if (claimsToday >= settings.askidaClaimsPerDay) {
+      if (eligibility.status === "claimed_today") {
         throw new PeniError("ASKIDA_LIMIT", `Askı limit is ${settings.askidaClaimsPerDay} per day`);
       }
       const peni = kurusToPeniCeil(input.unitPriceKurus);
@@ -385,6 +490,26 @@ export class PeniService {
       });
       return { transaction, peni, discountKurus: input.unitPriceKurus };
     });
+  }
+
+  /**
+   * What the take sheet should say before the member tries. `null` means the
+   * viewer has no membership here (signed out, or not joined).
+   */
+  async askidaEligibility(membershipId: string | null): Promise<AskidaEligibility> {
+    const membership = membershipId ? await this.directory.getMembership(membershipId) : null;
+    if (!membership) return { status: "not_member" };
+    if (membership.blocked) return { status: "blocked" };
+    const settings = await this.directory.getSettings(membership.cafeId);
+    return this.checkAskidaEligibility(membership, settings, this.clock());
+  }
+
+  /** The café's match share as a percentage (50 = "Kafe her bağışa %50 ekliyor"), or null when no match would be added. */
+  async askidaMatchPercent(cafeId: string): Promise<number | null> {
+    const settings = await this.directory.getSettings(cafeId);
+    if (!settings.askidaEnabled || settings.askidaMatchBps <= 0 || settings.askidaMatchMonthlyCapPeni <= 0) return null;
+    const matched = await this.matchedThisMonth(cafeId, settings, this.clock());
+    return matched < settings.askidaMatchMonthlyCapPeni ? settings.askidaMatchBps / 100 : null;
   }
 
   async askidaSnapshot(cafeId: string, referencePriceKurus: Kurus): Promise<AskidaSnapshot> {
@@ -455,8 +580,12 @@ export class PeniService {
 
   // ---------------------------------------------------------------- reporting
 
-  async cafeReport(cafeId: string, since: Date): Promise<CafePeniReport> {
-    const txs = await this.ledger.query({ cafeId, since });
+  /**
+   * Totals for `[since, until)`. Without `until` the window runs to now. With it,
+   * `outstandingPeni` is what was still owed at `until` (for "against the previous 30 days").
+   */
+  async cafeReport(cafeId: string, since: Date, until?: Date): Promise<CafePeniReport> {
+    const txs = (await this.ledger.query({ cafeId, since })).filter((t) => !until || t.createdAt < until);
     const sumInto = (kind: string, acc: string) =>
       txs.filter((t) => t.kind === kind).reduce((s, t) => s + inflow(t, acc), 0);
     /** Net inflow into `acc` from reversals of `kind`; it carries the opposite sign of the original. */
@@ -470,10 +599,14 @@ export class PeniService {
     const claimTxs = txs.filter((t) => t.kind === "askida_claim");
     const reversedIds = new Set(txs.filter((t) => t.reversesId).map((t) => t.reversesId));
 
-    const systemBalance =
-      (await this.ledger.balance(account.issuance(cafeId))) +
-      (await this.ledger.balance(account.tillDonation(cafeId))) +
-      (await this.ledger.balance(sink));
+    const systemAccounts = [account.issuance(cafeId), account.tillDonation(cafeId), sink];
+    const systemBalance = until
+      ? (await this.ledger.query({ cafeId }))
+          .filter((t) => t.createdAt < until)
+          .reduce((s, t) => s + systemAccounts.reduce((a, acc) => a + inflow(t, acc), 0), 0)
+      : (await this.ledger.balance(systemAccounts[0]!)) +
+        (await this.ledger.balance(systemAccounts[1]!)) +
+        (await this.ledger.balance(systemAccounts[2]!));
 
     return {
       cafeId,
@@ -498,10 +631,7 @@ export class PeniService {
     now: Date,
   ): Promise<Peni> {
     if (settings.askidaMatchBps <= 0 || settings.askidaMatchMonthlyCapPeni <= 0) return 0;
-    const monthStart = startOfLocalMonth(now, settings.timeZone);
-    const matchedThisMonth = (
-      await this.ledger.query({ cafeId: donation.cafeId, kinds: ["askida_match"], since: monthStart })
-    ).reduce((sum, t) => sum + inflow(t, account.askida(donation.cafeId)), 0);
+    const matchedThisMonth = await this.matchedThisMonth(donation.cafeId, settings, now);
     const match = Math.min(
       applyBps(peni, settings.askidaMatchBps),
       settings.askidaMatchMonthlyCapPeni - matchedThisMonth,
@@ -521,7 +651,7 @@ export class PeniService {
     return match;
   }
 
-  private async returnGift(gift: Gift, status: "declined" | "expired"): Promise<Gift> {
+  private async returnGift(gift: Gift, status: "declined" | "expired", cancelledBySender = false): Promise<Gift> {
     const now = this.clock();
     await this.ledger.post({
       cafeId: gift.cafeId,
@@ -531,7 +661,7 @@ export class PeniService {
         { account: account.member(gift.fromMembershipId), delta: gift.peni },
       ],
       idempotencyKey: `gift_resolve:${gift.id}`,
-      meta: { giftId: gift.id, status },
+      meta: { giftId: gift.id, status, ...(cancelledBySender ? { cancelledBySender: true } : {}) },
       createdAt: now,
     });
     const resolved: Gift = { ...gift, status, resolvedAt: now };
@@ -549,6 +679,27 @@ export class PeniService {
     const acc = account.member(membership.id);
     const txs = await this.ledger.query({ cafeId: membership.cafeId, kinds: [kind], since, account: acc });
     return txs.reduce((sum, t) => sum - inflow(t, acc), 0);
+  }
+
+  private async checkAskidaEligibility(
+    membership: Membership,
+    settings: CafePeniSettings,
+    now: Date,
+  ): Promise<Exclude<AskidaEligibility, { status: "not_member" }>> {
+    if (membership.blocked) return { status: "blocked" };
+    const opensAt = addDays(membership.joinedAt, settings.askidaMinMembershipDays);
+    if (opensAt > now) {
+      return { status: "too_new", daysLeft: Math.max(1, Math.ceil((opensAt.getTime() - now.getTime()) / DAY_MS)) };
+    }
+    const claimsToday = await this.countActiveClaims(membership, startOfLocalDay(now, settings.timeZone));
+    if (claimsToday >= settings.askidaClaimsPerDay) return { status: "claimed_today" };
+    return { status: "ok" };
+  }
+
+  private async matchedThisMonth(cafeId: string, settings: CafePeniSettings, now: Date): Promise<Peni> {
+    const since = startOfLocalMonth(now, settings.timeZone);
+    const matches = await this.ledger.query({ cafeId, kinds: ["askida_match"], since });
+    return matches.reduce((sum, t) => sum + inflow(t, account.askida(cafeId)), 0);
   }
 
   private async countActiveClaims(membership: Membership, since: Date): Promise<number> {
@@ -584,6 +735,20 @@ export class PeniService {
     return settings;
   }
 }
+
+const DAY_MS = 86_400_000;
+
+/** Ledger kinds that move a member's own wallet, as they read in their history. */
+const HISTORY_KIND: Partial<Record<LedgerTransaction["kind"], MemberHistoryKind>> = {
+  earn: "earn",
+  redeem: "redeem",
+  gift_send: "gift_out",
+  gift_accept: "gift_in",
+  gift_return: "gift_return",
+  askida_donate: "askida_donate",
+  // A released or refunded order: spent peni coming back, or earned peni taken back.
+  reversal: "refund",
+};
 
 function assertPositivePeni(peni: Peni): void {
   assertWholeNumber(peni, "peni");
