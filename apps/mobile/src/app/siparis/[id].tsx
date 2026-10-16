@@ -15,7 +15,7 @@
  */
 import type { FulfillmentStatus } from "@peni/api";
 import { actionCopy, errorCopy, orderCopy } from "@peni/brand/copy";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
 import { ReceiptText } from "lucide-react-native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Platform, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
@@ -67,16 +67,24 @@ export default function OrderScreen() {
 
   /* ------------------------------------------------ what changed while looking (A6, A11) */
 
-  const lastStatus = useRef<FulfillmentStatus | null>(null);
+  // Decided while rendering, so the very render that turns the fiş green mounts the HAZIR stamp
+  // ready to stamp down (A11) and the earn moment ready to strike (A6). Set in an effect, the
+  // flags would arrive a render after the stamp had mounted at rest.
+  const [seen, setSeen] = useState<FulfillmentStatus | null>(null);
   const [liveReady, setLiveReady] = useState(false);
   const [liveCollected, setLiveCollected] = useState(false);
+  if (order && order.status !== seen) {
+    if (seen !== null && order.status === "ready") setLiveReady(true);
+    if (seen !== null && order.status === "collected") setLiveCollected(true);
+    setSeen(order.status);
+  }
+
+  const lastStatus = useRef<FulfillmentStatus | null>(null);
   useEffect(() => {
     if (!order) return;
     const prev = lastStatus.current;
     lastStatus.current = order.status;
     if (prev === null || prev === order.status) return;
-    if (order.status === "ready") setLiveReady(true);
-    if (order.status === "collected") setLiveCollected(true);
     if (order.status === "rejected") haptic("warning");
     // Hazır is announced by the Fis; VoiceOver has no live regions, so say the rest here.
     if (Platform.OS === "ios" && order.status !== "ready") {
@@ -85,6 +93,22 @@ export default function OrderScreen() {
   }, [order?.status]);
 
   const earnMode = useEarnMoment(order?.id ?? null, order ? earnedPeni(order) : null, liveCollected);
+
+  /* ------------------------------------------------ the iptal sheet, once per tap burst (D16) */
+
+  // A quick double tap would push two identical sheets, and one "Vazgeç" would leave the second
+  // on screen. The guard clears when the fiş is back in focus.
+  const cancelOpen = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      cancelOpen.current = false;
+    }, []),
+  );
+  const openCancel = (id: string) => {
+    if (cancelOpen.current) return;
+    cancelOpen.current = true;
+    router.push({ pathname: "/iptal", params: { id } });
+  };
 
   /* ------------------------------------------------ pull to refresh */
 
@@ -192,7 +216,7 @@ export default function OrderScreen() {
             title={orderCopy.cancel}
             variant="danger-quiet"
             style={styles.cancel}
-            onPress={() => router.push({ pathname: "/iptal", params: { id: order.id } })}
+            onPress={() => openCancel(order.id)}
           />
         ) : null}
       </View>

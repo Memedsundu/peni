@@ -13,7 +13,7 @@
  */
 import type { WalletCafeDTO } from "@peni/api";
 import { actionCopy, peniCopy } from "@peni/brand/copy";
-import { formatNumber, formatPeni, goodsLine, SEP } from "@peni/brand/format";
+import { cafeHue, formatNumber, formatPeni, goodsLine, SEP } from "@peni/brand/format";
 import { router } from "expo-router";
 import { Gift } from "lucide-react-native";
 import { memo, useCallback, useState } from "react";
@@ -121,7 +121,7 @@ export const WalletCoinCard = memo(function WalletCoinCard({ cafe, city }: Walle
             title={walletCopy.goToCafe}
             variant="quiet"
             size="sm"
-            onPress={() => router.push({ pathname: "/kafe/[slug]", params: { slug: cafe.cafeSlug } })}
+            onPress={() => router.push({ pathname: "/kafe/[slug]", params: { slug: cafe.cafeSlug, hue: cafe.hue ?? cafeHue(cafe.cafeSlug) } })}
           />
         </View>
       </View>

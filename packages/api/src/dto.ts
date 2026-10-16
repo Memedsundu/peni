@@ -99,7 +99,7 @@ export interface CafeSummaryDTO {
   refItems: RefItemDTO[];
   /** The next upcoming Peni masası. [G2] */
   nextEvent: { postId: string; startsAt: string; title: string } | null;
-  /** [G9] Always null for now. */
+  /** [G9] The café's colourway; null until it picks one (the UI then derives it from the slug). */
   hue: CafeHue | null;
 }
 

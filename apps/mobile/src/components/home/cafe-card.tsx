@@ -19,7 +19,7 @@
  */
 import type { CafeSummaryDTO } from "@peni/api";
 import { askiCopy, peniCopy } from "@peni/brand/copy";
-import { dateBlock, formatTime, goods, relDay, SEP } from "@peni/brand/format";
+import { cafeHue, dateBlock, formatTime, goods, relDay, SEP } from "@peni/brand/format";
 import { askiItemFor } from "@peni/brand/shapes";
 import { Link } from "expo-router";
 import { Check, CirclePause } from "lucide-react-native";
@@ -92,7 +92,9 @@ export const CafeCard = memo(function CafeCard({ cafe }: { cafe: CafeSummaryDTO 
   );
 
   return (
-    <Link href={{ pathname: "/kafe/[slug]", params: { slug: cafe.slug } }} asChild>
+    // `hue`: the colourway this card shows, so the zoom lands on the same plate before the
+    // café's detail has arrived [G9].
+    <Link href={{ pathname: "/kafe/[slug]", params: { slug: cafe.slug, hue: cafe.hue ?? cafeHue(cafe.slug) } }} asChild>
       {Platform.OS === "ios" ? <Link.AppleZoom>{card}</Link.AppleZoom> : card}
     </Link>
   );

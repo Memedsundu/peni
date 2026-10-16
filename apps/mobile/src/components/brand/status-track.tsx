@@ -8,6 +8,9 @@
  * - Current: a 22pt ring (2pt `ink`) with an 8pt `ink` centre. One ring travels from stop to
  *   stop (`withTiming`, 300ms, EASE_OUT_STRONG). Reduced motion: everything is instant.
  * - Future: a 12pt ring, 1.5pt `lineStrong`.
+ * - `stopped` (a rejected, cancelled or uncollected order): the track is at rest. The tapped
+ *   stops stay ink; the stops it never reached, and the rail under them, take the quiet `line`,
+ *   so the slip never reads as still waiting for the barista.
  * Inside a Hazır fiş every one of these reads its on-success value (`useFisTokens`).
  *
  * Read as a list; the current stop is "selected".
@@ -34,6 +37,8 @@ export interface StatusTrackOrder {
 export interface StatusTrackProps {
   /** An `OrderDTO`, or anything with its status and four timestamps. */
   order: StatusTrackOrder;
+  /** The order stopped short (rejected, cancelled, not collected): the track is at rest. */
+  stopped?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -64,8 +69,9 @@ const COLUMNS = statusTrackStops.length;
 /** Labels may run past their column a little (as on the web): "Hazırlanıyor" is the widest. */
 const LABEL_OVERHANG = 14;
 
-export const StatusTrack = memo(function StatusTrack({ order, style }: StatusTrackProps) {
+export const StatusTrack = memo(function StatusTrack({ order, stopped = false, style }: StatusTrackProps) {
   const ft = useFisTokens();
+  const rest = stopped ? ft.line : ft.lineStrong;
   const reduced = useMotionReduced();
   const [width, setWidth] = useState(0);
   const states = stopStates(order);
@@ -77,7 +83,7 @@ export const StatusTrack = memo(function StatusTrack({ order, style }: StatusTra
 
   return (
     <View role="list" style={style} onLayout={onLayout}>
-      <View {...hidden} pointerEvents="none" style={[styles.track, { backgroundColor: ft.lineStrong }]} />
+      <View {...hidden} pointerEvents="none" style={[styles.track, { backgroundColor: rest }]} />
       {[0, 1, 2].map((i) => (
         <Segment key={i} index={i} filled={states[i + 1] !== "future"} color={ft.ink} reduced={reduced} />
       ))}
@@ -97,7 +103,7 @@ export const StatusTrack = memo(function StatusTrack({ order, style }: StatusTra
               style={styles.column}
             >
               <View {...hidden} style={styles.stopBox}>
-                {state === "done" ? <DoneStop /> : state === "future" ? <FutureStop /> : null}
+                {state === "done" ? <DoneStop /> : state === "future" ? <FutureStop color={rest} /> : null}
               </View>
               <View style={[styles.label, column > 0 ? { width: column + 2 * LABEL_OVERHANG } : null]}>
                 <FisText
@@ -150,10 +156,9 @@ function DoneStop() {
   );
 }
 
-function FutureStop() {
-  const ft = useFisTokens();
+function FutureStop({ color }: { color: string }) {
   const paper = useFisPaperStyle();
-  return <Animated.View style={[styles.future, { borderColor: ft.lineStrong }, paper]} />;
+  return <Animated.View style={[styles.future, { borderColor: color }, paper]} />;
 }
 
 /** The one current ring. It travels to its stop when the order moves on (A10). */

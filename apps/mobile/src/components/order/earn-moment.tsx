@@ -11,34 +11,36 @@ import { orderCopy } from "@peni/brand/copy";
 import { formatPeni } from "@peni/brand/format";
 import { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
+import Animated, { FadeIn } from "react-native-reanimated";
 import { Coin, type CoinCafe } from "@/components/brand";
 import { NumberRoll, T } from "@/components/ui";
+import { durations, useMotionReduced } from "@/lib/motion";
 import { storage } from "@/lib/storage";
 
 const COIN = 28;
+/** The words' fade, about as long as the coin's fall. */
+const WORDS_MS = 300;
 
 export type EarnMode = "pending" | "strike" | "still";
 
 export function EarnMoment({ peni, cafe, mode }: { peni: number; cafe: CoinCafe; mode: EarnMode }) {
-  const [landed, setLanded] = useState(mode !== "strike");
+  if (mode === "pending") return <View style={styles.reserve} />;
+  // Keyed: `landed` starts again from scratch when the strike begins, so the number rolls.
+  return <EarnLine key={mode} peni={peni} cafe={cafe} strike={mode === "strike"} />;
+}
+
+function EarnLine({ peni, cafe, strike }: { peni: number; cafe: CoinCafe; strike: boolean }) {
+  const reduced = useMotionReduced();
+  const [landed, setLanded] = useState(!strike);
   // "+2 peni cüzdanında": "+2" rolls, "+2 peni" is peni ink (an amount), "cüzdanında" is ink.
   const tail = orderCopy.earned(peni).slice(formatPeni(peni, { signed: true }).length);
 
-  if (mode === "pending") return <View style={styles.reserve} />;
-
   return (
     <View aria-hidden accessible={false} style={styles.row}>
-      <Coin size={COIN} cafe={cafe} animate={mode === "strike" ? "strike" : null} onLand={() => setLanded(true)} />
-      <View style={styles.words}>
-        <NumberRoll
-          kind="peni"
-          signed
-          value={landed ? peni : 0}
-          trend={1}
-          animated={mode === "strike"}
-          variant="item"
-          color="peniInk"
-        />
+      <Coin size={COIN} cafe={cafe} animate={strike ? "strike" : null} onLand={() => setLanded(true)} />
+      {/* The words come in as the coin falls, so a bare "+0" is never read on its own. */}
+      <Animated.View entering={strike ? FadeIn.duration(reduced ? durations.reduced : WORDS_MS) : undefined} style={styles.words}>
+        <NumberRoll kind="peni" signed value={landed ? peni : 0} trend={1} animated={strike} variant="item" color="peniInk" />
         {/* Word spaces as margins: a leading or trailing space between flex items is not measured reliably. */}
         <T variant="item" color="peniInk" style={styles.word}>
           peni
@@ -46,7 +48,7 @@ export function EarnMoment({ peni, cafe, mode }: { peni: number; cafe: CoinCafe;
         <T variant="item" style={styles.word}>
           {tail.trim()}
         </T>
-      </View>
+      </Animated.View>
     </View>
   );
 }

@@ -13,7 +13,7 @@
 import type { OrderDTO } from "@peni/api";
 import { orderCopy, staffCopy } from "@peni/brand/copy";
 import { formatTL } from "@peni/brand/format";
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { Fis, FisDivider, FisRow, FisText, HazirStamp, StatusTrack } from "@/components/brand";
 import { Skeleton } from "@/components/ui";
@@ -44,7 +44,7 @@ export const OrderFis = memo(function OrderFis({ order, prepRange, stampAnimates
       announce={code ? orderCopy.readyAnnouncement(code) : orderCopy.headline.ready}
     >
       <CodeBlock code={code} who={whoLine(order, now)} ready={ready} stampAnimates={stampAnimates} />
-      <StatusTrack order={order} style={styles.track} />
+      <StatusTrack order={order} stopped={isVoid(order.status)} style={styles.track} />
       <Headline order={order} prepRange={prepRange} earnMode={earnMode} />
       <Lines order={order} />
       {order.memberCode && !isVoid(order.status) ? (
@@ -61,35 +61,51 @@ export const OrderFis = memo(function OrderFis({ order, prepRange, stampAnimates
 /* ------------------------------------------------------------------------------------------ */
 
 const GAP = 12;
-/** The stamp's width before it has been measured once ("HAZIR" at 22pt, padding, rules). */
-let stampWidth = 104;
+/** The stamp's width ("HAZIR" at 22pt, padding, rules), measured once per launch by a hidden copy. */
+let stampWidth: number | null = null;
 
 /**
  * The stamp sits beside the code while both fit; on a narrow slip (360pt phones) it drops
  * beside the customer's name instead, overlapping the lines around it a little, the way a
  * rubber stamp does, so the code never wraps or shrinks.
+ *
+ * It mounts once, already in its place: only after the row, the code and the stamp itself have
+ * been measured. Moving it to the other parent after a measurement would remount it, and a
+ * live Hazır (A11) would stamp twice. It stamps at most once per slip: a later move (a rotation)
+ * shows it at rest.
  */
 function CodeBlock({ code, who, ready, stampAnimates }: { code: string | null; who: string; ready: boolean; stampAnimates: boolean }) {
   const [rowWidth, setRowWidth] = useState(0);
   const [codeWidth, setCodeWidth] = useState(0);
-  const [, remeasure] = useState(0);
-  const beside = ready && code != null && rowWidth > 0 && codeWidth > 0 && codeWidth + GAP + stampWidth <= rowWidth;
+  const [measuredStamp, setMeasuredStamp] = useState(stampWidth);
+  const [stamped, setStamped] = useState(false);
+  const settled = ready && rowWidth > 0 && (code == null || codeWidth > 0) && measuredStamp != null;
+  const beside = settled && code != null && codeWidth + GAP + (measuredStamp ?? 0) <= rowWidth;
+  useEffect(() => {
+    if (settled) setStamped(true);
+  }, [settled]);
 
-  const onStamp = (e: LayoutChangeEvent) => {
+  const onProbe = (e: LayoutChangeEvent) => {
     const w = Math.ceil(e.nativeEvent.layout.width);
-    if (w > 0 && w !== stampWidth) {
-      stampWidth = w;
-      remeasure((n) => n + 1);
-    }
+    if (w <= 0) return;
+    stampWidth = w;
+    setMeasuredStamp(w);
   };
-  const stamp = ready ? (
-    <View onLayout={onStamp} style={beside ? styles.stampBeside : styles.stampInline}>
-      <HazirStamp animate={stampAnimates} />
+  const probe =
+    ready && measuredStamp == null ? (
+      <View onLayout={onProbe} style={styles.probe}>
+        <HazirStamp animate={false} />
+      </View>
+    ) : null;
+  const stamp = settled ? (
+    <View style={beside ? styles.stampBeside : styles.stampInline}>
+      <HazirStamp animate={stampAnimates && !stamped} />
     </View>
   ) : null;
 
   return (
     <View style={styles.codeBlock} onLayout={(e) => setRowWidth(e.nativeEvent.layout.width)}>
+      {probe}
       <View style={styles.codeRow}>
         <View style={styles.codeColumn}>
           {code ? (
@@ -275,6 +291,8 @@ const styles = StyleSheet.create({
   stampBeside: { marginRight: 2 },
   // Beside the name: the stamp keeps the name row's height and overlaps its neighbours a little.
   stampInline: { marginVertical: -10, marginRight: 2 },
+  /** Measures the stamp, unseen, before the real one mounts. */
+  probe: { position: "absolute", top: 0, left: 0, opacity: 0 },
   track: { marginTop: 24 },
   headline: { marginTop: 24, gap: 6 },
   headlineText: { gap: 6 },
