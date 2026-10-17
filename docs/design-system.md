@@ -925,9 +925,9 @@ src/app/(staff)/kafe/[slug]/page.tsx     /kafe/[slug]     Café panel
 
 - The café name in Archivo 600 17px.
 - A live clock (`HH:MM`, tabular, updated each minute).
-- The **pause pill**: "Uygulama siparişleri: Açık" (success dot) or "Uygulama siparişleri: Durdu" (warning icon).
+- The **pause pill**: "Uygulama siparişleri: Açık" (success dot) or "Uygulama siparişleri: Durdu" (warning icon). Below 768px it reads "Uygulama: Açık" / "Uygulama: Durdu" (a bare "Açık" on a café screen reads as "the café is open"); the café name truncates first.
 - The sound toggle: an `IconButton` `Volume2`/`VolumeX` with the label "Ses açık"/"Ses kapalı".
-- "Çıkış" (forgets the staff key).
+- "Çıkış" (forgets the staff key) asks first, in a small sheet: "Panelden çıkmak istiyor musun?" / "Geri girmek için personel anahtarı gerekecek." with "Çıkış yap" and quiet "Vazgeç". One stray tap at a busy counter must not lock the board.
 
 Below it, a segmented control **Tezgâh · Askı · Rapor**, then the content at max-width 1280px. There is no customer header, bottom nav or footer.
 
@@ -1353,6 +1353,8 @@ A reading page, max 640px, centred.
 | 0–4 min | `Clock`, "3 dk", `ink-2` on `surface-2` |
 | 5–9 min | `Timer`, "7 dk", `warning-ink` on `warning-soft` |
 | ≥10 min | `AlarmClock`, "12 dk · gecikiyor", `danger` on `danger-soft` |
+
+Hazır tickets count from `readyAt` and are never late (the bar has finished): `Clock` "7 dk" neutral, and from 10 minutes "12 dk bekliyor" in `warning-ink` on `warning-soft`. "Gelmedi" covers the customer who doesn't come.
 
   - Lines in `text-item`: "2 × Çay". An askı line gets a neutral chip after it: `HOOK` glyph + "ikram", `ink-2` on `surface-2`. **Never turquoise; never next to the customer name.**
   - Line notes and the customer note go in a `warning-soft` block with `StickyNote`: "Not: az şekerli, yulaf sütlü".
