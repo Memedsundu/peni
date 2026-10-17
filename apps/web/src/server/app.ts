@@ -168,7 +168,11 @@ export interface PeniAppOptions {
 }
 
 const DEMO_CODE = "000000";
-const NEW_GUEST_NAME = "Yeni misafir";
+/**
+ * The name of a customer who hasn't given one yet. Never "Yeni …": a ticket reads its first
+ * word as the customer's name, and "P-005 Yeni" in the board's "Yeni" column reads as a status.
+ */
+const NEW_GUEST_NAME = "Misafir";
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 /** Gift recipient lookups per customer per hour. [G6] */

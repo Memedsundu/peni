@@ -5,6 +5,8 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
+  // Where shared links' preview images resolve. Set PENI_PUBLIC_URL in each deployment.
+  metadataBase: new URL(process.env.PENI_PUBLIC_URL ?? "http://localhost:3300"),
   title: { default: "Peni", template: "%s · Peni" },
   description: "Siparişini önceden ver, kasada öde. Her harcamada o kafeye özel peni biriktir, askıya bir çay bırak.",
 };

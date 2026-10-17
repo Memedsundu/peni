@@ -282,8 +282,10 @@ export function WalletPage({ initial, ismarla }: { initial: WalletInitial; ismar
       <PageHeader
         meta={withPeni > 0 ? peniCopy.walletSummary(withPeni) : undefined}
         action={
+          // Phones only: from 768px the top bar carries the same labelled "Peni kodum" right
+          // above, and two of them a few pixels apart read as two different things.
           kodu.available ? (
-            <Button variant="secondary" size="sm" iconStart={QrCode} onClick={() => kodu.show()}>
+            <Button variant="secondary" size="sm" iconStart={QrCode} onClick={() => kodu.show()} className="md:hidden">
               {peniCopy.peniCode}
             </Button>
           ) : null

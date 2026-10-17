@@ -21,7 +21,8 @@ export default async function CustomerLayout({ children }: { children: React.Rea
     <CustomerProviders session={session} initialOrders={orders}>
       <a
         href="#icerik"
-        className="sr-only z-50 rounded-[10px] bg-primary px-4 py-3 text-button text-on-primary focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+        // Padding only once shown: on the hidden link it would undo `sr-only`'s 1px box.
+        className="sr-only z-50 rounded-[10px] bg-primary text-button text-on-primary focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:inline-flex focus:min-h-11 focus:items-center focus:px-4"
       >
         İçeriğe geç
       </a>
