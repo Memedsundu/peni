@@ -55,6 +55,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifier } from "./customer-auth";
 import { AppError } from "./errors";
 import { buildIcs } from "./ics";
+import { MenuService } from "./menu";
 import { StaffService, type StaffContext } from "./staff";
 
 /**
@@ -117,6 +118,8 @@ export class PeniApp {
   readonly community: CommunityStore;
   readonly menu: MenuStore;
   /** Staff sign-in, the team and roles. */
+  /** Menü in the café panel (plan piece 5). */
+  readonly menuEditor: MenuService;
   readonly staff: StaffService;
   /** Customer sign-in with Google, Apple or an email code. */
   readonly auth: CustomerAuth;
@@ -138,6 +141,7 @@ export class PeniApp {
       email: options.auth?.email ?? null,
     });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
+    this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
@@ -827,6 +831,7 @@ function toMenuDTO(m: MenuItem, settings: CafePeniSettings): MenuItemDTO {
     priceKurus: m.priceKurus,
     available: m.available,
     description: m.description ?? null,
+    imageUrl: m.imageUrl ?? null,
     askida: settings.askidaEnabled && settings.askidaProductIds.includes(m.productId),
   };
 }

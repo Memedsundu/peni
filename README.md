@@ -22,6 +22,7 @@ The code is being rebuilt piece by piece. Today it holds:
 | `/api/v1` for wallets, gifts, askı, the café feed and the staff report | **Done, end-to-end tested** on Postgres and in memory |
 | Staff sign-in, the team, and roles (owner, manager, chef, barista) with per-café permissions | **Done, end-to-end tested** ([staff and roles](docs/staff-and-roles.md)) |
 | Customer sign-in with Google, Apple or an email code | **Done, end-to-end tested** (email; Google and Apple need their client ids) |
+| Menü: categories, products, prices, on/off, removing and bringing back, order; edited by roles with "menu.edit" | **Done, end-to-end tested** (API; screens come with the new design) |
 | Web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository

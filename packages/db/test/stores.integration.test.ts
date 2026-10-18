@@ -43,18 +43,26 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
   it("keeps cafés, settings and the menu", async () => {
     await stores.directory.saveSettings({ ...defaultSettings(cafeId), earnRateBps: 700, askidaProductIds: ["cay"] });
     expect(await stores.directory.getSettings(cafeId)).toMatchObject({ earnRateBps: 700, askidaProductIds: ["cay"], redeemableProductIds: null });
-    await stores.menu.setMenu(cafeId, [
-      { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 9_000, available: true },
-      { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 3_000, available: true, description: "İnce belli" },
+    const hot = { id: `cat_hot_${run}`, cafeId, name: "Sıcak", sortOrder: 1 };
+    const sweet = { id: `cat_sweet_${run}`, cafeId, name: "Tatlı", sortOrder: 0 };
+    await stores.menu.saveCategory(hot);
+    await stores.menu.saveCategory(sweet);
+    const base = { categoryId: hot.id, category: "", available: true };
+    await stores.menu.saveProduct(cafeId, { ...base, productId: "turk", name: "Türk Kahvesi", priceKurus: 9_000, sortOrder: 1 });
+    await stores.menu.saveProduct(cafeId, { ...base, productId: "cay", name: "Çay", priceKurus: 3_000, sortOrder: 0, description: "İnce belli" });
+    await stores.menu.saveProduct(cafeId, { ...base, productId: "kek", name: "Kek", categoryId: sweet.id, priceKurus: 6_000 });
+    await stores.menu.saveProduct(cafeId, { ...base, productId: "cay", name: "Çay", priceKurus: 3_500, sortOrder: 0 });
+    await stores.menu.saveProduct(cafeId, { ...base, productId: "eski", name: "Eski", priceKurus: 1_000, archivedAt: at });
+    expect((await stores.menu.listMenu(cafeId)).map((m) => [m.productId, m.category, m.priceKurus, m.description ?? null])).toEqual([
+      ["kek", "Tatlı", 6_000, null],
+      ["cay", "Sıcak", 3_500, null],
+      ["turk", "Sıcak", 9_000, null],
     ]);
-    await stores.menu.setMenu(cafeId, [
-      { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 3_500, available: true },
-      { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 9_000, available: false },
-    ]);
-    expect((await stores.menu.listMenu(cafeId)).map((m) => [m.productId, m.priceKurus, m.available])).toEqual([
-      ["cay", 3_500, true],
-      ["turk", 9_000, false],
-    ]);
+    expect((await stores.menu.listMenu(cafeId, { includeArchived: true })).map((m) => m.productId)).toContain("eski");
+    expect((await stores.menu.listCategories(cafeId)).map((c) => c.name)).toEqual(["Tatlı", "Sıcak"]);
+    await stores.menu.deleteCategory(cafeId, sweet.id);
+    expect(await stores.menu.getProduct(cafeId, "kek")).toMatchObject({ categoryId: null, category: "" });
+    expect(await stores.menu.getProduct(cafeId, "yok")).toBeNull();
     expect((await stores.identity.getCafeBySlug(`moda-${run}`))!.referenceProductIds).toEqual(["cay"]);
   });
 

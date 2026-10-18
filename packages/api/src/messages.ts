@@ -49,6 +49,16 @@ export const errorMessagesTr: Record<string, string> = {
   PIN_CLEARED: "PIN'in silindi. Şifrenle giriş yapıp yeni bir PIN belirle.",
   NO_PIN: "Önce şifrenle giriş yapıp bir PIN belirle.",
   DEVICE_UNKNOWN: "Bu bilgisayar satış ekranı olarak kurulmamış.",
+  NAME_REQUIRED: "Bir ad yaz.",
+  NAME_TOO_LONG: "Ad en fazla 60 harf olabilir.",
+  PRICE_INVALID: "Fiyat 0 ile 100.000 TL arasında olmalı.",
+  DESCRIPTION_TOO_LONG: "Açıklama en fazla 280 harf olabilir.",
+  IMAGE_URL_INVALID: "Fotoğraf bağlantısı https:// ile başlamalı.",
+  CATEGORY_EXISTS: "Bu adla bir kategori zaten var.",
+  CATEGORY_NOT_EMPTY: "Kategoriyi silmeden önce içindeki ürünleri taşı ya da menüden kaldır.",
+  CATEGORY_NOT_FOUND: "Bu kategori bulunamadı.",
+  CATEGORY_REQUIRED: "Ürün için bir kategori seç.",
+  PRODUCT_NOT_FOUND: "Bu ürün bulunamadı.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

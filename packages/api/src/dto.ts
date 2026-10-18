@@ -58,7 +58,42 @@ export interface MenuItemDTO {
   priceKurus: number;
   available: boolean;
   description: string | null;
+  imageUrl: string | null;
   askida: boolean;
+}
+
+// ─────────────────────────────────────────────── café panel: Menü (plan piece 5)
+
+export interface StaffMenuCategoryDTO {
+  id: string;
+  name: string;
+  /** Products on the menu in it; removed ones don't count. */
+  productCount: number;
+}
+
+export interface StaffMenuProductDTO {
+  productId: string;
+  name: string;
+  /** Null only for a removed product whose category was deleted. */
+  categoryId: string | null;
+  category: string;
+  priceKurus: number;
+  /** On the till and the customer pages. */
+  available: boolean;
+  description: string | null;
+  imageUrl: string | null;
+  /** On the askı list (set in Peni ve askı). */
+  askida: boolean;
+}
+
+/** `GET /staff/:slug/menu`, and the answer to every menu change. */
+export interface StaffMenuDTO {
+  /** Top to bottom, as on the till's tabs. */
+  categories: StaffMenuCategoryDTO[];
+  /** On the menu, by category then position. */
+  products: StaffMenuProductDTO[];
+  /** "Menüden kaldırılanlar": kept for past sales; can be brought back. */
+  removed: StaffMenuProductDTO[];
 }
 
 export interface AskidaDTO {

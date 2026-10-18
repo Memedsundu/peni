@@ -132,6 +132,7 @@ model Cafe {
   tillDevices   TillDevice[]
   staffSessions StaffSession[]
   menu          MenuItem[]
+  menuCategories MenuCategory[]
   memberships   Membership[]
   posts         CafePost[]
 }
@@ -274,22 +275,45 @@ model RolePermission {
 }
 
 /// What a café sells. Edited in the Menü section of the café panel.
+/// A group on the menu and a tab on the till (plan piece 5).
+model MenuCategory {
+  id        String   @id
+  cafeId    String
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  cafe     Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  products MenuItem[]
+
+  @@unique([cafeId, name])
+  @@index([cafeId, sortOrder])
+}
+
 model MenuItem {
-  id          String  @id @default(cuid())
+  id          String    @id @default(cuid())
   cafeId      String
   /// Stable product id.
   productId   String
   name        String
-  category    String
+  /// Null only for a removed product whose category was deleted later.
+  categoryId  String?
   priceKurus  Int
-  available   Boolean @default(true)
+  available   Boolean   @default(true)
   description String?
   imageUrl    String?
-  sortOrder   Int     @default(0)
+  /// Within its category.
+  sortOrder   Int       @default(0)
+  /// "Menüden kaldır": kept for past sales and reports.
+  archivedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  cafe     Cafe          @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  category MenuCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
   @@unique([cafeId, productId])
+  @@index([cafeId, categoryId, sortOrder])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni
