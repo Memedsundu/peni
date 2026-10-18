@@ -9,13 +9,30 @@ export const phoneSchema = z
 
 const peniAmount = z.number().int().min(1).max(100_000);
 
-export const sendGiftSchema = z.object({
-  cafeSlug: z.string().min(1),
-  toPhone: phoneSchema,
-  peni: peniAmount,
-  message: z.string().trim().max(140).optional(),
-  idempotencyKey: z.string().min(8).max(100),
-});
+/** A Peni kodu as typed or scanned ("m7k 42q"); the server normalises it. */
+const memberCodeSchema = z.string().trim().min(6).max(12);
+
+/**
+ * Who a gift goes to [G6, D28]: a phone number, their Peni kodu, or a member picked
+ * from the café's list or from recent recipients (`toMemberId`). Exactly one.
+ */
+const recipientFields = {
+  toPhone: phoneSchema.optional(),
+  toCode: memberCodeSchema.optional(),
+  toMemberId: z.string().min(1).max(100).optional(),
+};
+const oneRecipient = (r: { toPhone?: string; toCode?: string; toMemberId?: string }) =>
+  [r.toPhone, r.toCode, r.toMemberId].filter((x) => x !== undefined).length === 1;
+
+export const sendGiftSchema = z
+  .object({
+    cafeSlug: z.string().min(1),
+    ...recipientFields,
+    peni: peniAmount,
+    message: z.string().trim().max(140).optional(),
+    idempotencyKey: z.string().min(8).max(100),
+  })
+  .refine(oneRecipient, "Telefon, Peni kodu veya üyeden birini seç");
 
 export const donateAskidaSchema = z.object({
   cafeSlug: z.string().min(1),
@@ -31,8 +48,13 @@ export const tillDonationSchema = z.object({
 
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(500) });
 
-/** `POST /cafes/:slug/members/lookup` [G6] */
-export const memberLookupSchema = z.object({ phone: phoneSchema });
+/** `POST /cafes/:slug/members/lookup`: by phone or by Peni kodu, one of them. [G6, D28] */
+export const memberLookupSchema = z
+  .object({ phone: phoneSchema.optional(), code: memberCodeSchema.optional() })
+  .refine((r) => (r.phone === undefined) !== (r.code === undefined), "Telefon veya Peni kodu gir");
+
+/** `GET /cafes/:slug/members?q=`: the café's members who show their profile. [D28] */
+export const cafeMembersQuerySchema = z.object({ q: z.string().trim().max(40).optional() });
 
 /** `POST /me/profile` [G18]. Send only what changes. */
 export const updateProfileSchema = z.object({

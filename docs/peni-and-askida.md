@@ -61,6 +61,7 @@ Every operation carries an **idempotency key**, so a retried request or a webhoo
 ## Gifts (*ısmarlama*)
 
 - Only to a member of the **same café**, and never to yourself.
+- The sender finds the recipient one of three ways (D28): by **phone number**, by their **Peni kodu** (shown in their app, typed or scanned), or by picking them from the café's **member list**, which shows only members who made their profile visible ("Mehmet K."). People who sign in by email, Google or Apple may have no phone, so the code and the list are how they get treated. Phone and code lookups count against 20 an hour per customer. "Son ısmarladıkların" keeps everyone treated before, phone or not.
 - Held in escrow until the recipient **accepts**. Declined, cancelled by the sender, or not accepted within `giftExpiryHours` (24 h) → it returns to the sender.
 - Daily limit per sender: `dailyGiftLimitPeni` (200), counted per **local day** in the café's time zone.
 

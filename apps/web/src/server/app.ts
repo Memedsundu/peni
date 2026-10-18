@@ -2,6 +2,7 @@ import type {
   AskidaDTO,
   CafeDetailDTO,
   CafeHue,
+  CafeMembersDTO,
   CafeSummaryDTO,
   CustomerDTO,
   FullWalletDTO,
@@ -41,6 +42,7 @@ import {
   type Gift,
   type IdentityStore,
   type LedgerStore,
+  type Membership,
   type MenuItem,
   type MenuStore,
   type PeniDirectory,
@@ -271,21 +273,41 @@ export class PeniApp {
   }
 
   /**
-   * Gift recipient check [G6]: reveals only "Mehmet K.", only to members of the same
-   * café, and only 20 times an hour per customer. Every lookup counts, hits or not.
+   * Gift recipient check [G6]: by phone or Peni kodu, reveals only "Mehmet K.", only to
+   * members of the same café, and only 20 times an hour per customer. Every lookup
+   * counts, hits or not.
    */
-  async lookupMember(customer: CustomerRecord, slug: string, phone: string): Promise<MemberLookupDTO> {
+  async lookupMember(customer: CustomerRecord, slug: string, by: RecipientRef): Promise<MemberLookupDTO> {
     const cafe = await this.requireCafe(slug);
     await this.requireMembershipId(customer.id, cafe.id);
     await this.consumeLookup(customer.id);
-    if (phone === customer.phone) throw new AppError("GIFT_INVALID", "You cannot treat yourself", 400);
-    const recipient = await this.identity.getCustomerByPhone(phone);
-    const membership = recipient ? await this.directory.findMembership(recipient.id, cafe.id) : null;
-    if (!recipient || !membership || membership.blocked) {
-      throw new AppError("RECIPIENT_NOT_MEMBER", "No member with this number at this café", 404);
-    }
-    const { firstName, lastInitial } = nameParts(recipient.displayName);
+    const membership = await this.recipientAt(cafe, by);
+    if (membership.customerId === customer.id) throw new AppError("GIFT_INVALID", "You cannot treat yourself", 400);
+    const recipient = await this.identity.getCustomer(membership.customerId);
+    const { firstName, lastInitial } = nameParts(recipient?.displayName ?? "");
     return { firstName, lastInitial };
+  }
+
+  /**
+   * "Kafenin üyeleri" [D28]: members of this café who show their profile, to pick whom
+   * to treat. Hidden profiles, blocked members and the customer themself are left out.
+   */
+  async cafeMembers(customer: CustomerRecord, slug: string, q?: string): Promise<CafeMembersDTO> {
+    const cafe = await this.requireCafe(slug);
+    await this.requireMembershipId(customer.id, cafe.id);
+    const memberships = (await this.directory.listMemberships({ cafeId: cafe.id })).filter(
+      (m) => !m.blocked && m.customerId !== customer.id,
+    );
+    const people = new Map((await this.identity.getCustomers(memberships.map((m) => m.customerId))).map((c) => [c.id, c]));
+    const needle = q?.trim().toLocaleLowerCase("tr");
+    const members = memberships
+      .map((m) => ({ m, c: people.get(m.customerId) }))
+      .filter((x): x is { m: Membership; c: CustomerRecord } => !!x.c?.profileVisible && !!x.c.displayName.trim())
+      .filter(({ c }) => !needle || c.displayName.toLocaleLowerCase("tr").split(/\s+/).some((w) => w.startsWith(needle)))
+      .sort((a, b) => a.c.displayName.localeCompare(b.c.displayName, "tr"))
+      .slice(0, 50)
+      .map(({ m, c }) => ({ memberId: m.id, ...nameParts(c.displayName), initials: initialsOf(c.displayName), avatarUrl: c.avatarUrl }));
+    return { members };
   }
 
   // ─────────────────────────────────────────────── wallet & gifts
@@ -354,14 +376,20 @@ export class PeniApp {
 
   async sendGift(
     customer: CustomerRecord,
-    input: { cafeSlug: string; toPhone: string; peni: number; message?: string; idempotencyKey: string },
+    input: {
+      cafeSlug: string;
+      toPhone?: string;
+      toCode?: string;
+      toMemberId?: string;
+      peni: number;
+      message?: string;
+      idempotencyKey: string;
+    },
   ): Promise<GiftDTO> {
     const cafe = await this.requireCafe(input.cafeSlug);
     const from = await this.requireMembershipId(customer.id, cafe.id);
-    if (input.toPhone === customer.phone) throw new PeniError("GIFT_INVALID", "You cannot send a gift to yourself");
-    const recipient = await this.identity.getCustomerByPhone(input.toPhone);
-    const to = recipient ? await this.directory.findMembership(recipient.id, cafe.id) : null;
-    if (!to) throw new AppError("RECIPIENT_NOT_MEMBER", "Recipient is not a member of this café", 404);
+    const to = await this.recipientAt(cafe, recipientRef(input));
+    if (to.id === from) throw new PeniError("GIFT_INVALID", "You cannot send a gift to yourself");
     const gift = await this.peni.sendGift({
       fromMembershipId: from,
       toMembershipId: to.id,
@@ -684,12 +712,13 @@ export class PeniApp {
       const count = perCafe.get(s.cafe.id) ?? 0;
       if (seen.has(key) || count >= 5) continue;
       const customer = await this.customerForMembership(s.recipientId);
-      if (!customer?.phone) continue;
+      if (!customer) continue;
       seen.add(key);
       perCafe.set(s.cafe.id, count + 1);
       const { firstName, lastInitial } = nameParts(customer.displayName);
       out.push({
         cafeSlug: s.cafe.slug,
+        memberId: s.recipientId,
         phone: customer.phone,
         firstName,
         lastInitial,
@@ -698,6 +727,24 @@ export class PeniApp {
       });
     }
     return out;
+  }
+
+  /** The membership at this café that a phone, a Peni kodu or a picked member points to. Blocked members can't be treated. */
+  private async recipientAt(cafe: Cafe, to: RecipientRef): Promise<Membership> {
+    let membership: Membership | null = null;
+    if ("memberId" in to) {
+      membership = await this.directory.getMembership(to.memberId);
+    } else if ("code" in to) {
+      const id = await this.membershipForCode(to.code);
+      membership = id ? await this.directory.getMembership(id) : null;
+    } else {
+      const recipient = await this.identity.getCustomerByPhone(to.phone);
+      membership = recipient ? await this.directory.findMembership(recipient.id, cafe.id) : null;
+    }
+    if (!membership || membership.cafeId !== cafe.id || membership.blocked) {
+      throw new AppError("RECIPIENT_NOT_MEMBER", "No such member at this café", 404);
+    }
+    return membership;
   }
 
   private async consumeLookup(customerId: string): Promise<void> {
@@ -749,6 +796,16 @@ export class PeniApp {
     if (!m) throw new AppError("NOT_A_MEMBER", "Join the café first", 403);
     return m.id;
   }
+}
+
+/** Who a gift goes to: a phone number, a Peni kodu, or a member picked from a list. [G6, D28] */
+export type RecipientRef = { phone: string } | { code: string } | { memberId: string };
+
+function recipientRef(input: { toPhone?: string; toCode?: string; toMemberId?: string }): RecipientRef {
+  if (input.toMemberId !== undefined) return { memberId: input.toMemberId };
+  if (input.toCode !== undefined) return { code: input.toCode };
+  if (input.toPhone !== undefined) return { phone: input.toPhone };
+  throw new AppError("VALIDATION", "Choose whom to treat", 400);
 }
 
 function toCustomerDTO(c: CustomerRecord): CustomerDTO {

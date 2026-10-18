@@ -199,11 +199,28 @@ export interface MemberLookupDTO {
   lastInitial: string | null;
 }
 
+/** `GET /cafes/:slug/members`: someone to treat, picked by name. Only members who show their profile. [D28] */
+export interface CafeMemberDTO {
+  /** Send it back as `toMemberId`. */
+  memberId: string;
+  firstName: string;
+  lastInitial: string | null;
+  initials: string;
+  avatarUrl: string | null;
+}
+
+export interface CafeMembersDTO {
+  /** By name, at most 50. */
+  members: CafeMemberDTO[];
+}
+
 /** Someone this customer treated before, at one café. Newest first. [G6] */
 export interface RecentRecipientDTO {
   cafeSlug: string;
-  /** To send again. The sender typed it the first time. Recipients without a phone are left out. */
-  phone: string;
+  /** To send again as `toMemberId`. */
+  memberId: string;
+  /** Only when the recipient has one; people who sign in by email may not. */
+  phone: string | null;
   firstName: string;
   lastInitial: string | null;
   initials: string;

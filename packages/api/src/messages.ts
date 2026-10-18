@@ -14,7 +14,7 @@ export const errorMessagesTr: Record<string, string> = {
   CROSS_CAFE: "Yalnız aynı kafenin üyelerine ısmarlayabilirsin.",
   MEMBERSHIP_BLOCKED: "Bu kafedeki üyeliğin şu an kullanılamıyor. Kasaya sorabilirsin.",
   NOT_A_MEMBER: "Bunun için kafeye katıl. Üyelik ücretsiz.",
-  RECIPIENT_NOT_MEMBER: "Bu numarayla bu kafede üye bulunamadı.",
+  RECIPIENT_NOT_MEMBER: "Bu kafede böyle bir üye bulunamadı.",
   GIFT_INVALID: "Kendine ısmarlayamazsın.",
   GIFT_LIMIT: "Bugünkü ısmarlama sınırına ulaştın. Yarın yine ısmarlayabilirsin.",
   GIFT_NOT_PENDING: "Bu ısmarlama artık geçerli değil.",
