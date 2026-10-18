@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { PeniApp } from "./app";
 import { DEMO_CUSTOMERS, DEMO_STAFF, DEMO_STAFF_PASSWORD, seed } from "./seed";
-import { SIGN_IN_LIMIT } from "./staff";
+import { PIN_MAX_FAILURES, PIN_TRIES, SIGN_IN_LIMIT } from "./staff";
 
 let app: PeniApp;
 let now: Date;
@@ -34,7 +34,7 @@ describe("staff sign-in", () => {
     expect(moda!.permissions).toContain("roles.manage");
     expect(kuzguncuk!.permissions).toContain("reports.view");
     expect(kuzguncuk!.permissions).not.toContain("team.manage");
-    expect(await app.staff.me(session.token)).toEqual({ account: session.account, cafes: session.cafes });
+    expect(await app.staff.me(session.token)).toEqual({ account: session.account, signedInWith: "password", cafes: session.cafes });
   });
 
   it("gives the same answer for a wrong password and an unknown email", async () => {
@@ -190,5 +190,123 @@ describe("staff who are also customers", () => {
     await app.staff.join(account.id, "cafe_kuzguncuk", "chef");
     expect(await app.staff.cafesForCustomer(DEMO_CUSTOMERS.deniz.id)).toEqual([{ slug: "kuzguncuk", name: expect.any(String), role: "chef" }]);
     expect(await app.staff.cafesForCustomer(DEMO_CUSTOMERS.ayse.id)).toEqual([]);
+  });
+});
+
+describe("the till", () => {
+  /** Leyla sets the café computer up as a till and returns its device token. */
+  const setUpTill = async () => {
+    const owner = await app.staff.at(await signIn("leyla"), "moda");
+    return (await app.staff.registerDevice(owner, "Kasa bilgisayarı")).token;
+  };
+  const eceId = async (device: string) => (await app.staff.till(device)).staff.find((s) => s.name === "Ece Tan")!.memberId;
+
+  it("lists who can sign in with a PIN on a computer set up as a till", async () => {
+    const device = await setUpTill();
+    const till = await app.staff.till(device);
+    expect(till.cafe).toEqual({ slug: "moda", name: "Moda Kahvesi" });
+    expect(till.staff.map((s) => [s.name, s.hasPin])).toEqual([
+      ["Leyla Kara", false],
+      ["Murat Aksu", false],
+      ["Hakan Usta", true],
+      ["Ece Tan", true],
+    ]);
+    expect(await code(app.staff.till("not-a-device"))).toBe("DEVICE_UNKNOWN");
+    expect(await code(app.staff.till(null))).toBe("DEVICE_UNKNOWN");
+  });
+
+  it("is set up by an owner", async () => {
+    const murat = await app.staff.at(await signIn("murat"), "moda");
+    expect(await code(app.staff.registerDevice(murat, "Kasa"))).toBe("FORBIDDEN");
+  });
+
+  it("signs a barista in with their PIN for the till's own work only", async () => {
+    const device = await setUpTill();
+    const session = await app.staff.pinSignIn(device, await eceId(device), "2580");
+    expect(session.signedInWith).toBe("pin");
+    expect(session.cafes.map((c) => c.slug)).toEqual(["moda"]);
+    expect(session.cafes[0]!.permissions).toContain("till.use");
+    expect((await app.staff.at(session.token, "moda", "peni.till")).method).toBe("pin");
+    expect(await code(app.staff.at(session.token, "moda", "stock.view"))).toBe("FORBIDDEN");
+  });
+
+  it("keeps an owner's PIN session away from the back office", async () => {
+    const owner = await app.staff.at(await signIn("leyla"), "moda");
+    const device = (await app.staff.registerDevice(owner, "Kasa")).token;
+    const leylaId = (await app.staff.till(device)).staff.find((s) => s.name === "Leyla Kara")!.memberId;
+    expect(await code(app.staff.pinSignIn(device, leylaId, "2580"))).toBe("NO_PIN");
+    await app.staff.setPin(owner, "4826");
+    const pin = await app.staff.pinSignIn(device, leylaId, "4826");
+    expect(pin.cafes.map((c) => c.slug)).toEqual(["moda"]);
+    expect((await app.staff.at(pin.token, "moda", "till.correct")).role).toBe("owner");
+    expect(await code(app.staff.at(pin.token, "moda", "team.manage"))).toBe("NEEDS_PASSWORD");
+    expect(await code(app.staff.at(pin.token, "kuzguncuk"))).toBe("NOT_STAFF");
+    const atTill = await app.staff.at(pin.token, "moda");
+    expect(await code(app.staff.setPin(atTill, "9137"))).toBe("NEEDS_PASSWORD");
+    expect(await code(app.staff.registerDevice(atTill, "Another"))).toBe("NEEDS_PASSWORD");
+    expect(await code(app.staff.changePassword(pin.token, DEMO_STAFF_PASSWORD, "something-new-1"))).toBe("NEEDS_PASSWORD");
+  });
+
+  it("refuses easy PINs", async () => {
+    const owner = await app.staff.at(await signIn("leyla"), "moda");
+    expect(await code(app.staff.setPin(owner, "1234"))).toBe("PIN_TOO_EASY");
+    expect(await code(app.staff.setPin(owner, "12"))).toBe("PIN_FORMAT");
+  });
+
+  it("pauses a PIN after 5 wrong tries and clears it after 20", async () => {
+    const device = await setUpTill();
+    const ece = await eceId(device);
+    for (let i = 1; i < PIN_TRIES; i++) expect(await code(app.staff.pinSignIn(device, ece, "0007"))).toBe("PIN_WRONG");
+    expect(await code(app.staff.pinSignIn(device, ece, "0007"))).toBe("PIN_WRONG");
+    expect(await code(app.staff.pinSignIn(device, ece, "2580"))).toBe("PIN_LOCKED");
+    expect((await app.staff.till(device)).staff.find((s) => s.memberId === ece)!.lockedUntilIso).not.toBeNull();
+    tick(16 * MIN);
+    expect(await code(app.staff.pinSignIn(device, ece, "2580"))).toBe("ok");
+
+    for (let i = 1; i < PIN_MAX_FAILURES; i++) {
+      await code(app.staff.pinSignIn(device, ece, "0007"));
+      if (i % PIN_TRIES === 0) tick(16 * MIN);
+    }
+    expect(await code(app.staff.pinSignIn(device, ece, "0007"))).toBe("PIN_CLEARED");
+    expect(await code(app.staff.pinSignIn(device, ece, "2580"))).toBe("NO_PIN");
+  });
+
+  it("ends a PIN session after a shift, when the till is revoked, or when the person leaves", async () => {
+    const owner = await app.staff.at(await signIn("leyla"), "moda");
+    const { device, token } = await app.staff.registerDevice(owner, "Kasa");
+    const ece = await eceId(token);
+    const first = await app.staff.pinSignIn(token, ece, "2580");
+    tick(13 * 60 * MIN);
+    expect(await code(app.staff.me(first.token))).toBe("STAFF_UNAUTHENTICATED");
+
+    const second = await app.staff.pinSignIn(token, ece, "2580");
+    expect((await app.staff.devices(owner)).devices.map((d) => d.name)).toEqual(["Kasa"]);
+    await app.staff.revokeDevice(owner, device.id);
+    expect(await code(app.staff.me(second.token))).toBe("STAFF_UNAUTHENTICATED");
+    expect(await code(app.staff.till(token))).toBe("DEVICE_UNKNOWN");
+    expect(await app.staff.devices(owner)).toEqual({ devices: [] });
+
+    const again = (await app.staff.registerDevice(owner, "Yeni kasa")).token;
+    const third = await app.staff.pinSignIn(again, ece, "2580");
+    await app.staff.updateMember(owner, ece, { removed: true });
+    expect(await code(app.staff.at(third.token, "moda"))).toBe("NOT_STAFF");
+    expect(await code(app.staff.pinSignIn(again, ece, "2580"))).toBe("NOT_STAFF");
+  });
+
+  it("lets the owner clear someone's PIN", async () => {
+    const owner = await app.staff.at(await signIn("leyla"), "moda");
+    const device = (await app.staff.registerDevice(owner, "Kasa")).token;
+    const ece = await eceId(device);
+    const team = await app.staff.updateMember(owner, ece, { clearPin: true });
+    expect(team.members.find((m) => m.id === ece)!.hasPin).toBe(false);
+    expect(await code(app.staff.pinSignIn(device, ece, "2580"))).toBe("NO_PIN");
+  });
+
+  it("keeps one café's till to that café's team", async () => {
+    const tarik = await app.staff.at(await signIn("tarik"), "kuzguncuk");
+    const device = (await app.staff.registerDevice(tarik, "Kuzguncuk kasa")).token;
+    const modaDevice = await setUpTill();
+    expect(await code(app.staff.pinSignIn(device, await eceId(modaDevice), "2580"))).toBe("NOT_STAFF");
+    expect((await app.staff.till(device)).staff.map((s) => s.name)).toEqual(["Tarık Ersoy", "Leyla Kara"]);
   });
 });

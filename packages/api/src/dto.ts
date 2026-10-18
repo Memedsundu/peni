@@ -309,9 +309,11 @@ export interface StaffCafeAccessDTO {
   permissions: string[];
 }
 
-/** `GET /staff/me` */
+/** `GET /staff-session` */
 export interface StaffMeDTO {
   account: StaffAccountDTO;
+  /** "pin" at the till: one café, only the till's own work. */
+  signedInWith: "password" | "pin";
   cafes: StaffCafeAccessDTO[];
 }
 
@@ -329,11 +331,28 @@ export interface TeamMemberDTO {
   isYou: boolean;
   /** False until a password is set. */
   canSignIn: boolean;
+  /** Has set a PIN for the till. */
+  hasPin: boolean;
 }
 
 /** `GET /staff/:slug/team` */
 export interface TeamDTO {
   members: TeamMemberDTO[];
+}
+
+export interface TillDeviceDTO {
+  id: string;
+  name: string;
+  createdIso: string;
+  lastSeenIso: string | null;
+}
+
+/** `GET /till`: the till's sign-in screen, for a computer set up as a till. */
+export interface TillDTO {
+  cafe: { slug: string; name: string };
+  device: TillDeviceDTO;
+  /** Everyone whose role takes orders. Tap a name, then type the PIN. */
+  staff: { memberId: string; name: string; role: StaffRole; hasPin: boolean; lockedUntilIso: string | null }[];
 }
 
 export interface RolePermissionDTO {

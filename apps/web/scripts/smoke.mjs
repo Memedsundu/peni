@@ -126,7 +126,24 @@ await call("POST", "/staff-session/sign-out", { headers: ece });
 assert.equal((await call("GET", "/staff-session", { headers: ece })).status, 401);
 step("Staff sign in by email; Ece records askı cash but can't see the report; Leyla adds Ali, lets baristas see the team, then removes him");
 
-// 4. Profile, calendar.
+// 4. The till: Leyla sets the café computer up once; Ece signs in on it with her PIN.
+const setup = (await call("POST", "/staff/moda/devices", { headers: STAFF, body: { name: "Kasa bilgisayarı" } })).json;
+const TILL = { "x-peni-till-token": setup.token };
+assert.equal((await call("GET", "/till")).json.error.code, "DEVICE_UNKNOWN");
+const tillScreen = (await call("GET", "/till", { headers: TILL })).json;
+const eceAtTill = tillScreen.staff.find((s) => s.name === "Ece Tan");
+assert.equal(eceAtTill.hasPin, true);
+assert.equal((await call("POST", "/till/pin", { headers: TILL, body: { memberId: eceAtTill.memberId, pin: "0007" } })).json.error.code, "PIN_WRONG");
+const pinSession = (await call("POST", "/till/pin", { headers: TILL, body: { memberId: eceAtTill.memberId, pin: "2580" } })).json;
+assert.equal(pinSession.signedInWith, "pin");
+const ecePin = { "x-peni-staff-token": pinSession.token };
+assert.equal((await call("POST", "/staff/moda/askida/till", { headers: ecePin, body: { peni: 10, idempotencyKey: key() } })).status, 200);
+assert.equal((await call("POST", "/staff/moda/pin", { headers: ecePin, body: { pin: "9137" } })).json.error.code, "NEEDS_PASSWORD");
+await call("POST", `/staff/moda/devices/${setup.device.id}/revoke`, { headers: STAFF });
+assert.equal((await call("GET", "/staff-session", { headers: ecePin })).status, 401, "revoking the till signs everyone on it out");
+step("Leyla sets up a till; Ece signs in with her PIN, records askı cash, can't change her PIN there; revoking the till signs her out");
+
+// 5. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
 assert.deepEqual(me.staffCafes, []);
@@ -139,7 +156,7 @@ assert.match(ics.headers.get("content-type") ?? "", /^text\/calendar/);
 assert.match(await ics.text(), /BEGIN:VEVENT\r\n[\s\S]*SUMMARY:Mahalleye bir takas kütüphanesi kursak\?/);
 step("Profil loads and saves; the Peni masası downloads as text/calendar");
 
-// 5. The café report adds up: every change in what is owed is a change in wallets or the askı.
+// 6. The café report adds up: every change in what is owed is a change in wallets or the askı.
 const dash = (await call("GET", "/staff/moda", { headers: STAFF })).json;
 const wallets = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
 const delta = (xs, ys) => ys.reduce((a, b) => a + b, 0) - xs.reduce((a, b) => a + b, 0);

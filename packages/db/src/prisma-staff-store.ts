@@ -5,12 +5,24 @@ import {
   type StaffAccount,
   type StaffMember,
   type StaffStore,
+  type TillDevice,
 } from "@peni/core";
 import type { Db } from "./db";
 import type { Prisma } from "./generated/client";
 
 const ACCOUNT = { id: true, email: true, name: true, passwordHash: true, customerId: true, disabledAt: true } as const;
-const MEMBER = { id: true, cafeId: true, accountId: true, role: true, createdAt: true, removedAt: true } as const;
+const MEMBER = {
+  id: true,
+  cafeId: true,
+  accountId: true,
+  role: true,
+  createdAt: true,
+  removedAt: true,
+  pinHash: true,
+  pinFailures: true,
+  pinLockedUntil: true,
+} as const;
+const DEVICE = { id: true, cafeId: true, name: true, createdAt: true, createdByMemberId: true, lastSeenAt: true, revokedAt: true } as const;
 
 export class PrismaStaffStore implements StaffStore {
   constructor(private readonly db: Db) {}
@@ -62,14 +74,21 @@ export class PrismaStaffStore implements StaffStore {
     await this.db().staffMember.upsert({ where: { id }, create: member, update });
   }
 
-  async createSession(accountId: string, tokenHash: string, expiresAt: Date): Promise<void> {
-    await this.db().staffSession.create({ data: { accountId, tokenHash, expiresAt } });
+  async createSession(
+    accountId: string,
+    tokenHash: string,
+    expiresAt: Date,
+    pin?: { cafeId: string; deviceId: string },
+  ): Promise<void> {
+    await this.db().staffSession.create({
+      data: { accountId, tokenHash, expiresAt, ...(pin ? { method: "pin" as const, ...pin } : {}) },
+    });
   }
 
   async sessionFor(tokenHash: string) {
     return this.db().staffSession.findUnique({
       where: { tokenHash },
-      select: { accountId: true, expiresAt: true, revokedAt: true },
+      select: { accountId: true, expiresAt: true, revokedAt: true, method: true, cafeId: true, deviceId: true },
     });
   }
 
@@ -82,6 +101,35 @@ export class PrismaStaffStore implements StaffStore {
       where: { accountId, revokedAt: null, ...(exceptTokenHash ? { tokenHash: { not: exceptTokenHash } } : {}) },
       data: { revokedAt: at },
     });
+  }
+
+  async revokeSessionsOnDevice(deviceId: string, at: Date): Promise<void> {
+    await this.db().staffSession.updateMany({ where: { deviceId, revokedAt: null }, data: { revokedAt: at } });
+  }
+
+  async createDevice(device: TillDevice, tokenHash: string): Promise<void> {
+    await this.db().tillDevice.create({ data: { ...device, tokenHash } });
+  }
+
+  async getDevice(id: string): Promise<TillDevice | null> {
+    return this.db().tillDevice.findUnique({ where: { id }, select: DEVICE });
+  }
+
+  async deviceForToken(tokenHash: string): Promise<TillDevice | null> {
+    return this.db().tillDevice.findUnique({ where: { tokenHash }, select: DEVICE });
+  }
+
+  async listDevices(cafeId: string): Promise<TillDevice[]> {
+    return this.db().tillDevice.findMany({
+      where: { cafeId, revokedAt: null },
+      select: DEVICE,
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+  }
+
+  async saveDevice(device: TillDevice): Promise<void> {
+    const { id, ...data } = device;
+    await this.db().tillDevice.update({ where: { id }, data });
   }
 
   async recordFailedSignIn(email: string, at: Date): Promise<void> {

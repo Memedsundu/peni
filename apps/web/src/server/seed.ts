@@ -22,15 +22,18 @@ export const DEMO_NEIGHBOURS = {
   nermin: { id: "cus_nermin", phone: "+905320000020", displayName: "Nermin Arıkan", profileVisible: true },
 } as const;
 
-/** Demo café staff, one of each role, all with the same password. Leyla also manages Kuzguncuk. */
+/** Demo café staff, one of each role, all with the same password. Leyla also manages Kuzguncuk. Hakan and Ece have till PINs. */
 export const DEMO_STAFF_PASSWORD = process.env.PENI_DEMO_STAFF_PASSWORD ?? "demo-staff";
 export const DEMO_STAFF = {
   leyla: { name: "Leyla Kara", email: "leyla@moda.test", roles: { moda: "owner", kuzguncuk: "manager" } },
   murat: { name: "Murat Aksu", email: "murat@moda.test", roles: { moda: "manager" } },
-  hakan: { name: "Hakan Usta", email: "hakan@moda.test", roles: { moda: "chef" } },
-  ece: { name: "Ece Tan", email: "ece@moda.test", roles: { moda: "barista" } },
+  hakan: { name: "Hakan Usta", email: "hakan@moda.test", roles: { moda: "chef" }, pin: "3690" },
+  ece: { name: "Ece Tan", email: "ece@moda.test", roles: { moda: "barista" }, pin: "2580" },
   tarik: { name: "Tarık Ersoy", email: "tarik@kuzguncuk.test", roles: { kuzguncuk: "owner" } },
-} as const satisfies Record<string, { name: string; email: string; roles: Partial<Record<"moda" | "kuzguncuk", StaffRole>> }>;
+} as const satisfies Record<
+  string,
+  { name: string; email: string; roles: Partial<Record<"moda" | "kuzguncuk", StaffRole>>; pin?: string }
+>;
 
 type Who = keyof typeof DEMO_CUSTOMERS | keyof typeof DEMO_NEIGHBOURS;
 type Slug = "moda" | "kuzguncuk";
@@ -120,7 +123,8 @@ export async function seed(app: PeniApp): Promise<void> {
     const account = await app.staff.ensureAccount({ name: s.name, email: s.email, password: DEMO_STAFF_PASSWORD });
     // A day apart, so a person's cafés list in the same order in memory and in Postgres.
     for (const [i, [slug, role]] of (Object.entries(s.roles) as [Slug, StaffRole][]).entries()) {
-      const member = await app.at(daysAgo(90 - i), () => app.staff.join(account.id, CAFE_ID[slug], role));
+      const pin = "pin" in s ? s.pin : undefined;
+      const member = await app.at(daysAgo(90 - i), () => app.staff.join(account.id, CAFE_ID[slug], role, pin));
       if (role === "barista" || (role === "owner" && !tillStaff[slug])) {
         tillStaff[slug] = { cafe: (await app.identity.getCafe(CAFE_ID[slug]))!, member };
       }
