@@ -99,6 +99,7 @@ import { TaskService } from "./tasks";
 import { AlertService } from "./alerts";
 import { SalesReportService } from "./sales-report";
 import { AssistantService, demoModel, type AiMode } from "./assistant";
+import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
 import type { AiModel } from "@peni/ai";
 import { shiftEmail } from "./shift-email";
@@ -191,8 +192,14 @@ export interface PeniAppOptions {
   publicUrl?: string;
   /** The assistant's model (piece 24): OpenAI with a key, the demo's stand-in, or none (off). */
   ai?: { model: AiModel | null; mode: AiMode };
+  /**
+   * The domain cafés' bill addresses are at (piece 26), when this server takes email.
+   * The demo shows addresses at fatura.peni.test, which take only its sample email.
+   */
+  inboxDomain?: string | null;
 }
 
+const DEMO_INBOX_DOMAIN = "fatura.peni.test";
 const HOUR_MS = 3_600_000;
 const CLOSED_CLAIM = { claimed: "CLAIM_TAKEN", expired: "CLAIM_EXPIRED", cancelled: "CLAIM_CANCELLED" } as const;
 const DAY_MS = 24 * HOUR_MS;
@@ -245,6 +252,8 @@ export class PeniApp {
   readonly jobs: JobRunner;
   /** Taslaklar: documents in, drafts out, a person confirms (piece 24). */
   readonly assistant: AssistantService;
+  /** Each café's address for bills (piece 26). */
+  readonly inbox: InboxService;
   /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
   readonly orderStore: OrderStore;
   readonly paymentStore: PaymentStore;
@@ -324,6 +333,13 @@ export class PeniApp {
     this.jobs = new JobRunner(stores.assistant, () => this.now());
     const ai = options.ai ?? (options.demo ? { model: demoModel(() => localDateKey(this.now(), "Europe/Istanbul")), mode: "demo" as const } : { model: null, mode: "off" as const });
     this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, ai, () => this.now());
+    this.inbox = new InboxService(
+      stores.assistant,
+      this.assistant,
+      this.directory,
+      { domain: options.inboxDomain ?? (options.demo ? DEMO_INBOX_DOMAIN : null), demo: options.demo },
+      () => this.now(),
+    );
     this.alerts = new AlertService({
       stock: this.stock,
       debts: this.debts,

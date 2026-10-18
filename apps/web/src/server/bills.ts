@@ -675,7 +675,14 @@ export class BillService {
       closed: !!closedThrough && bill.date <= closedThrough,
       kdv: bill.kdv,
       document: doc
-        ? { id: doc.id, name: doc.name, contentType: doc.contentType, size: doc.size, url: `/api/v1/staff/${encodeURIComponent(ctx.cafe.slug)}/documents/${doc.id}` }
+        ? {
+            id: doc.id,
+            name: doc.name,
+            contentType: doc.contentType,
+            size: doc.size,
+            url: `/api/v1/staff/${encodeURIComponent(ctx.cafe.slug)}/documents/${doc.id}`,
+            sender: doc.sender,
+          }
         : null,
     };
   }

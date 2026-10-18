@@ -929,6 +929,37 @@ const TEXT = {
   kdvTooMuch: { tr: "KDV toplamı faturadan az olmalı; her oran bir kez.", en: "The VAT must be less than the bill, each rate once." },
   kdvLine: { tr: "KDV %{rate}", en: "VAT {rate}%" },
   billDocument: { tr: "Belgeyi aç", en: "Open the document" },
+  // ── the inbox (plan piece 26)
+  ibTitle: { tr: "Faturalar için e-posta adresin", en: "Your address for bills" },
+  ibHelp: {
+    tr: "Tedarikçilerine bu adresi ver ya da sana gelen faturayı buraya ilet. Ekteki PDF ve fotoğrafları asistan okur, taslak burada bekler.",
+    en: "Give this address to your suppliers, or forward bills you get to it. The assistant reads attached PDFs and photos; the draft waits here.",
+  },
+  ibCopy: { tr: "Kopyala", en: "Copy" },
+  ibCopied: { tr: "Kopyalandı", en: "Copied" },
+  ibOff: { tr: "Kapalı: bu adrese gelen e-postalar okunmuyor.", en: "Off: emails to this address aren't read." },
+  ibTurnOff: { tr: "Kapat", en: "Turn off" },
+  ibTurnOn: { tr: "Aç", en: "Turn on" },
+  ibNew: { tr: "Yeni adres al", en: "Get a new address" },
+  ibNewHelp: {
+    tr: "Eski adres hemen çalışmaz olur; ona gelen e-postalar okunmaz. Tedarikçilerine yeni adresi vermen gerekir.",
+    en: "The old address stops working at once, and emails to it aren't read. You'll need to give suppliers the new one.",
+  },
+  ibNewDo: { tr: "Evet, yeni adres al", en: "Yes, get a new address" },
+  ibDemo: { tr: "Demo: bu adres gerçek e-posta almaz.", en: "Demo: this address doesn't get real email." },
+  ibSample: { tr: "Örnek e-posta gönder", en: "Send a sample email" },
+  ibNoEmails: { tr: "Bu adrese henüz e-posta gelmedi.", en: "No email has reached this address yet." },
+  ibNotReady: { tr: "E-posta kutusu bu sunucuda henüz kurulmadı.", en: "The email inbox isn't set up on this server yet." },
+  ibNoSubject: { tr: "(konu yok)", en: "(no subject)" },
+  ibNoFiles: { tr: "Eki yok, okunacak bir şey gelmedi.", en: "No attachments; nothing to read." },
+  ibSkipped: { tr: "okunmadı: {why}", en: "not read: {why}" },
+  skip_type: { tr: "fotoğraf ya da PDF değil", en: "not a photo or PDF" },
+  skip_large: { tr: "10 MB'tan büyük", en: "larger than 10 MB" },
+  skip_same: { tr: "bu dosya daha önce geldi", en: "this file came before" },
+  skip_limit: { tr: "sınır doldu", en: "over the limit" },
+  drEmails: { tr: "E-postalar", en: "Emails" },
+  drByEmail: { tr: "e-postayla: {sender}", en: "by email: {sender}" },
+  ev_email_received: { tr: "E-posta geldi", en: "Email received" },
 } as const;
 
 export type TextKey = keyof typeof TEXT;

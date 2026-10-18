@@ -13,6 +13,7 @@ import {
   type BillProposal,
   type BillStore,
   type Draft,
+  type DocumentType,
   type DuplicateRef,
   type Job,
   type LineMatch,
@@ -86,22 +87,51 @@ export class AssistantService {
       const duplicate = await this.sameFile(ctx.cafe.id, sha256);
       if (duplicate) return { reading: null, duplicate };
     }
-    const now = this.now();
+    const { doc, job } = await this.intake(ctx.cafe.id, { bytes, name, contentType, sha256 }, { by: ctx.member.id, emailId: null, sender: null });
+    return { reading: this.reading(job, doc.name), duplicate: null };
+  }
+
+  /**
+   * A file from an email that reached the café's address (piece 26): read like an upload,
+   * with the sender kept for the draft. Anything but a photo or PDF, anything too large,
+   * and a file the café already sent in are left, with the reason.
+   */
+  async fromEmail(
+    cafeId: string,
+    file: { bytes: Uint8Array; name: string },
+    email: { id: string; sender: string },
+  ): Promise<{ documentId: string } | { skipped: "type" | "large" | "same" }> {
+    if (file.bytes.length > MAX_DOCUMENT_BYTES) return { skipped: "large" };
+    const contentType = sniffDocumentType(file.bytes);
+    if (!contentType) return { skipped: "type" };
+    const sha256 = createHash("sha256").update(file.bytes).digest("hex");
+    if (await this.sameFile(cafeId, sha256)) return { skipped: "same" };
+    const { doc } = await this.intake(cafeId, { ...file, contentType, sha256 }, { by: null, emailId: email.id, sender: email.sender });
+    return { documentId: doc.id };
+  }
+
+  private async intake(
+    cafeId: string,
+    file: { bytes: Uint8Array; name: string; contentType: DocumentType; sha256: string },
+    from: { by: string | null; emailId: string | null; sender: string | null },
+  ) {
     const doc = {
       id: `doc_${randomUUID()}`,
-      cafeId: ctx.cafe.id,
-      name: name.trim().slice(0, DOCUMENT_NAME_MAX),
-      contentType,
-      bytes,
-      size: bytes.length,
-      sha256,
-      uploadedBy: ctx.member.id,
-      createdAt: now,
+      cafeId,
+      name: file.name.trim().slice(0, DOCUMENT_NAME_MAX),
+      contentType: file.contentType,
+      bytes: file.bytes,
+      size: file.bytes.length,
+      sha256: file.sha256,
+      uploadedBy: from.by ?? "",
+      emailId: from.emailId,
+      sender: from.sender,
+      createdAt: this.now(),
     };
     await this.store.saveDocument(doc);
-    const job = await this.jobs.add(ctx.cafe.id, READ, { documentId: doc.id, by: ctx.member.id });
-    await this.record({ cafeId: ctx.cafe.id, kind: "document.uploaded", memberId: ctx.member.id, documentId: doc.id, jobId: job.id, detail: doc.name || null });
-    return { reading: this.reading(job, doc.name), duplicate: null };
+    const job = await this.jobs.add(cafeId, READ, { documentId: doc.id, by: from.by, ...(from.sender ? { sender: from.sender } : {}) });
+    await this.record({ cafeId, kind: "document.uploaded", memberId: from.by, documentId: doc.id, jobId: job.id, detail: doc.name || null });
+    return { doc, job };
   }
 
   /** An earlier upload of the same bytes that is still being read or became a draft nobody dismissed. */
@@ -174,7 +204,11 @@ export class AssistantService {
     return {
       cafe: { slug: ctx.cafe.slug, name: ctx.cafe.name },
       today,
-      open: await Promise.all(open.map((d) => this.dto(ctx, d, names))),
+      // Two copies read at the same moment (an email with both, several files at once) don't
+      // see each other when they're written; here the newer one is marked.
+      open: await Promise.all(
+        open.map((d, i) => this.dto(ctx, { ...d, duplicateOf: d.duplicateOf ?? sameBillAmong(d.proposal, open.slice(i + 1), d.id) }, names)),
+      ),
       recent: await Promise.all(recent.map((d) => this.dto(ctx, d, names))),
       reading,
       ai: this.ai.mode,
@@ -372,7 +406,8 @@ export class AssistantService {
     if (!reading.isBill) return { result: { notBill: true } };
 
     const read = readBill(reading, items.length);
-    const { proposal, doubts } = await this.propose(cafeId, read, items);
+    const sender = typeof job.payload.sender === "string" ? job.payload.sender : null;
+    const { proposal, doubts } = await this.propose(cafeId, read, items, sender);
     const draft: Draft = {
       id: `drf_${randomUUID()}`,
       cafeId,
@@ -404,8 +439,10 @@ export class AssistantService {
    * matches, and each line as the stock item a person confirmed it to be before, or the
    * one the model picked (piece 25). Anything that needs a second look becomes a doubt.
    */
-  private async propose(cafeId: string, read: ReadBill, items: StockItem[]): Promise<{ proposal: BillProposal; doubts: string[] }> {
-    const supplier = matchSupplier(await this.billStore.listSuppliers(cafeId), read.supplierName, read.supplierTaxNumber);
+  private async propose(cafeId: string, read: ReadBill, items: StockItem[], sender: string | null): Promise<{ proposal: BillProposal; doubts: string[] }> {
+    const suppliers = await this.billStore.listSuppliers(cafeId);
+    // A bill emailed from a supplier's own address is theirs when the name doesn't say (piece 26).
+    const supplier = matchSupplier(suppliers, read.supplierName, read.supplierTaxNumber) ?? supplierByEmail(suppliers, sender);
     const learned = learnedMatches(await this.store.listLineMatches(cafeId), supplier?.id ?? null);
     const live = new Map(items.map((i) => [i.id, i]));
     const doubts: string[] = [];
@@ -503,18 +540,7 @@ export class AssistantService {
 
   /** Another open draft of the same bill: two photos of one receipt. */
   private async duplicateDraft(cafeId: string, p: BillProposal, self: string): Promise<DuplicateRef | null> {
-    if (!p.supplierId && !p.supplierName) return null;
-    const key = billNumberKey(p.number);
-    const total = p.totalKurus ?? lineSum(p);
-    const same = (await this.store.listDrafts(cafeId, { status: "open", limit: 100 })).find((d) => {
-      if (d.id === self) return false;
-      const q = d.proposal;
-      const sameSeller = p.supplierId ? q.supplierId === p.supplierId : !q.supplierId && q.supplierName === p.supplierName;
-      if (!sameSeller) return false;
-      if (key) return billNumberKey(q.number) === key;
-      return !!p.date && q.date === p.date && Math.abs((q.totalKurus ?? lineSum(q)) - total) <= SAME_TOTAL_KURUS;
-    });
-    return same ? { kind: "draft", id: same.id, title: same.title, why: key ? "number" : "dayTotal" } : null;
+    return sameBillAmong(p, await this.store.listDrafts(cafeId, { status: "open", limit: 100 }), self);
   }
 
   // ─────────────────────────────────────────────── helpers
@@ -531,7 +557,7 @@ export class AssistantService {
   }
 
   private async dto(ctx: StaffContext, d: Draft, names?: Map<string, string>): Promise<DraftDTO> {
-    const doc = d.documentId ? await this.store.getDocument(d.cafeId, d.documentId) : null;
+    const doc = d.documentId ? await this.store.getDocumentInfo(d.cafeId, d.documentId) : null;
     const who = d.decidedById ? ((names ?? (await this.names([d.decidedById]))).get(d.decidedById) ?? null) : null;
     return {
       id: d.id,
@@ -548,6 +574,7 @@ export class AssistantService {
             contentType: doc.contentType,
             size: doc.size,
             url: `/api/v1/staff/${encodeURIComponent(ctx.cafe.slug)}/documents/${doc.id}`,
+            sender: doc.sender,
           }
         : null,
       decidedBy: who,
@@ -586,6 +613,30 @@ let eventSeq = 0;
 export function eventId(): string {
   eventSeq = (eventSeq + 1) % 1_679_616;
   return `aie_${Date.now().toString(36).padStart(9, "0")}${eventSeq.toString(36).padStart(4, "0")}_${randomUUID().slice(0, 8)}`;
+}
+
+/** Another open draft of the same bill: the same seller and number, or with no number the same day and total. */
+function sameBillAmong(p: BillProposal, drafts: Draft[], self: string): DuplicateRef | null {
+  if (!p.supplierId && !p.supplierName) return null;
+  const key = billNumberKey(p.number);
+  const total = p.totalKurus ?? lineSum(p);
+  const same = drafts.find((d) => {
+    if (d.id === self) return false;
+    const q = d.proposal;
+    const sameSeller = p.supplierId ? q.supplierId === p.supplierId : !q.supplierId && q.supplierName === p.supplierName;
+    if (!sameSeller) return false;
+    if (key) return billNumberKey(q.number) === key;
+    return !!p.date && q.date === p.date && Math.abs((q.totalKurus ?? lineSum(q)) - total) <= SAME_TOTAL_KURUS;
+  });
+  return same ? { kind: "draft", id: same.id, title: same.title, why: key ? "number" : "dayTotal" } : null;
+}
+
+/** The one live supplier whose email the bill came from. */
+export function supplierByEmail(suppliers: Supplier[], sender: string | null): Supplier | null {
+  const from = sender?.trim().toLowerCase();
+  if (!from) return null;
+  const hits = suppliers.filter((s) => !s.archivedAt && s.email?.trim().toLowerCase() === from);
+  return hits.length === 1 ? hits[0]! : null;
 }
 
 /** "Moda Süt Ürünleri Ltd. Şti." and "Moda Süt" are the same seller; so are two equal tax numbers. */

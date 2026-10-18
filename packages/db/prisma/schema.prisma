@@ -170,6 +170,8 @@ model Cafe {
   drafts         AiDraft[]
   jobs           Job[]
   aiEvents       AiEvent[]
+  inbox          CafeInbox?
+  inboundEmails  InboundEmail[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -1431,12 +1433,46 @@ model CafeDocument {
   bytes       Bytes
   size        Int
   sha256      String   @db.VarChar(64)
+  /// "" when it came by email.
   uploadedBy  String
+  /// The email it came in (piece 26), and who sent it.
+  emailId     String?
+  sender      String?
   createdAt   DateTime
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@index([cafeId, sha256])
+}
+
+/// A café's address for bills (piece 26): <slug>.<token>@<PENI_INBOX_DOMAIN>.
+model CafeInbox {
+  cafeId    String   @id
+  token     String   @unique @db.VarChar(16)
+  enabled   Boolean  @default(true)
+  createdAt DateTime
+  updatedAt DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+}
+
+/// An email that reached a café's address; taken once per café.
+model InboundEmail {
+  id         String   @id
+  cafeId     String
+  providerId String
+  sender     String
+  subject    String
+  receivedAt DateTime
+  /// [{ documentId, name }]
+  documents  Json     @default("[]")
+  /// [{ name, why }]
+  skipped    Json     @default("[]")
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, providerId])
+  @@index([cafeId, receivedAt])
 }
 
 /// Something the assistant proposes; nothing happens until a person confirms it (D21).

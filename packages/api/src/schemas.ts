@@ -349,6 +349,9 @@ export const confirmDraftSchema = z.object({ ...billFields, allowDuplicate: z.bo
 
 export const dismissDraftSchema = z.object({ reason: optionalText(200) });
 
+/** The café's bill address (piece 26): on or off, or a new address that retires the old one. */
+export const inboxSettingsSchema = z.object({ enabled: z.boolean().optional(), newAddress: z.literal(true).optional() });
+
 /** "Düzelt": the whole bill again, with the version it was read at. */
 export const correctBillSchema = z.object({ version: z.number().int().min(1), ...billFields });
 
@@ -671,3 +674,4 @@ export type CheckTaskInput = z.input<typeof checkTaskSchema>;
 export type AlertEmailInput = z.input<typeof alertEmailSchema>;
 export type ConfirmDraftInput = z.input<typeof confirmDraftSchema>;
 export type DismissDraftInput = z.input<typeof dismissDraftSchema>;
+export type InboxSettingsInput = z.input<typeof inboxSettingsSchema>;

@@ -1,7 +1,7 @@
 import { addMonths, dayPay, defaultSettings, dueOn, localDateKey, monthDays, orderTotals, plusDays, rateOn, shiftEnds, startOfLocalDay, weekStartOf } from "@peni/core";
 import type { Bill, BillLine, Cafe, MenuItem, Order, OrderLine, Payment, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, TaskCheck, TaskItem, TaskList, Weekday, WorkDay } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
-import { receiptPdf } from "./demo-receipt";
+import { ambalajBill } from "./demo-receipt";
 
 export const DEMO_CUSTOMERS = {
   ayse: { id: "cus_ayse", phone: "+905320000001", displayName: "Ayşe Yılmaz" },
@@ -1021,21 +1021,7 @@ async function seedDrafts(app: PeniApp): Promise<void> {
   if (app.assistant.mode === "off") return;
   const murat = await app.staff.at((await app.staff.signIn(DEMO_STAFF.murat.email, DEMO_STAFF_PASSWORD)).token, "moda");
   const today = localDateKey(app.now(), TZ).split("-").reverse().join(".");
-  const pdf = receiptPdf([
-    { text: "AMBALAJ DÜNYASI TİC. LTD. ŞTİ.", bold: true },
-    { text: "Ihlamurkuyu Sk. No:12 Kadiköy/Istanbul" },
-    { text: "VKN 0123456789" },
-    { text: "" },
-    { text: `FATURA NO: A-20511     TARIH: ${today}` },
-    { text: "----------------------------------------" },
-    { text: "Karton bardak 8 oz" },
-    { text: "  1000 adet x 1,45            1.450,00" },
-    { text: "Peçete" },
-    { text: "  20 paket x 18,00              360,00" },
-    { text: "----------------------------------------" },
-    { text: "KDV %20                         301,67" },
-    { text: "TOPLAM (KDV DAHIL)            1.810,00", bold: true },
-  ]);
+  const pdf = ambalajBill(today);
   await app.assistant.upload(murat, pdf, "ambalaj-dunyasi.pdf");
   if (app.assistant.mode === "demo") await app.jobs.runDue();
 }
