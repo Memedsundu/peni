@@ -135,6 +135,7 @@ model Cafe {
   menuCategories MenuCategory[]
   orders        Order[]
   orderCounters OrderCounter[]
+  claims        PeniClaim[]
   memberships   Membership[]
   posts         CafePost[]
 }
@@ -367,6 +368,7 @@ model Order {
 
   cafe  Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   lines OrderLine[]
+  claim PeniClaim?
 
   @@unique([cafeId, businessDay, number])
   @@unique([cafeId, createKey])
@@ -605,4 +607,26 @@ model ContentReport {
 
   @@unique([targetType, targetId, reporterId])
   @@index([cafeId, status])
+}
+
+/// A paid order's one-time peni claim: the QR token and 4-digit code on the customer screen.
+model PeniClaim {
+  id                    String    @id
+  cafeId                String
+  orderId               String    @unique
+  /// The café's local date, YYYY-MM-DD; codes are unique per café and day.
+  businessDay           String
+  code                  String
+  token                 String    @unique
+  peni                  Int
+  createdAt             DateTime
+  expiresAt             DateTime
+  claimedAt             DateTime?
+  claimedByMembershipId String?
+  cancelledAt           DateTime?
+
+  cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, businessDay, code])
 }

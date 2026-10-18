@@ -26,6 +26,7 @@ import {
   InMemoryIdentityStore,
   InMemoryLedgerStore,
   InMemoryMenuStore,
+  InMemoryClaimStore,
   InMemoryOrderStore,
   InMemoryStaffStore,
   Ledger,
@@ -46,6 +47,7 @@ import {
   type Membership,
   type MenuItem,
   type MenuStore,
+  type ClaimStore,
   type OrderStore,
   type PeniDirectory,
   type Post,
@@ -81,6 +83,7 @@ export interface PeniStores {
   community: CommunityStore;
   menu: MenuStore;
   orders: OrderStore;
+  claims: ClaimStore;
   staff: StaffStore;
 }
 
@@ -92,6 +95,7 @@ export function inMemoryStores(): PeniStores {
     community: new InMemoryCommunityStore(),
     menu: new InMemoryMenuStore(),
     orders: new InMemoryOrderStore(),
+    claims: new InMemoryClaimStore(),
     staff: new InMemoryStaffStore(),
   };
 }
@@ -149,7 +153,7 @@ export class PeniApp {
     });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
-    this.till = new OrderService(stores.orders, this.menu, stores.staff, this.directory, () => this.now());
+    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, () => this.now());
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */

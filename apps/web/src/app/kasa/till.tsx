@@ -112,6 +112,9 @@ export function Till() {
               <span className="mr-2 hidden sm:inline">
                 {t(`role_${access.role}`)}: <span className="text-ink">{stage.me.account.name.split(" ")[0]}</span>
               </span>
+              <Button size="sm" onClick={() => window.open("/kasa/ekran", "peni-customer-screen", "popup=yes,width=1024,height=600")}>
+                {t("openScreen")}
+              </Button>
               {access.permissions.includes("till.history") && (
                 <Button size="sm" onClick={() => setView(view === "sell" ? "sales" : "sell")}>
                   {view === "sell" ? t("sales") : t("backToTill")}
@@ -145,7 +148,7 @@ export function Till() {
         )}
         {stage.kind === "setup" && <Setup t={t} lang={lang} onDone={() => void load()} />}
         {stage.kind === "signIn" && <SignIn t={t} lang={lang} till={stage.till} onSignedIn={(me) => setStage({ kind: "open", till: stage.till, me })} />}
-        {stage.kind === "open" && view === "sell" && <Sell t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
+        {stage.kind === "open" && view === "sell" && <Sell t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} deviceId={stage.till.device.id} />}
         {stage.kind === "open" && view === "sales" && <Sales t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
       </main>
     </div>

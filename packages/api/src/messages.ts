@@ -70,6 +70,7 @@ export const errorMessagesTr: Record<string, string> = {
   PRODUCT_UNAVAILABLE: "Siparişteki bir ürün şu an satışta değil. Siparişi yenile.",
   REASON_REQUIRED: "Bir sebep yaz.",
   REASON_TOO_LONG: "Sebep en çok 200 karakter olabilir.",
+  CLAIM_CODE_BUSY: "Şu an peni kodu verilemedi. Ödemeyi tekrar kaydet.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

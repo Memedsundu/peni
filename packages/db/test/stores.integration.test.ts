@@ -235,4 +235,27 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.orders.listOrders(cafeId)).map((o) => o.number)).toEqual([1]);
     expect(await stores.orders.getOrder("cafe_other", first.id)).toBeNull();
   });
+
+  it("keeps peni claims with one code per café and day", async () => {
+    const day = "2026-10-20";
+    const orderId = `ord_c_${run}`;
+    const order = {
+      id: orderId, cafeId, number: 1, businessDay: day, status: "paid" as const, discountPercent: 0, createdByMemberId: "sm_x",
+      createKey: `ckc_${run}`, createdAt: at, lines: [{ productId: "cay", name: "Çay", unitPriceKurus: 3_000, quantity: 1, discountPercent: 0 }],
+      subtotalKurus: 3_000, discountKurus: 0, totalKurus: 3_000, paidAt: at, paidByMemberId: "sm_x", paymentMethod: "cash" as const,
+      tenderedKurus: null, changeKurus: null, payKey: `pkc_${run}`, voidedAt: null, voidedByMemberId: null, voidReason: null,
+      refundedAt: null, refundedByMemberId: null, refundReason: null, refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
+    };
+    await stores.orders.saveOrder(order);
+    await stores.orders.saveOrder({ ...order, id: `${orderId}_2`, number: 2, createKey: `ckc2_${run}` });
+    const claim = {
+      id: `clm_${run}`, cafeId, orderId, businessDay: day, code: "0427", token: `tok_${run}`, peni: 5, createdAt: at,
+      expiresAt: new Date("2026-10-20T21:00:00Z"), claimedAt: null, claimedByMembershipId: null, cancelledAt: null,
+    };
+    expect(await stores.claims.saveClaim(claim)).toBe(true);
+    expect(await stores.claims.saveClaim({ ...claim, id: `clm2_${run}`, orderId: `${orderId}_2`, token: `tok2_${run}` })).toBe(false);
+    expect([...(await stores.claims.codesUsed(cafeId, day))]).toEqual(["0427"]);
+    expect(await stores.claims.saveClaim({ ...claim, cancelledAt: at })).toBe(true);
+    expect(await stores.claims.getClaimByOrder(cafeId, orderId)).toEqual({ ...claim, cancelledAt: at });
+  });
 });

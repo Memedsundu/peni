@@ -24,6 +24,7 @@ The code is being rebuilt piece by piece. Today it holds:
 | Customer sign-in with Google, Apple or an email code | **Done, end-to-end tested** (email; Google and Apple need their client ids) |
 | Menü: categories, products, prices, on/off, removing and bringing back, order; edited by roles with "menu.edit" | **Done, end-to-end tested** (API; screens come with the new design) |
 | Satış ekranı at `/kasa`: set a computer up as a till, PIN sign-in, tabs and photo tiles, line and order discounts, cash with change or card, Satışlar with void, refund and delete | **Done, end-to-end tested** (API, and the screen in a browser, Turkish and English, light and dark) |
+| Müşteri ekranı at `/kasa/ekran`: the order as it's entered, then thanks with the peni QR and 4-digit code; idle, the café, its posts and events, and how to get Peni | **Done, tested in a browser** (claiming the peni in the app is piece 10) |
 | Other web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
@@ -51,7 +52,7 @@ pnpm dev:web            # http://localhost:3000, demo data in memory, nothing to
 
 To keep data in Postgres, set `DATABASE_URL` in `apps/web/.env` and apply the migrations once with `DATABASE_URL=… pnpm --filter @peni/db migrate:deploy`. An empty database gets the demo cafés on first start.
 
-The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista). Ece's till PIN is 2580 once an owner has set a computer up as a till: open http://localhost:3000/kasa and sign in there as Leyla once. Email sign-in works in the demo without an email service: `POST /api/v1/auth/email/start` with any address, then read the code from `GET /api/v1/auth/demo/outbox?email=…`.
+The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista). Ece's till PIN is 2580 once an owner has set a computer up as a till: open http://localhost:3000/kasa and sign in there as Leyla once. "Müşteri ekranı" in the till's header opens the customer screen in a second window, for the small monitor facing the customer (make it full screen there). Email sign-in works in the demo without an email service: `POST /api/v1/auth/email/start` with any address, then read the code from `GET /api/v1/auth/demo/outbox?email=…`.
 
 ## Checks
 

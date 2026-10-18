@@ -145,6 +145,20 @@ export interface OrderDTO {
   canVoid: boolean;
   canRefund: boolean;
   canDelete: boolean;
+  /**
+   * Only in the answer to "pay": the peni the customer can take, for the customer screen.
+   * Null when the café has peni off or the order earns nothing.
+   */
+  claim: OrderClaimDTO | null;
+}
+
+export interface OrderClaimDTO {
+  /** Four digits to type in the app. */
+  code: string;
+  /** What the QR carries, as `<origin>/p/<token>`. */
+  token: string;
+  peni: number;
+  expiresAt: string;
 }
 
 /** `GET /staff/:slug/orders`: one day's orders, newest first, and the day's sums. */

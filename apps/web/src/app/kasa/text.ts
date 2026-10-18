@@ -122,6 +122,31 @@ const TEXT = {
   refundedBy: { tr: "İade eden", en: "Refunded by" },
 
   signOut: { tr: "Kilitle", en: "Lock" },
+  openScreen: { tr: "Müşteri ekranı", en: "Customer screen" },
+  peniOnScreen: { tr: "Müşteri ekranında peni kodu", en: "Peni code on the customer screen" },
+
+  // The customer screen
+  yourOrder: { tr: "Siparişin", en: "Your order" },
+  total: { tr: "Toplam", en: "Total" },
+  thanks: { tr: "Teşekkürler!", en: "Thank you!" },
+  paidByCash: { tr: "Nakitle ödendi", en: "Paid in cash" },
+  paidByCard: { tr: "Kartla ödendi", en: "Paid by card" },
+  takePeni: { tr: "Peni'ni al", en: "Take your peni" },
+  scanHelp: {
+    tr: "Peni uygulamasında Tara'ya dokun ve kodu okut. Ya da bu kodu yaz:",
+    en: "In the Peni app, tap Scan and point it at the code. Or type this code:",
+  },
+  peniQr: { tr: "Peni almak için QR kod", en: "QR code to take your peni" },
+  welcome: { tr: "Hoş geldin", en: "Welcome" },
+  event: { tr: "Etkinlik", en: "Event" },
+  fromTheCafe: { tr: "Kafeden", en: "From the café" },
+  getPeni: { tr: "Peni'yi indir", en: "Get Peni" },
+  getPeniBody: {
+    tr: "Her kahvende peni biriktir, askıya kahve bırak, mahallenle tanış.",
+    en: "Collect peni with every coffee, leave one on the askı, meet your neighbours.",
+  },
+  scanWithPhone: { tr: "Telefonunla okut", en: "Scan with your phone" },
+  appQr: { tr: "Peni'yi indirmek için QR kod", en: "QR code to get Peni" },
   role_owner: { tr: "Sahip", en: "Owner" },
   role_manager: { tr: "Müdür", en: "Manager" },
   role_chef: { tr: "Şef", en: "Chef" },
