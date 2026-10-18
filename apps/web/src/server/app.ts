@@ -27,6 +27,8 @@ import {
   InMemoryCommunityStore,
   InMemoryImageStore,
   InMemoryReportStore,
+  InMemoryStockStore,
+  type StockStore,
   type ImageStore,
   type ReportStore,
   InMemoryDirectory,
@@ -84,6 +86,7 @@ import { MenuService } from "./menu";
 import { OrderService } from "./orders";
 import { PaymentService } from "./payments";
 import { CashService } from "./cash";
+import { StockService } from "./stock";
 import { bare, eventCapacity, eventTime, FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 
@@ -114,6 +117,7 @@ export interface PeniStores {
   staff: StaffStore;
   images: ImageStore;
   reports: ReportStore;
+  stock: StockStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -131,6 +135,7 @@ export function inMemoryStores(): PeniStores {
     staff: new InMemoryStaffStore(),
     images: new InMemoryImageStore(),
     reports: new InMemoryReportStore(),
+    stock: new InMemoryStockStore(),
   };
 }
 
@@ -173,6 +178,10 @@ export class PeniApp {
   readonly payments: PaymentService;
   /** Kasa: the drawer's sessions, counts and cash moves (plan piece 9). */
   readonly cash: CashService;
+  /** Stok and each product's recipe (plan piece 17). */
+  readonly stock: StockService;
+  /** Stock items, moves and recipes as stored; for the demo seed and the data move from Shelby. */
+  readonly stockStore: StockStore;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   readonly feed: FeedService;
@@ -219,6 +228,9 @@ export class PeniApp {
     this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
     this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, this.cash, this.peni, () => this.now());
     // A newcomer may have no name yet; the barista then checks the balance instead.
+    this.stockStore = stores.stock;
+    this.stock = new StockService(stores.stock, this.menu, stores.staff, () => this.now());
+    this.till.stock = this.stock;
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
@@ -691,7 +703,7 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── staff dashboard
 
-  async staffDashboard({ cafe }: Pick<StaffContext, "cafe">): Promise<StaffDashboardDTO> {
+  async staffDashboard({ cafe, permissions }: Pick<StaffContext, "cafe"> & Partial<Pick<StaffContext, "permissions">>): Promise<StaffDashboardDTO> {
     const settings = await this.directory.getSettings(cafe.id);
     const menu = await this.menu.listMenu(cafe.id);
     const now = this.now();
@@ -714,6 +726,7 @@ export class PeniApp {
         },
       },
       memberCount: members.length,
+      lowStock: permissions?.has("stock.view") ? await this.stock.lowStock(cafe.id) : null,
     };
   }
 

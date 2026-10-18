@@ -367,6 +367,42 @@ const cafeEvent = { createKey: key(), kind: "event", title: "Latte art atölyesi
 assert.ok((await call("POST", "/staff/moda/feed", { headers: STAFF, body: cafeEvent })).json.posts.some((p) => p.title === cafeEvent.title && p.kind === "event"));
 step("Mehmet opens an event (a retry opens once), Ayşe joins and reports it; Leyla takes it down and pauses him, then lets him back; Leyla opens a café event");
 
+// 5l. Stock and recipes (piece 17): Leyla adds oat milk (a retry adds it once) and puts it in a
+//     new latte's recipe; Ece sells one by card and the milk goes down; Leyla counts it and
+//     records a spill; Bugün lists what's low; Ece can't see Stok.
+const oat = { key: key(), name: `Yulaf sütü ${key()}`, kind: "ingredient", unit: "l", startMilli: 3_000, minMilli: 1_000, costKurus: 9_500 };
+await call("POST", "/staff/moda/stock/items", { headers: STAFF, body: oat });
+const stock = (await call("POST", "/staff/moda/stock/items", { headers: STAFF, body: oat })).json;
+const oatItem = stock.items.filter((i) => i.name === oat.name);
+assert.equal(oatItem.length, 1, "a retried add adds once");
+const oatName = `Yulaflı latte ${key()}`;
+const oatLatte = (await call("POST", "/staff/moda/menu/products", { headers: STAFF, body: { name: oatName, categoryId: tiles.categories[0].id, priceKurus: 13_500 } })).json.products.find((p) => p.name === oatName);
+const recipes = (await call("POST", `/staff/moda/menu/products/${oatLatte.productId}/recipe`, {
+  headers: STAFF,
+  body: { mode: "recipe", lines: [{ itemId: "stk_espresso", qtyMilli: 18 }, { itemId: oatItem[0].id, qtyMilli: 200 }] },
+})).json;
+assert.equal(recipes.recipes.find((r) => r.productId === oatLatte.productId).costKurus, 1_620 + 1_900, "18 g of beans at ₺900/kg and 200 ml at ₺95/L");
+// The till from 5d was revoked; Ece signs in on a new one.
+const till3 = (await call("POST", "/staff/moda/devices", { headers: STAFF, body: { name: "Bar" } })).json;
+const ecePos3 = { "x-peni-staff-token": (await call("POST", "/till/pin", { headers: { "x-peni-till-token": till3.token }, body: { memberId: eceId, pin: "2580" } })).json.token };
+const oatSale = (await call("POST", "/staff/moda/orders", { headers: ecePos3, body: { createKey: key(), lines: [{ productId: oatLatte.productId, quantity: 1 }] } })).json;
+const oatCard = (await call("POST", `/staff/moda/orders/${oatSale.id}/pay`, { headers: ecePos3, body: { method: "card", payKey: key() } })).json;
+await call("POST", `/staff/moda/orders/${oatSale.id}/payments/${oatCard.payment.id}/confirm`, { headers: ecePos3, body: {} });
+const oatHistory = (await call("GET", `/staff/moda/stock/items/${oatItem[0].id}`, { headers: STAFF })).json;
+assert.deepEqual([oatHistory.item.qtyMilli, oatHistory.moves[0].reason, oatHistory.moves[0].changeMilli], [2_800, "sale", -200]);
+const countKey = key();
+await call("POST", "/staff/moda/stock/count", { headers: STAFF, body: { key: countKey, counts: [{ itemId: oatItem[0].id, countedMilli: 2_500 }] } });
+await call("POST", "/staff/moda/stock/count", { headers: STAFF, body: { key: countKey, counts: [{ itemId: oatItem[0].id, countedMilli: 9_000 }] } });
+const afterWaste = (await call("POST", "/staff/moda/stock/waste", { headers: STAFF, body: { key: key(), itemId: oatItem[0].id, qtyMilli: 1_600, why: "spilled" } })).json;
+assert.deepEqual(
+  [afterWaste.items.find((i) => i.id === oatItem[0].id).qtyMilli, afterWaste.items.find((i) => i.id === oatItem[0].id).level],
+  [900, "low"],
+  "counted 2.5 L once, then 1.6 L spilled",
+);
+assert.ok((await call("GET", "/staff/moda", { headers: STAFF })).json.lowStock.some((i) => i.id === oatItem[0].id));
+assert.equal((await call("GET", "/staff/moda/stock", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
+step("Leyla adds oat milk (once despite a retry) and a latte that uses it; Ece sells one and 200 ml go; Leyla counts 2.5 L (once) and records a 1.6 L spill; Bugün shows it low; Ece can't see Stok");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

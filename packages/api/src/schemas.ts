@@ -225,6 +225,57 @@ export const cashMoveSchema = z.object({
   reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun"),
 });
 
+// ─────────────────────────────────────────────── stock (plan piece 17)
+
+/** Thousandths of the unit: grams, ml, or 1000 per piece. */
+const milli = z.number().int().min(0).max(1_000_000_000);
+const stockName = z.string().trim().min(1, "Bir ad yaz").max(60, "Ad en fazla 60 harf olabilir");
+const stockCost = z.number().int().min(0).max(10_000_000).nullable();
+const stockNote = z.string().trim().max(200, "En çok 200 karakter");
+
+export const addStockItemSchema = z.object({
+  key: actionKey,
+  name: stockName,
+  kind: z.enum(["ingredient", "supply"]),
+  unit: z.enum(["kg", "l", "adet"]),
+  /** What is there now. */
+  startMilli: milli,
+  minMilli: milli.optional(),
+  costKurus: stockCost.optional(),
+});
+
+/** Send only what changes; `removed` takes it off Stok or brings it back. */
+export const updateStockItemSchema = z.object({
+  name: stockName.optional(),
+  kind: z.enum(["ingredient", "supply"]).optional(),
+  unit: z.enum(["kg", "l", "adet"]).optional(),
+  minMilli: milli.optional(),
+  costKurus: stockCost.optional(),
+  removed: z.boolean().optional(),
+});
+
+/** "Sayım": what is there now, for one item or many. */
+export const countStockSchema = z.object({
+  key: actionKey,
+  counts: z.array(z.object({ itemId: z.string().min(1).max(100), countedMilli: milli })).min(1).max(300),
+  note: stockNote.optional(),
+});
+
+/** "Fire": how much went to waste, and why. */
+export const wasteStockSchema = z.object({
+  key: actionKey,
+  itemId: z.string().min(1).max(100),
+  qtyMilli: milli.refine((v) => v > 0, "Miktar yaz"),
+  why: z.enum(["spilled", "expired", "broken", "other"]),
+  note: stockNote.optional(),
+});
+
+/** "Stok nasıl düşsün?" and, by recipe, what goes into one. */
+export const saveRecipeSchema = z.object({
+  mode: z.enum(["recipe", "counted", "none"]),
+  lines: z.array(z.object({ itemId: z.string().min(1).max(100), qtyMilli: milli.refine((v) => v > 0, "Miktar yaz") })).max(20),
+});
+
 export const orderReasonSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -323,6 +374,11 @@ export type OpenCashInput = z.input<typeof openCashSchema>;
 export type CloseCashInput = z.input<typeof closeCashSchema>;
 export type CashMoveInput = z.input<typeof cashMoveSchema>;
 export type OrderListQuery = z.input<typeof orderListQuerySchema>;
+export type AddStockItemInput = z.input<typeof addStockItemSchema>;
+export type UpdateStockItemInput = z.input<typeof updateStockItemSchema>;
+export type CountStockInput = z.input<typeof countStockSchema>;
+export type WasteStockInput = z.input<typeof wasteStockSchema>;
+export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
 
 export type StaffSignInInput = z.input<typeof staffSignInSchema>;

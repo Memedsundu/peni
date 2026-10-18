@@ -1,5 +1,5 @@
 import { defaultSettings, startOfLocalDay } from "@peni/core";
-import type { Cafe, MenuItem, Post, StaffMember, StaffRole } from "@peni/core";
+import type { Cafe, MenuItem, Post, StaffMember, StaffRole, StockBatch, StockItem, StockMode } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -119,17 +119,28 @@ export async function seed(app: PeniApp): Promise<void> {
   // ─────────────────────────────────────────── staff
 
   const tillStaff = {} as Record<Slug, { cafe: Cafe; member: StaffMember }>;
+  const staffAt = {} as Record<string, StaffMember>; // `${email}:${slug}`
   for (const s of Object.values(DEMO_STAFF)) {
     const account = await app.staff.ensureAccount({ name: s.name, email: s.email, password: DEMO_STAFF_PASSWORD });
     // A day apart, so a person's cafés list in the same order in memory and in Postgres.
     for (const [i, [slug, role]] of (Object.entries(s.roles) as [Slug, StaffRole][]).entries()) {
       const pin = "pin" in s ? s.pin : undefined;
       const member = await app.at(daysAgo(90 - i), () => app.staff.join(account.id, CAFE_ID[slug], role, pin));
+      staffAt[`${s.email}:${slug}`] = member;
       if (role === "barista" || (role === "owner" && !tillStaff[slug])) {
         tillStaff[slug] = { cafe: (await app.identity.getCafe(CAFE_ID[slug]))!, member };
       }
     }
   }
+
+  // ─────────────────────────────────────────── stock and recipes (plan piece 17)
+
+  await seedStock(app, {
+    leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
+    ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
+    on,
+    earlierToday,
+  });
 
   // ─────────────────────────────────────────── people and memberships
 
@@ -449,4 +460,80 @@ async function seedMenu(app: PeniApp, cafeId: string, items: (Omit<MenuItem, "ca
     }
     await app.menu.saveProduct(cafeId, { ...item, categoryId, sortOrder: i });
   }
+}
+
+/**
+ * Moda's stock: what it bought two weeks ago, a count last week, some waste, today's sales so
+ * far, and recipes for most of the menu. Milk and lemons are low and the cheesecake is out,
+ * so Stok and Bugün have something to say. Kuzguncuk hasn't set stock up yet.
+ */
+async function seedStock(
+  app: PeniApp,
+  p: { leyla: string; ece: string; on: (daysAgo: number, hh: number, mm?: number) => Date; earlierToday: (minutes: number) => Date },
+): Promise<void> {
+  const cafeId = "cafe_moda";
+  const g = (grams: number) => grams; // a kg item's thousandths are grams, a litre's are ml
+  const kg = (n: number) => Math.round(n * 1000);
+  const pcs = (n: number) => n * 1000;
+  type Seeded = { id: string; name: string; kind: StockItem["kind"]; unit: StockItem["unit"]; start: number; min: number; cost: number | null };
+  const items: Seeded[] = [
+    { id: "stk_espresso", name: "Espresso çekirdeği", kind: "ingredient", unit: "kg", start: kg(4), min: kg(1), cost: 90_000 },
+    { id: "stk_filtre", name: "Filtre kahve çekirdeği", kind: "ingredient", unit: "kg", start: kg(2), min: g(500), cost: 110_000 },
+    { id: "stk_turk", name: "Türk kahvesi", kind: "ingredient", unit: "kg", start: kg(2), min: g(300), cost: 60_000 },
+    { id: "stk_cay", name: "Dökme çay", kind: "ingredient", unit: "kg", start: kg(3), min: g(500), cost: 35_000 },
+    { id: "stk_sut", name: "Süt", kind: "ingredient", unit: "l", start: kg(24), min: kg(5), cost: 4_500 },
+    { id: "stk_limon", name: "Limon", kind: "ingredient", unit: "kg", start: kg(5), min: kg(1), cost: 6_000 },
+    { id: "stk_nane", name: "Taze nane", kind: "ingredient", unit: "adet", start: pcs(6), min: pcs(2), cost: null },
+    { id: "stk_simit", name: "Simit", kind: "ingredient", unit: "adet", start: pcs(40), min: pcs(10), cost: 1_000 },
+    { id: "stk_sansebastian", name: "San Sebastian dilimi", kind: "ingredient", unit: "adet", start: pcs(12), min: pcs(2), cost: 6_500 },
+    { id: "stk_lokum", name: "Lokum", kind: "ingredient", unit: "adet", start: pcs(300), min: pcs(50), cost: 150 },
+    { id: "stk_bardak", name: "Karton bardak (8 oz)", kind: "supply", unit: "adet", start: pcs(500), min: pcs(100), cost: 250 },
+    { id: "stk_kapak", name: "Bardak kapağı", kind: "supply", unit: "adet", start: pcs(500), min: pcs(100), cost: 120 },
+  ];
+  for (const i of items) {
+    await app.stockStore.saveItem({
+      id: i.id, cafeId, name: i.name, kind: i.kind, unit: i.unit, qtyMilli: 0, minMilli: i.min, costKurus: i.cost, archivedAt: null, createdAt: p.on(14, 9),
+    });
+  }
+  let n = 0;
+  const batch = async (
+    batchKey: string,
+    at: Date,
+    reason: StockBatch["reason"],
+    changes: ([string, number] | [string, { counted: number }])[],
+    extra: Partial<StockBatch> = {},
+  ) =>
+    app.stockStore.applyBatch({
+      cafeId, batchKey, reason, at, memberId: p.leyla, ...extra,
+      changes: changes.map(([itemId, c]) => ({ id: `smv_seed_${++n}`, itemId, ...(typeof c === "number" ? { changeMilli: c } : { countedMilli: c.counted }) })),
+    });
+
+  for (const i of items) await batch(`add:seed_${i.id}`, p.on(14, 9), "start", [[i.id, i.start]]);
+  // Two weeks of selling, as one move per item per week (the demo has no till orders that old).
+  await batch("sale:seed_week1", p.on(7, 21), "sale", [
+    ["stk_espresso", -kg(1.3)], ["stk_filtre", -g(600)], ["stk_turk", -g(700)], ["stk_cay", -g(900)], ["stk_sut", -kg(13)],
+    ["stk_limon", -kg(2.4)], ["stk_simit", -pcs(22)], ["stk_sansebastian", -pcs(7)], ["stk_lokum", -pcs(80)], ["stk_bardak", -pcs(150)], ["stk_kapak", -pcs(150)],
+  ], { memberId: p.ece });
+  await batch("count:seed_week1", p.on(7, 22), "count", [
+    ["stk_espresso", { counted: kg(2.65) }], ["stk_sut", { counted: kg(10.5) }], ["stk_simit", { counted: pcs(17) }], ["stk_sansebastian", { counted: pcs(5) }],
+  ], { note: "Pazar sayımı" });
+  // Until bills arrive (piece 18), a delivery is entered as a count.
+  await batch("count:seed_delivery", p.on(6, 10), "count", [["stk_sut", { counted: kg(22.5) }], ["stk_simit", { counted: pcs(47) }]], { note: "Süt ve simit geldi" });
+  await batch("waste:seed_1", p.on(4, 18), "waste", [["stk_sut", -kg(2)]], { why: "expired", memberId: p.ece });
+  await batch("waste:seed_2", p.on(2, 15), "waste", [["stk_sansebastian", -pcs(1)]], { why: "broken", note: "Vitrinden düştü", memberId: p.ece });
+  await batch("sale:seed_week2", p.on(1, 21), "sale", [
+    ["stk_espresso", -kg(1.1)], ["stk_filtre", -g(550)], ["stk_turk", -g(600)], ["stk_cay", -g(800)], ["stk_sut", -kg(16.8)],
+    ["stk_limon", -kg(2.2)], ["stk_simit", -pcs(33)], ["stk_sansebastian", -pcs(4)], ["stk_lokum", -pcs(70)], ["stk_bardak", -pcs(140)], ["stk_kapak", -pcs(140)],
+  ], { memberId: p.ece });
+  await batch("sale:seed_today", p.earlierToday(90), "sale", [["stk_espresso", -g(144)], ["stk_sut", -g(1_600)], ["stk_cay", -g(60)], ["stk_simit", -pcs(4)]], { memberId: p.ece });
+
+  const recipe = (productId: string, mode: StockMode, lines: [string, number][]) =>
+    app.stockStore.saveRecipe({ cafeId, productId, mode, lines: lines.map(([itemId, qtyMilli]) => ({ itemId, qtyMilli })) });
+  await recipe("cay", "recipe", [["stk_cay", g(3)]]);
+  await recipe("turk", "recipe", [["stk_turk", g(7)], ["stk_lokum", pcs(1)]]);
+  await recipe("filtre", "recipe", [["stk_filtre", g(15)]]);
+  await recipe("latte", "recipe", [["stk_espresso", g(18)], ["stk_sut", g(200)]]);
+  await recipe("limonata", "recipe", [["stk_limon", g(150)], ["stk_nane", 200]]);
+  await recipe("simit", "counted", [["stk_simit", pcs(1)]]);
+  await recipe("cheesecake", "counted", [["stk_sansebastian", pcs(1)]]);
 }

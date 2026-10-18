@@ -23,6 +23,9 @@ import type {
   StaffMeDTO,
   StaffSessionDTO,
   StaffMenuDTO,
+  StockDTO,
+  StockItemHistoryDTO,
+  RecipesDTO,
   StaffFeedDTO,
   TeamDTO,
   TillDTO,
@@ -66,6 +69,11 @@ import type {
   UpdatePostInput,
   TillDonationInput,
   UpdateProfileInput,
+  AddStockItemInput,
+  UpdateStockItemInput,
+  CountStockInput,
+  WasteStockInput,
+  SaveRecipeInput,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -263,6 +271,21 @@ export function createPeniClient(options: PeniClientOptions) {
           call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products/${slug(productId)}`, input, true),
         reorder: (cafeSlug: string, input: MenuOrderInput) =>
           call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/order`, input, true),
+        /** How each product uses stock, with its cost (piece 17). */
+        recipes: (cafeSlug: string) => call<RecipesDTO>("GET", `/staff/${slug(cafeSlug)}/menu/recipes`, undefined, true),
+        saveRecipe: (cafeSlug: string, productId: string, input: SaveRecipeInput) =>
+          call<RecipesDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products/${slug(productId)}/recipe`, input, true),
+      },
+      /** Stok (piece 17). Viewing needs "stock.view"; the rest "stock.edit". Every call answers with the whole page. */
+      stock: {
+        get: (cafeSlug: string) => call<StockDTO>("GET", `/staff/${slug(cafeSlug)}/stock`, undefined, true),
+        item: (cafeSlug: string, itemId: string) => call<StockItemHistoryDTO>("GET", `/staff/${slug(cafeSlug)}/stock/items/${slug(itemId)}`, undefined, true),
+        addItem: (cafeSlug: string, input: AddStockItemInput) => call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/items`, input, true),
+        /** Send only what changes; `removed` takes it off Stok or brings it back. */
+        updateItem: (cafeSlug: string, itemId: string, input: UpdateStockItemInput) =>
+          call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/items/${slug(itemId)}`, input, true),
+        count: (cafeSlug: string, input: CountStockInput) => call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/count`, input, true),
+        waste: (cafeSlug: string, input: WasteStockInput) => call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/waste`, input, true),
       },
       /** Satış ekranı: prices and totals always come from the server. */
       till: {
