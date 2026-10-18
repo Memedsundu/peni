@@ -95,6 +95,7 @@ export function Sales({ t, slug, onError, lang }: TillProps) {
           <Stat label={t("cash")} value={formatTL(s.cashKurus)} />
           <Stat label={t("card")} value={formatTL(s.cardKurus)} />
           {s.peniKurus > 0 && <Stat label={t("peni")} value={formatTL(s.peniKurus)} />}
+          {s.askidaKurus > 0 && <Stat label={t("askida")} value={formatTL(s.askidaKurus)} />}
           <Stat
             label={`${t("sumRefunds")} · ${t("sumVoided")}`}
             value={formatTL(s.refundedKurus)}
@@ -233,6 +234,14 @@ function OrderSheet({
             <span className="tabular">{order.peni.peni} peni</span>
           </div>
         )}
+        {order.askida && (
+          <div className="flex justify-between text-muted">
+            <span>
+              {t("askidaOnOrder")} · {order.askida.items.map((i) => `${i.quantity} ${i.name}`).join(", ")}
+            </span>
+            <span className="tabular">{formatTL(order.askida.kurus)}</span>
+          </div>
+        )}
         {order.tenderedKurus !== null && (
           <div className="flex justify-between text-muted">
             <span>
@@ -312,7 +321,7 @@ function Payments({ t, payments }: Pick<TillProps, "t"> & { payments: PaymentDTO
         {payments.map((p) => {
           const over = p.status === "declined" || p.status === "cancelled";
           const details = [
-            p.reference && `${t("approvalCode")} ${p.reference}`,
+            p.reference && p.method !== "askida" && `${t("approvalCode")} ${p.reference}`,
             p.receiptNo && `${t("receiptNo")} ${p.receiptNo}`,
           ].filter(Boolean);
           return (

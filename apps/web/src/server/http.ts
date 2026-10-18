@@ -25,6 +25,9 @@ const STATUS: Record<string, number> = {
   SPEND_CODE_WRONG: 404,
   SPEND_CODE_EXPIRED: 410,
   NOTHING_TO_SPEND: 409,
+  ASKIDA_EMPTY: 409,
+  ASKIDA_DISABLED: 409,
+  PRODUCT_NOT_ELIGIBLE: 409,
 };
 
 export function errorResponse(error: unknown): NextResponse {

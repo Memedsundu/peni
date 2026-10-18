@@ -279,6 +279,24 @@ const rest = (await call("POST", `/staff/moda/orders/${peniOrder.id}/pay`, { hea
 const restPaid = (await call("POST", `/staff/moda/orders/${peniOrder.id}/payments/${rest.payment.id}/confirm`, { headers: ecePos, body: {} })).json.order;
 assert.deepEqual([restPaid.status, restPaid.peni.peni, restPaid.claim.peni], ["paid", 40, 11], "only the ₺225 on card earns: 11 peni");
 
+// 5i. Askıda kahve (piece 13): Ece gives a çay from the askı to whoever asks; the same guest
+//     leaves a simit on it, paid by card with the rest of the order.
+const poolBefore = (await call("GET", "/staff/moda/askida", { headers: ecePos })).json.balancePeni;
+const askiOrder = (await call("POST", "/staff/moda/orders", { headers: ecePos, body: { createKey: key(), lines: [{ productId: "cay", quantity: 1 }, { productId: "askida:simit", quantity: 1 }] } })).json;
+assert.equal(askiOrder.lines[1].name, "Askıya simit");
+const askiKey = key();
+const fromAski = (await call("POST", `/staff/moda/orders/${askiOrder.id}/askida`, { headers: ecePos, body: { productId: "cay", quantity: 1, payKey: askiKey } })).json;
+await call("POST", `/staff/moda/orders/${askiOrder.id}/askida`, { headers: ecePos, body: { productId: "cay", quantity: 1, payKey: askiKey } });
+assert.deepEqual([fromAski.payment.method, fromAski.order.dueKurus, fromAski.order.askida.kurus], ["askida", 2_500, 3_000]);
+const locked = await call("POST", `/staff/moda/orders/${askiOrder.id}`, { headers: ecePos, body: { lines: [{ productId: "cay", quantity: 2 }] } });
+assert.equal(locked.json.error.code, "ASKIDA_ON_ORDER");
+const askiRest = (await call("POST", `/staff/moda/orders/${askiOrder.id}/pay`, { headers: ecePos, body: { method: "card", payKey: key() } })).json;
+const askiPaid = (await call("POST", `/staff/moda/orders/${askiOrder.id}/payments/${askiRest.payment.id}/confirm`, { headers: ecePos, body: {} })).json.order;
+assert.deepEqual([askiPaid.status, askiPaid.paymentMethod], ["paid", "card"]);
+const poolAfter = (await call("GET", "/cafes/moda")).json.askida.balancePeni;
+assert.equal(poolAfter, poolBefore - 30 + 25, "one çay off the askı, one simit on it, once each");
+step("Askıda kahve at the till: Ece gives a çay from the askı (a retry gives it once) and the order is locked; the guest leaves a simit on it and pays the rest by card");
+
 // 5f. Kasa (piece 9): Ece takes ₺45 out for milk and closes the drawer ₺5 short, with a reason.
 await call("POST", "/staff/moda/cash/moves", { headers: ecePos, body: { key: key(), kind: "out", amountKurus: 4_500, reason: "Süt" } });
 const beforeClose = (await call("GET", "/staff/moda/cash", { headers: ecePos })).json.open;

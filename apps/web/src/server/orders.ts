@@ -1,8 +1,10 @@
-import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDTO, PeniCheckDTO, TillMenuDTO } from "@peni/api";
+import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDTO, PeniCheckDTO, TillAskidaDTO, TillMenuDTO } from "@peni/api";
+import { goodsName } from "@peni/brand/format";
 import {
   amountPaid,
   calculateEarn,
   claimIsOpen,
+  kurusToPeniCeil,
   localDateKey,
   randomClaimCode,
   startOfNextLocalDay,
@@ -131,9 +133,9 @@ export class OrderService {
     const order = await this.find(ctx, id);
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
     // The peni were worked out for these lines: they go back first.
-    if (peniKurusOf(await this.payments.list(ctx.cafe.id, [order.id])) > 0) {
-      throw new AppError("PENI_ON_ORDER", "Give the peni back before changing the order", 409);
-    }
+    const paid = await this.payments.list(ctx.cafe.id, [order.id]);
+    if (peniKurusOf(paid) > 0) throw new AppError("PENI_ON_ORDER", "Give the peni back before changing the order", 409);
+    if (askidaKurusOf(paid) > 0) throw new AppError("ASKIDA_ON_ORDER", "Put the askı items back before changing the order", 409);
     const lines = await this.priced(ctx, input.lines);
     const discountPercent = input.discountPercent ?? order.discountPercent;
     this.check(lines, discountPercent);
@@ -271,7 +273,7 @@ export class OrderService {
     const payments = await this.payments.list(ctx.cafe.id, [order.id]);
     const peniKurus = peniKurusOf(payments);
     if (peniKurus <= 0) return;
-    await this.peni.releaseOrder(order.cafeId, order.id, "returned");
+    await this.peni.releaseOrder(order.cafeId, order.id, "returned", ["redeem"]);
     await this.payments.start(actor(ctx), {
       orderId: order.id,
       kind: "refund",
@@ -284,6 +286,112 @@ export class OrderService {
       cashSessionId: null,
       reference: walletOf(payments),
     });
+  }
+
+  /** The askı as the till sees it (plan piece 13): the pool and how many of each askı item it pays for. */
+  async tillAskida(ctx: StaffContext): Promise<TillAskidaDTO> {
+    this.require(ctx, "till.use");
+    const settings = await this.directory.getSettings(ctx.cafe.id);
+    const balancePeni = await this.peni.askidaBalance(ctx.cafe.id);
+    const menu = await this.menu.listMenu(ctx.cafe.id);
+    const items = menu
+      .filter((p) => p.available && settings.askidaProductIds.includes(p.productId))
+      .sort((a, b) => a.priceKurus - b.priceKurus)
+      .map((p) => {
+        const peni = Math.max(1, kurusToPeniCeil(p.priceKurus));
+        return { productId: p.productId, name: p.name, priceKurus: p.priceKurus, peni, available: Math.floor(balancePeni / peni) };
+      });
+    return { enabled: settings.askidaEnabled, balancePeni, items: settings.askidaEnabled ? items : [] };
+  }
+
+  /**
+   * "Askıdan ver" (plan piece 13, D8): the askı pays for askı items already on the order,
+   * for whoever asks, on trust: no account, no limit. It's a payment approved at once;
+   * the rest of the order is paid as usual. The same `payKey` again pays once.
+   */
+  async giveAskida(ctx: StaffContext, orderId: string, input: { productId: string; quantity: number; payKey: string }): Promise<PaymentAnswerDTO> {
+    this.require(ctx, "till.use");
+    const order = await this.find(ctx, orderId);
+    const again = await this.payments.findByKey(ctx.cafe.id, input.payKey);
+    if (again) {
+      if (again.orderId !== order.id) throw new AppError("PAY_KEY_REUSED", "This payment belongs to another order", 409);
+      return this.answer(ctx, again);
+    }
+    if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    await this.payments.clearPending(actor(ctx), order.id);
+    const payments = await this.payments.list(ctx.cafe.id, [order.id]);
+    const line = order.lines.find((l) => l.productId === input.productId);
+    const given = askidaGiven(payments).get(input.productId) ?? 0;
+    if (!line || given + input.quantity > line.quantity) {
+      throw new AppError("ASKIDA_NOT_ON_ORDER", "Add the item to the order before giving it from the askı", 409);
+    }
+    // What these items cost on this order, discounts included, and never more than is left to pay.
+    const share = Math.round(((lineTotal(line) * input.quantity) / line.quantity) * (100 - order.discountPercent)) / 100;
+    const amountKurus = Math.min(Math.round(share), order.totalKurus - amountPaid(payments));
+    if (amountKurus <= 0) throw new AppError("ASKIDA_NOT_ON_ORDER", "Nothing left to pay on this order", 409);
+    await this.peni.giveFromAskidaAtTill({
+      cafeId: order.cafeId,
+      orderId: order.id,
+      key: input.payKey,
+      peni: kurusToPeniCeil(amountKurus),
+      productId: input.productId,
+      quantity: input.quantity,
+    });
+    const payment = await this.payments.start(actor(ctx), {
+      orderId: order.id,
+      kind: "sale",
+      method: "askida",
+      amountKurus,
+      tenderedKurus: null,
+      changeKurus: null,
+      key: input.payKey,
+      reason: null,
+      cashSessionId: (await this.cash.current(ctx.cafe.id))?.id ?? null,
+      reference: askidaRef(input.productId, input.quantity),
+    });
+    return this.answer(ctx, payment);
+  }
+
+  /** "Askıya geri koy": what the askı paid for on an unpaid order goes back to it, say to change the order. */
+  async returnAskida(ctx: StaffContext, orderId: string): Promise<OrderDTO> {
+    this.require(ctx, "till.use");
+    const order = await this.find(ctx, orderId);
+    if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    await this.giveAskidaBack(ctx, order, null);
+    return this.dto(ctx, order);
+  }
+
+  /** Askı items on an order nobody will pay go back on the askı: a refund of the askı's payments, reversed in the ledger. */
+  private async giveAskidaBack(ctx: StaffContext, order: Order, why: string | null): Promise<void> {
+    const kurus = askidaKurusOf(await this.payments.list(ctx.cafe.id, [order.id]));
+    if (kurus <= 0) return;
+    await this.peni.releaseOrder(order.cafeId, order.id, "returned", ["askida_claim"]);
+    await this.payments.start(actor(ctx), {
+      orderId: order.id,
+      kind: "refund",
+      method: "askida",
+      amountKurus: kurus,
+      tenderedKurus: null,
+      changeKurus: null,
+      key: `askida-back:${randomUUID()}`,
+      reason: why,
+      cashSessionId: null,
+    });
+  }
+
+  /**
+   * "Askıya bırak" lines go on the askı once the order is paid: what the guest paid for
+   * them, discounts included, in whole peni. Recorded once per order.
+   */
+  private async hang(order: Order, staffMemberId: string): Promise<void> {
+    const hung = order.lines.filter((l) => isHang(l.productId));
+    if (hung.length === 0) return;
+    const settings = await this.directory.getSettings(order.cafeId);
+    if (!settings.askidaEnabled) return;
+    const kurus = hung.reduce((s, l) => s + lineTotal(l), 0) * ((100 - order.discountPercent) / 100);
+    const peni = Math.floor(kurus / 100);
+    if (peni <= 0) return;
+    await this.peni.recordTillDonation({ cafeId: order.cafeId, peni, staffUserId: staffMemberId, idempotencyKey: `order:${order.id}`, orderId: order.id });
   }
 
   /** One wallet per order, so it's always clear whose peni to give back. */
@@ -312,6 +420,8 @@ export class OrderService {
     if (payment.kind === "sale") {
       if (order.status !== "open") return;
       if (amountPaid(await this.payments.list(order.cafeId, [order.id])) < order.totalKurus) return;
+      // Before the order shows paid, so a retry that catches up records it too (once).
+      await this.hang(order, payment.startedByMemberId);
       await this.orders.saveOrder({
         ...order,
         status: "paid",
@@ -338,6 +448,8 @@ export class OrderService {
     // Peni go with the money: peni spent on it go back to the wallet, a code nobody used
     // closes, and peni already taken come back out of the wallet (as much as is left).
     await this.peni.refundOrder(order.cafeId, order.id);
+    // What the guest left on the askı comes back off it, as much as is still there.
+    await this.peni.unhangOrder(order.cafeId, order.id);
   }
 
   /**
@@ -381,9 +493,9 @@ export class OrderService {
     const existing = await this.claims.getClaimByOrder(order.cafeId, order.id);
     if (existing) return existing;
     const settings = await this.directory.getSettings(order.cafeId);
-    // Peni earn nothing: only what was paid in money does.
-    const peniKurus = peniKurusOf(await this.payments.list(order.cafeId, [order.id]));
-    const peni = calculateEarn(order.totalKurus - peniKurus, settings);
+    // Peni and the askı earn nothing: only what was paid in money does.
+    const paid = await this.payments.list(order.cafeId, [order.id]);
+    const peni = calculateEarn(order.totalKurus - peniKurusOf(paid) - askidaKurusOf(paid), settings);
     if (peni === 0) return null;
     const now = this.now();
     const businessDay = localDateKey(now, settings.timeZone);
@@ -426,6 +538,7 @@ export class OrderService {
     const why = reason(input.reason);
     await this.payments.clearPending(actor(ctx), order.id);
     await this.givePeniBack(ctx, order, why);
+    await this.giveAskidaBack(ctx, order, why);
     const next: Order = { ...order, status: "voided", voidedAt: this.now(), voidedByMemberId: ctx.member.id, voidReason: why };
     await this.orders.saveOrder(next);
     return this.dto(ctx, next);
@@ -443,11 +556,11 @@ export class OrderService {
     const why = reason(input.reason);
     await this.payments.clearPending(actor(ctx), order.id);
     const payments = await this.payments.list(ctx.cafe.id, [order.id]);
-    // Each way it was paid goes back the same way: peni to the wallet first, then the money.
-    const owed = (["peni", "cash", "card"] as const)
+    // Each way it was paid goes back the same way: the askı and peni first, then the money.
+    const owed = (["askida", "peni", "cash", "card"] as const)
       .map((method) => ({ method, amountKurus: amountPaid(payments.filter((p) => p.method === method)) }))
       .filter((x) => x.amountKurus > 0);
-    const drawers = await Promise.all(owed.map((x) => (x.method === "peni" ? null : this.drawer(ctx, x.method))));
+    const drawers = await Promise.all(owed.map((x) => (x.method === "peni" || x.method === "askida" ? null : this.drawer(ctx, x.method))));
     for (const [i, x] of owed.entries()) {
       await this.payments.start(actor(ctx), {
         orderId: order.id,
@@ -500,6 +613,7 @@ export class OrderService {
         cashKurus: byMethod("cash"),
         cardKurus: byMethod("card"),
         peniKurus: byMethod("peni"),
+        askidaKurus: byMethod("askida"),
         refundedCount: paid.filter((o) => o.status === "refunded").length,
         refundedKurus: paid.reduce((s, o) => s + (o.refundKurus ?? 0), 0),
         voidedCount: all.filter((o) => o.status === "voided").length,
@@ -516,10 +630,17 @@ export class OrderService {
       const prev = merged.get(l.productId);
       merged.set(l.productId, prev ? { ...prev, quantity: prev.quantity + l.quantity } : { ...l });
     }
+    const settings = [...merged.keys()].some(isHang) ? await this.directory.getSettings(ctx.cafe.id) : null;
     return [...merged.values()].map((l) => {
-      const product = menu.get(l.productId);
+      const productId = isHang(l.productId) ? l.productId.slice(HANG.length) : l.productId;
+      const product = menu.get(productId);
       if (!product || !product.available) throw new AppError("PRODUCT_UNAVAILABLE", "A product in the order isn't on sale", 409);
-      return { productId: l.productId, name: product.name, unitPriceKurus: product.priceKurus, quantity: l.quantity, discountPercent: l.discountPercent ?? 0 };
+      if (settings && productId !== l.productId && !(settings.askidaEnabled && settings.askidaProductIds.includes(productId))) {
+        throw new AppError("PRODUCT_NOT_ELIGIBLE", "This product can't go on the askı", 409);
+      }
+      // "Askıya bırak": the same price, a line of its own, named for what it is.
+      const name = productId === l.productId ? product.name : `Askıya ${goodsName(product.name)}`;
+      return { productId: l.productId, name, unitPriceKurus: product.priceKurus, quantity: l.quantity, discountPercent: l.discountPercent ?? 0 };
     });
   }
 
@@ -571,7 +692,7 @@ export class OrderService {
       number: o.number,
       businessDay: o.businessDay,
       status: o.status,
-      lines: o.lines.map((l) => ({ ...l, totalKurus: lineTotal(l) })),
+      lines: o.lines.map((l) => ({ ...l, totalKurus: lineTotal(l), hang: isHang(l.productId) })),
       discountPercent: o.discountPercent,
       subtotalKurus: o.subtotalKurus,
       discountKurus: o.discountKurus,
@@ -589,6 +710,7 @@ export class OrderService {
         : null,
       dueKurus: o.status === "open" ? o.totalKurus - amountPaid(payments) : 0,
       peni: peniKurus > 0 && o.status !== "refunded" && o.status !== "voided" ? { peni: peniKurus / 100, name: (wallet && wallets.get(wallet)) || "Üye" } : null,
+      askida: askidaOn(o, payments),
       canVoid: o.status === "open" && ctx.permissions.has("till.correct"),
       canRefund: o.status === "paid" && !refundWaiting && ctx.permissions.has("till.correct"),
       canDelete: ctx.permissions.has("till.delete"),
@@ -647,6 +769,40 @@ export class OrderService {
 /** Peni on an order: approved peni payments less peni given back, in kuruş. */
 function peniKurusOf(payments: Payment[]): number {
   return amountPaid(payments.filter((p) => p.method === "peni"));
+}
+
+/** What the askı paid on an order: approved askı payments less what went back, in kuruş. */
+function askidaKurusOf(payments: Payment[]): number {
+  return amountPaid(payments.filter((p) => p.method === "askida"));
+}
+
+/** An askı payment's `reference`: "2x cay" is two teas. */
+function askidaRef(productId: string, quantity: number): string {
+  return `${quantity}x${productId}`;
+}
+
+/** Askı items still paid for by the askı on an order, per product. Once given back, none are. */
+function askidaGiven(payments: Payment[]): Map<string, number> {
+  const out = new Map<string, number>();
+  if (askidaKurusOf(payments) <= 0) return out;
+  for (const p of payments.filter((x) => x.method === "askida" && x.kind === "sale" && x.status === "approved")) {
+    const m = /^(\d+)x(.+)$/.exec(p.reference ?? "");
+    if (m) out.set(m[2]!, (out.get(m[2]!) ?? 0) + Number(m[1]));
+  }
+  return out;
+}
+
+function askidaOn(o: Order, payments: Payment[]): OrderDTO["askida"] {
+  const kurus = askidaKurusOf(payments);
+  if (kurus <= 0 || o.status === "refunded" || o.status === "voided") return null;
+  const names = new Map(o.lines.map((l) => [l.productId, l.name]));
+  return { kurus, items: [...askidaGiven(payments)].map(([productId, quantity]) => ({ productId, name: names.get(productId) ?? productId, quantity })) };
+}
+
+/** "Askıya bırak" lines carry the askı item's id behind this. */
+const HANG = "askida:";
+function isHang(productId: string): boolean {
+  return productId.startsWith(HANG);
 }
 
 /** The wallet an order's peni came from. */

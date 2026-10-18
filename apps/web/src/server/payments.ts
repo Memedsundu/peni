@@ -1,4 +1,4 @@
-import { peniTerminal, type Payment, type PaymentConfirmation, type PaymentKind, type PaymentMethod, type PaymentStore, type PaymentTerminal, type PaymentTerminals, type TerminalOutcome } from "@peni/core";
+import { askidaTerminal, peniTerminal, type Payment, type PaymentConfirmation, type PaymentKind, type PaymentMethod, type PaymentStore, type PaymentTerminal, type PaymentTerminals, type TerminalOutcome } from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors";
 
@@ -20,7 +20,7 @@ export interface PaymentRequest {
   reason: string | null;
   /** The open drawer session, when there is one. */
   cashSessionId: string | null;
-  /** Peni: the wallet's membership. */
+  /** Peni: the wallet's membership. Askı: what it paid for (`askidaRef`). */
   reference?: string | null;
 }
 
@@ -147,9 +147,11 @@ export class PaymentService {
     return orderIds.length ? this.store.listPayments(cafeId, orderIds) : Promise.resolve([]);
   }
 
-  /** Peni never go near the card terminal: the wallet is their terminal. */
+  /** Peni and the askı never go near the card terminal: the wallet or the pool is their terminal. */
   private terminal(cafeId: string, deviceId: string | null, method: PaymentMethod): Promise<PaymentTerminal> {
-    return method === "peni" ? Promise.resolve(peniTerminal) : this.terminals.terminalFor(cafeId, deviceId);
+    if (method === "peni") return Promise.resolve(peniTerminal);
+    if (method === "askida") return Promise.resolve(askidaTerminal);
+    return this.terminals.terminalFor(cafeId, deviceId);
   }
 
   private async finish(payment: Payment, change: Partial<Payment>): Promise<Payment> {

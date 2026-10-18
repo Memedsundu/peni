@@ -19,6 +19,8 @@ export type DisplayState =
       totalKurus: number;
       /** Peni the customer spent on it, and what's left to pay (piece 11). */
       peni?: number;
+      /** What the askı paid for on it (piece 13), in kuruş. */
+      askidaKurus?: number;
       dueKurus?: number;
     }
   | {
@@ -31,6 +33,7 @@ export type DisplayState =
       changeKurus: number | null;
       claim: OrderClaimDTO | null;
       peni?: number;
+      askidaKurus?: number;
     };
 
 type Message = { type: "state"; state: DisplayState } | { type: "hello" };

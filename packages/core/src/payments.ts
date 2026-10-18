@@ -104,6 +104,17 @@ export const peniTerminal: PaymentTerminal = {
   cancel: async () => {},
 };
 
+/**
+ * The askı pays for askı items given out at the till (plan piece 13): the pool is taken
+ * from before the payment is recorded, so it's approved as it's recorded.
+ */
+export const askidaTerminal: PaymentTerminal = {
+  kind: "askida",
+  confirmation: () => "now",
+  send: async () => {},
+  cancel: async () => {},
+};
+
 /** Which terminal a till computer pays with. */
 export interface PaymentTerminals {
   terminalFor(cafeId: string, deviceId: string | null): Promise<PaymentTerminal>;

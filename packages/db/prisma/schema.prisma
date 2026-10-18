@@ -336,6 +336,8 @@ enum PaymentMethod {
   cash
   card
   peni
+  /// The askı paid for askı items given out at the till (plan piece 13).
+  askida
 }
 
 /// What the till sold. Amounts in kuruş.
