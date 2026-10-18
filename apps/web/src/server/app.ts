@@ -37,6 +37,8 @@ import {
   InMemoryTaskStore,
   InMemoryAssistantStore,
   InMemoryChatStore,
+  InMemoryLetterStore,
+  type LetterStore,
   type AssistantStore,
   type ChatStore,
   type BillStore,
@@ -103,6 +105,8 @@ import { SalesReportService } from "./sales-report";
 import { AskedReportService } from "./asked-reports";
 import { AssistantService, demoModel, demoTranscriber, type AiMode } from "./assistant";
 import { ChatService } from "./chat";
+import { LetterService } from "./letters";
+import { MonthPackageService } from "./month-package";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
@@ -157,6 +161,7 @@ export interface PeniStores {
   tasks: TaskStore;
   assistant: AssistantStore;
   chat: ChatStore;
+  letters: LetterStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -182,6 +187,7 @@ export function inMemoryStores(): PeniStores {
     tasks: new InMemoryTaskStore(),
     assistant: new InMemoryAssistantStore(),
     chat: new InMemoryChatStore(),
+    letters: new InMemoryLetterStore(),
   };
 }
 
@@ -265,6 +271,10 @@ export class PeniApp {
   readonly askedReports: AskedReportService;
   /** The assistant's chat, "Açıkla" and saved reports (piece 29). */
   readonly chat: ChatService;
+  /** The weekly letter (piece 30). */
+  readonly letters: LetterService;
+  /** Ay kapanışı's package for the mali müşavir (piece 30). */
+  readonly monthPackage: MonthPackageService;
   /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
   readonly orderStore: OrderStore;
   readonly paymentStore: PaymentStore;
@@ -384,6 +394,26 @@ export class PeniApp {
       cafes: () => this.identity.listCafes(),
       email: () => this.options.auth?.email ?? null,
       publicUrl: () => this.options.publicUrl ?? null,
+      letter: (cafeId) => this.letters.latest(cafeId),
+      now: () => this.now(),
+    });
+    this.monthPackage = new MonthPackageService(stores.bills, stores.assistant, stores.payments, this.money, this.directory, () => this.now());
+    this.letters = new LetterService({
+      store: stores.letters,
+      log: stores.assistant,
+      jobs: this.jobs,
+      sales: this.salesReports,
+      alerts: this.alerts,
+      bills: stores.bills,
+      stock: stores.stock,
+      menu: this.menu,
+      staff: stores.staff,
+      muted: stores.tasks,
+      directory: this.directory,
+      cafes: () => this.identity.listCafes(),
+      email: () => this.options.auth?.email ?? null,
+      publicUrl: () => this.options.publicUrl ?? null,
+      ai,
       now: () => this.now(),
     });
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";

@@ -8,7 +8,7 @@ import { Button, Notice } from "../../kasa/ui";
 import { formatDay, formatMonth } from "../amounts";
 import { Field, useSave } from "../controls";
 import { METHOD } from "../pay";
-import { PanelShell, when, type PanelProps } from "../shell";
+import { has, PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T } from "../text";
 
 /**
@@ -96,9 +96,53 @@ function MonthsPage({ cafe, t, lang, signedOut }: PanelProps) {
               </ul>
             )}
           </section>
+
+          {has(cafe, "bills.view") && <Package t={t} lang={lang} slug={cafe.slug} today={data.today} closedThrough={data.closedThrough} />}
         </>
       )}
     </>
+  );
+}
+
+/** The month-end package for the mali müşavir (plan piece 30, B11): any of the last twelve months as one ZIP. */
+function Package({ t, lang, slug, today, closedThrough }: { t: T; lang: Lang; slug: string; today: string; closedThrough: string | null }) {
+  const months = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(`${today.slice(0, 7)}-01T12:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() - i);
+    return d.toISOString().slice(0, 7);
+  });
+  // The month just finished, unless this one is all there is to pick.
+  const [month, setMonth] = useState(months[1]!);
+  const open = !closedThrough || closedThrough.slice(0, 7) < month;
+  return (
+    <section className="flex flex-col gap-4 rounded-3xl bg-panel p-5" aria-labelledby="package">
+      <div className="flex flex-col gap-1">
+        <h2 id="package" className="font-serif text-3xl">
+          {t("mpTitle")}
+        </h2>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("mpHelp")}</p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-muted">{t("mpMonth")}</span>
+          <select value={month} onChange={(e) => setMonth(e.target.value)} className="min-h-12 rounded-2xl border border-line bg-paper px-4 capitalize">
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {formatMonth(m, lang)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <a
+          href={api.staff.monthPackageUrl(slug, month)}
+          download
+          className="inline-flex min-h-12 items-center rounded-full bg-ink px-6 font-semibold text-paper"
+        >
+          {t("mpDownload")}
+        </a>
+      </div>
+      {open && <p className="text-sm text-muted">{t("mpOpen")}</p>}
+    </section>
   );
 }
 

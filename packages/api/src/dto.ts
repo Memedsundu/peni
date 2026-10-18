@@ -1493,6 +1493,8 @@ export interface TodayDTO {
   email: { eligible: boolean; on: boolean };
   /** Today's sales by hour against the same weekday last week, up to this hour; null without "reports.view". */
   sales: TodaySalesDTO | null;
+  /** Last week's letter once it's written (piece 30); null without "reports.view". */
+  letter: { weekStart: string; weekEnd: string; headline: string } | null;
 }
 
 export interface TodaySalesDTO {
@@ -1976,4 +1978,37 @@ export interface SavedReportsDTO {
   }[];
   /** "assistant.use": asking for a new one happens in the chat. */
   canAsk: boolean;
+}
+
+// ─────────────────────────────────────────────── the weekly letter (plan piece 30)
+
+/** Where a fact can be checked. A page's `label` is its key ("raporlar", "borclar"). */
+export interface LetterLinkDTO {
+  kind: "bill" | "item" | "page";
+  label: string;
+  href: string;
+}
+
+export interface LetterDTO {
+  weekStart: string;
+  weekEnd: string;
+  headline: string;
+  points: { title: string; text: string; links: LetterLinkDTO[] }[];
+  todo: { text: string; links: LetterLinkDTO[] };
+  writtenAt: string;
+  /** Written by the demo's stand-in. */
+  demo: boolean;
+}
+
+/**
+ * `GET /staff/:slug/letters?hafta=`: the weekly letters ("reports.view"). `state` is about
+ * last week's: "ready", "writing" (it's being written now), "failed" (the assistant
+ * couldn't; it tries again), "quiet" (nothing sold that week), "off" (no assistant here).
+ */
+export interface LettersDTO {
+  lastWeek: { from: string; through: string };
+  state: "ready" | "writing" | "failed" | "quiet" | "off";
+  /** The one asked for, else the newest. */
+  letter: LetterDTO | null;
+  weeks: { weekStart: string; weekEnd: string; headline: string }[];
 }

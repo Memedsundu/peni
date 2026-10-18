@@ -172,6 +172,7 @@ model Cafe {
   aiEvents       AiEvent[]
   aiChats        AiChat[]
   savedReports   SavedReport[]
+  weeklyLetters  WeeklyLetter[]
   inbox          CafeInbox?
   inboundEmails  InboundEmail[]
   memberships    Membership[]
@@ -1596,4 +1597,21 @@ model SavedReport {
 
   @@unique([cafeId, key])
   @@index([cafeId, createdAt])
+}
+
+/// The weekly letter (piece 30): what changed last week, as the assistant wrote it up, with
+/// the numbers it was written from. One per café per week.
+model WeeklyLetter {
+  id        String    @id
+  cafeId    String
+  weekStart String
+  facts     Json
+  body      Json
+  model     String
+  createdAt DateTime
+  emailedAt DateTime?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, weekStart])
 }

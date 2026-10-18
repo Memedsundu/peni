@@ -42,6 +42,8 @@ export interface AlertDeps {
   cafes: () => Promise<Cafe[]>;
   email: () => EmailSender | null;
   publicUrl: () => string | null;
+  /** Last week's letter for Bugün (piece 30), once it's written. */
+  letter?: (cafeId: string) => Promise<TodayDTO["letter"]>;
   now: () => Date;
 }
 
@@ -156,11 +158,12 @@ export class AlertService {
   /** Bugün: the viewer's alerts and today's tasks. */
   async today(ctx: StaffContext): Promise<TodayDTO> {
     const cafeId = ctx.cafe.id;
-    const [alerts, tasks, muted, sales] = await Promise.all([
+    const [alerts, tasks, muted, sales, letter] = await Promise.all([
       this.list(cafeId, ctx.permissions),
       this.d.tasks.summary(ctx),
       this.d.store.listMuted(cafeId),
       this.d.sales.today(ctx),
+      ctx.permissions.has("reports.view") && this.d.letter ? this.d.letter(cafeId) : null,
     ]);
     return {
       cafe: { slug: ctx.cafe.slug, name: ctx.cafe.name },
@@ -170,6 +173,7 @@ export class AlertService {
       tasks,
       email: { eligible: this.mayEmail(ctx.rolePermissions), on: !muted.includes(ctx.member.id) },
       sales,
+      letter,
     };
   }
 

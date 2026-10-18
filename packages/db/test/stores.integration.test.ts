@@ -814,4 +814,32 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.chat.deleteSavedReport(cafeId, saved.id);
     expect(await stores.chat.listSavedReports(cafeId)).toEqual([]);
   });
+
+  it("keeps one weekly letter a café a week, even when two passes write it at once", async () => {
+    const letter = {
+      id: `ltr_${run}`,
+      cafeId,
+      weekStart: "2026-10-12",
+      facts: { sales: { ref: "sales", total: 41_250 } },
+      body: {
+        headline: "Satışlar arttı, süt pahalandı",
+        points: [{ title: "Süt pahalandı", text: "Litresi ₺43'ten ₺45'e çıktı.", refs: ["item:stk_sut"] }],
+        todo: { text: "Latte fiyatına bak.", refs: [] },
+        links: { "item:stk_sut": { kind: "item" as const, label: "Süt", href: "/panel/stok?kafe=moda" } },
+      },
+      model: "demo",
+      createdAt: at,
+      emailedAt: null,
+    };
+    const both = await Promise.all([stores.letters.addLetter(letter), stores.letters.addLetter({ ...letter, id: `ltr2_${run}`, body: { ...letter.body, headline: "Başka" } })]);
+    expect(both[0]!.id).toBe(both[1]!.id);
+    const kept = (await stores.letters.getLetter(cafeId, "2026-10-12"))!;
+    expect(kept).toEqual(both[0]);
+    await stores.letters.addLetter({ ...letter, id: `ltr3_${run}`, weekStart: "2026-10-05" });
+    expect((await stores.letters.listLetters(cafeId, 12)).map((l) => l.weekStart)).toEqual(["2026-10-12", "2026-10-05"]);
+    expect(await stores.letters.listLetters(cafeId, 1)).toHaveLength(1);
+    await stores.letters.markEmailed(cafeId, "2026-10-12", new Date(at.getTime() + 5000));
+    expect((await stores.letters.getLetter(cafeId, "2026-10-12"))!.emailedAt).toEqual(new Date(at.getTime() + 5000));
+    expect(await stores.letters.getLetter("other", "2026-10-12")).toBeNull();
+  });
 });

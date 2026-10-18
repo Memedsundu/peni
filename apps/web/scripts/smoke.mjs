@@ -808,6 +808,34 @@ const eceAsks = await call("POST", "/staff/moda/chat", { headers: ecePassword, b
 assert.equal(eceAsks.json.error.code, "FORBIDDEN");
 step("Assistant: Murat's question draws this month's coffee sales by hour against last month, asked once; kept on Raporlar for Leyla with today's numbers, explained and removed; Açıkla reads the hours; Ece can't ask");
 
+// 5x. The weekly letter and the month's package (piece 30): opening Mektup starts last week's
+//     letter, the demo writes it in the background, and it links what it rests on; Bugün shows
+//     it. Leyla downloads this month's ZIP for the mali müşavir. Ece sees neither.
+let letterPage = (await call("GET", "/staff/moda/letters", { headers: STAFF })).json;
+assert.ok(["writing", "ready"].includes(letterPage.state), letterPage.state);
+for (let i = 0; i < 40 && letterPage.state === "writing"; i++) {
+  await new Promise((r) => setTimeout(r, 500));
+  letterPage = (await call("GET", "/staff/moda/letters", { headers: STAFF })).json;
+}
+assert.equal(letterPage.state, "ready");
+assert.equal(letterPage.letter.weekStart, letterPage.lastWeek.from);
+assert.ok(letterPage.letter.demo && letterPage.letter.points.length >= 2 && letterPage.letter.todo.text);
+assert.ok(letterPage.letter.points.every((pt) => pt.links.every((l) => l.href.startsWith("/panel/"))));
+assert.equal((await call("GET", "/staff/moda/today", { headers: STAFF })).json.letter.headline, letterPage.letter.headline);
+assert.equal((await call("GET", `/staff/moda/letters?hafta=${letterPage.lastWeek.from}`, { headers: STAFF })).json.letter.headline, letterPage.letter.headline);
+assert.equal((await call("GET", "/staff/moda/letters", { headers: ecePassword })).json.error.code, "FORBIDDEN");
+const packageMonth = new Date().toISOString().slice(0, 7);
+const pkg = await fetch(`${BASE}/api/v1/staff/moda/money/months/${packageMonth}/package`, { headers: STAFF });
+assert.equal(pkg.status, 200);
+assert.equal(pkg.headers.get("content-type"), "application/zip");
+assert.match(pkg.headers.get("content-disposition"), new RegExp(`peni-moda-${packageMonth}\\.zip`));
+const pkgBytes = new Uint8Array(await pkg.arrayBuffer());
+assert.deepEqual([...pkgBytes.subarray(0, 2)], [0x50, 0x4b]);
+assert.ok(new TextDecoder().decode(pkgBytes).includes(`moda-${packageMonth}.xlsx`));
+assert.equal((await fetch(`${BASE}/api/v1/staff/moda/money/months/${packageMonth}/package`, { headers: ecePassword })).status, 403);
+assert.equal((await call("GET", "/staff/moda/money/months/2099-01/package", { headers: STAFF })).json.error.code, "PACKAGE_MONTH");
+step("Letter: opening Mektup writes last week's letter in the background, with links, on Bugün too; Leyla downloads the month's ZIP with its workbook; Ece sees neither");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

@@ -21,7 +21,16 @@ export function useAssistant(): Assistant | null {
 }
 
 /** What a page a source links to is called. */
-const PAGE_LABEL: Record<string, TextKey> = { raporlar: "navReports", faturalar: "bills", borclar: "debts", stok: "stock", nakit: "money" };
+export const PAGE_LABEL: Record<string, TextKey> = {
+  raporlar: "navReports",
+  faturalar: "bills",
+  borclar: "debts",
+  stok: "stock",
+  nakit: "money",
+  taslaklar: "navDrafts",
+  puantaj: "pay",
+  gorevler: "navTasks",
+};
 
 const key = () => (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 

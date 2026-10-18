@@ -218,6 +218,8 @@ export const errorMessagesTr: Record<string, string> = {
   INBOX_SAMPLE_DEMO: "Örnek e-posta yalnızca demoda gönderilir.",
   CHAT_LIMIT: "Bugün için soru sınırı doldu. Yarın yeniden sorabilirsin.",
   CHAT_NOT_FOUND: "Bu sohbet bulunamadı. Yeni bir sohbet başlat.",
+  LETTER_NOT_FOUND: "O haftanın mektubu yok.",
+  PACKAGE_MONTH: "Bu ay için paket hazırlanamaz: bitmiş ya da süren bir ay seç.",
   SAVED_REPORT_NOT_FOUND: "Bu rapor bulunamadı; kaldırılmış olabilir.",
   SAVED_REPORTS_FULL: "En çok 30 rapor kaydedilir. Yenisi için birini kaldır.",
   ASKED_REPORT: "Bu rapor böyle çıkarılamıyor. Başka bir biçimde sor.",
