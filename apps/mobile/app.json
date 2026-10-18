@@ -14,7 +14,8 @@
         "light": "./assets/icon.png",
         "dark": "./assets/icon-dark.png",
         "tinted": "./assets/icon-tinted.png"
-      }
+      },
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "app.peni",
@@ -32,6 +33,16 @@
       "expo-router",
       "expo-secure-store",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Peni, kasadaki QR'ı okutup peni'ni alman için kamerayı kullanır.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-apple-authentication",
+      "expo-web-browser",
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
@@ -44,6 +55,8 @@
         }
       ]
     ],
-    "experiments": { "typedRoutes": false }
+    "experiments": {
+      "typedRoutes": false
+    }
   }
 }
