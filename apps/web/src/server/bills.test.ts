@@ -28,7 +28,7 @@ const milk = (litres: number, tl: number, date = "2026-10-16") => ({
 beforeEach(async () => {
   now = new Date("2026-10-16T09:00:00Z");
   app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now }, inMemoryStores());
-  await seed(app);
+  await seed(app, { sales: false });
   [murat, hakan, ece] = await Promise.all([at("murat"), at("hakan"), at("ece")]);
 });
 

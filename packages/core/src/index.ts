@@ -24,3 +24,4 @@ export * from "./debts";
 export * from "./books";
 export * from "./shifts";
 export * from "./tasks";
+export * from "./figures";

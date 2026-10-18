@@ -57,6 +57,9 @@ export class PrismaOrderStore implements OrderStore {
         cafeId,
         deletedAt: null,
         ...(filter.businessDay ? { businessDay: filter.businessDay } : {}),
+        ...(filter.from || filter.through
+          ? { businessDay: { ...(filter.from ? { gte: filter.from } : {}), ...(filter.through ? { lte: filter.through } : {}) } }
+          : {}),
         ...(filter.status ? { status: filter.status } : {}),
       },
       orderBy: [{ createdAt: "desc" }, { number: "desc" }],

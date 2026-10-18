@@ -17,6 +17,7 @@
     "@peni/core": "workspace:*",
     "@peni/db": "workspace:*",
     "bcryptjs": "3.0.2",
+    "echarts": "6.1.0",
     "geist": "1.8.1",
     "jose": "6.2.10",
     "next": "16.4.1",

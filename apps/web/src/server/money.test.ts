@@ -34,7 +34,7 @@ beforeEach(async () => {
   now = new Date("2026-10-16T09:00:00Z");
   stores = inMemoryStores();
   app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now }, stores);
-  await seed(app);
+  await seed(app, { sales: false });
   [leyla, murat, hakan, ece] = await Promise.all([at("leyla"), at("murat"), at("hakan"), at("ece")]);
 });
 

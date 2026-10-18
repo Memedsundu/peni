@@ -598,6 +598,23 @@ assert.equal((await call("GET", "/cron/daily")).status, 401);
 assert.equal((await call("GET", "/cron/daily", { headers: { authorization: "Bearer wrong" } })).status, 401);
 step("Bugün lists what needs doing and today's tasks; Ece ticks a task at the till (once), not yesterday's; Leyla makes, changes and removes a list (once) and turns her morning email off and on; the cron route needs its secret");
 
+// 5r. Raporlar (piece 23): this month so far adds up, with weeks of history behind it and
+//     today's till sales from this run in it; Bugün's sales strip says the same as the
+//     report for today. Ece's till can't open reports, and days to come can't be reported.
+const report = (await call("GET", "/staff/moda/reports", { headers: STAFF })).json;
+assert.equal(report.totals.profitKurus, report.totals.salesKurus - report.totals.expensesKurus);
+assert.ok(report.totals.salesKurus > 0 && report.products.length > 0 && report.months.length >= 2, "this month's report has numbers");
+assert.equal(report.paidWith.cashKurus + report.paidWith.cardKurus, report.totals.salesKurus);
+const todayReport = (await call("GET", `/staff/moda/reports?from=${report.today}&through=${report.today}`, { headers: STAFF })).json;
+assert.equal(todayReport.series.step, "hour");
+assert.ok(todayReport.totals.orders > 0, "this run's sales are in today's report");
+bugun = (await call("GET", "/staff/moda/today", { headers: STAFF })).json;
+assert.equal(bugun.sales.salesKurus, todayReport.totals.salesKurus);
+assert.equal((await call("GET", "/staff/moda/reports", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
+const future = await call("GET", `/staff/moda/reports?from=${report.today}&through=${addDays(report.today, 1)}`, { headers: STAFF });
+assert.deepEqual([future.status, future.json.error.code], [400, "REPORT_RANGE"]);
+step("Raporlar adds up for this month, has today's sales from this run (the same as on Bugün), and isn't for the till or for days to come");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

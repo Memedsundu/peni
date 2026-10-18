@@ -1477,4 +1477,74 @@ export interface TodayDTO {
   tasks: { done: number; total: number; lists: { id: string; name: string; mine: boolean; done: number; total: number }[] } | null;
   /** The morning email: whether it can go to the viewer (they see alerts) and whether it's on. */
   email: { eligible: boolean; on: boolean };
+  /** Today's sales by hour against the same weekday last week, up to this hour; null without "reports.view". */
+  sales: TodaySalesDTO | null;
+}
+
+export interface TodaySalesDTO {
+  salesKurus: number;
+  orders: number;
+  /** Last week's same weekday, up to the same time. */
+  lastWeekKurus: number;
+  lastWeekDay: string;
+  /** Opening hours only: the first and last hour anything sold either day. */
+  hours: { hour: string; salesKurus: number; lastWeekKurus: number }[];
+}
+
+// ─────────────────────────────────────────────── Raporlar (plan piece 23)
+
+export type ReportStepDTO = "hour" | "day" | "week" | "month";
+export type ExpenseKindDTO = "ingredients" | "supplies" | "rent" | "utilities" | "services" | "wages" | "other";
+
+/** A period's headline numbers. Money is what came in by cash and card, refunds taken out. */
+export interface ReportTotalsDTO {
+  salesKurus: number;
+  /** Paid orders on those days, refunded ones left out. */
+  orders: number;
+  /** Order totals (peni and askı included) over orders; null with none. */
+  avgOrderKurus: number | null;
+  /** Bills dated in the period and pay earned for hours worked in it. */
+  expensesKurus: number;
+  profitKurus: number;
+}
+
+/** One product's line in the ranking. Cost comes from its recipe at the latest bill prices (D30). */
+export interface ReportProductDTO {
+  productId: string;
+  name: string;
+  quantity: number;
+  /** What it sold for, discounts taken off; peni and askı included. */
+  salesKurus: number;
+  /** Per piece; null when it isn't tracked or an ingredient has no price yet. */
+  unitCostKurus: number | null;
+  profitKurus: number | null;
+  /** Profit over sales, whole percent. */
+  marginPercent: number | null;
+}
+
+/** `GET /staff/:slug/reports?from&through`: Raporlar. Needs "reports.view". */
+export interface SalesReportDTO {
+  cafe: { slug: string; name: string };
+  today: string;
+  from: string;
+  through: string;
+  /** When the period runs to today, the period before is counted up to the same time of day, "HH:MM"; else null. */
+  previous: { from: string; through: string; untilTime: string | null };
+  totals: ReportTotalsDTO;
+  previousTotals: ReportTotalsDTO;
+  /** How the period's orders were paid, net of refunds. Peni and askı aren't money in. */
+  paidWith: { cashKurus: number; cardKurus: number; peniKurus: number; askidaKurus: number };
+  /** Money in over the period, bucket by bucket, with the previous period's bucket at the same place. */
+  series: { step: ReportStepDTO; points: { key: string; salesKurus: number; previousKurus: number | null }[] };
+  /** Paid orders by hour of the day, "07" to "22"; only hours with any. */
+  hours: { hour: string; orders: number }[];
+  /** Average money in per weekday (1 = Monday), whole days only; empty for periods under a week. */
+  weekdays: { weekday: number; avgKurus: number }[];
+  expenses: { kind: ExpenseKindDTO; kurus: number }[];
+  /** Best profit first; products without a cost after the rest, by sales. */
+  products: ReportProductDTO[];
+  /** Products sold without a known cost. */
+  unpriced: number;
+  /** Month by month, up to this month, from the first month with numbers; at most 12. */
+  months: { month: string; salesKurus: number; expensesKurus: number; profitKurus: number }[];
 }
