@@ -87,7 +87,7 @@ describe("Faturalar (plan piece 18)", () => {
     const paidNow = await app.bills.add(murat, { key: key(), ...milk(5, 225), paid: { method: "cash" } });
     expect(paidNow).toMatchObject({ state: "paid", paidKurus: 22_500 });
     expect(paidNow.payments).toEqual([
-      { id: expect.any(String), amountKurus: 22_500, method: "cash", paidOn: "2026-10-16", by: "Murat Aksu", check: null, lender: null, locked: null, canRemove: true },
+      { id: expect.any(String), amountKurus: 22_500, method: "cash", paidOn: "2026-10-16", by: "Murat Aksu", check: null, lender: null, locked: null, account: "reserve", canRemove: true },
     ]);
 
     expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { key: key(), method: "bank", paidOn: "2026-10-17" }))).toBe("PAID_ON_INVALID");

@@ -31,4 +31,11 @@ export class PrismaPaymentStore implements PaymentStore {
   async listCashSessionPayments(cafeId: string, cashSessionId: string): Promise<Payment[]> {
     return this.db().payment.findMany({ where: { cafeId, cashSessionId }, orderBy: [{ startedAt: "asc" }, { id: "asc" }] });
   }
+
+  async listSettled(cafeId: string, from: Date, to: Date): Promise<Payment[]> {
+    return this.db().payment.findMany({
+      where: { cafeId, status: "approved", settledAt: { gte: from, lt: to } },
+      orderBy: [{ settledAt: "asc" }, { id: "asc" }],
+    });
+  }
 }

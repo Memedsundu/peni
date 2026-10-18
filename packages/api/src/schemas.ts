@@ -327,7 +327,10 @@ const amount = z.number().int().min(1, "Tutar yaz").max(100_000_000, "Tutarı ko
 const lender = z.object({ memberId: z.string().min(1).max(100).nullable().optional(), name: z.string().trim().max(80, "En çok 80 karakter").optional() });
 
 /** "Fatura ekle". `paid` marks it paid on the spot (needs "bills.manage"). */
-export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.object({ method: payMethod }).optional() });
+/** Cash comes out of the drawer or the reserve (piece 20); left out, the drawer when it's open. */
+const cashFrom = z.enum(["drawer", "reserve"]);
+
+export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.object({ method: payMethod, from: cashFrom.optional() }).optional() });
 
 /** "Düzelt": the whole bill again, with the version it was read at. */
 export const correctBillSchema = z.object({ version: z.number().int().min(1), ...billFields });
@@ -344,6 +347,7 @@ export const payBillSchema = z.object({
   check: z.object({ number: z.string().trim().min(1, "Çek numarasını yaz").max(30), bankName: optionalText(60), dueDate: billDay }).optional(),
   lender: lender.optional(),
   loanDueDate: billDay.nullable().optional(),
+  from: cashFrom.optional(),
 });
 
 export const voidBillSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
@@ -377,7 +381,7 @@ export const addLoanSchema = z.object({
 });
 
 /** Paid back to a lender (their key from Borçlar); pays their oldest loans first. */
-export const repayLenderSchema = z.object({ key: actionKey, lender: z.string().min(1).max(200), amountKurus: amount, method: payMethod, paidOn: billDay.optional() });
+export const repayLenderSchema = z.object({ key: actionKey, lender: z.string().min(1).max(200), amountKurus: amount, method: payMethod, paidOn: billDay.optional(), from: cashFrom.optional() });
 
 export const cardSettingsSchema = z.object({
   name: z.string().trim().min(1, "Bir ad yaz").max(80),
@@ -386,7 +390,30 @@ export const cardSettingsSchema = z.object({
   dueDay: z.number().int().min(1).max(28),
 });
 
-export const payCardSchema = z.object({ key: actionKey, amountKurus: amount, method: z.enum(["cash", "bank"]), paidOn: billDay.optional() });
+export const payCardSchema = z.object({ key: actionKey, amountKurus: amount, method: z.enum(["cash", "bank"]), paidOn: billDay.optional(), from: cashFrom.optional() });
+
+// ─────────────────────────────────────────────── money and month close (plan piece 20)
+
+const moneyNote = z.string().trim().max(200, "Not çok uzun");
+
+/** "Başla": what the reserve and the bank hold today. */
+export const startMoneySchema = z.object({ reserveKurus: z.number().int().min(0).max(1_000_000_000), bankKurus: z.number().int().min(-1_000_000_000).max(1_000_000_000) });
+
+/**
+ * "Aktar" from `account` to `to`; "Para koy" and "Para çek" on the reserve or the bank; "Düzelt"
+ * sets the reserve or the bank to `amountKurus` (what was counted or the statement says).
+ */
+export const moneyMoveSchema = z.object({
+  key: actionKey,
+  kind: z.enum(["transfer", "deposit", "withdraw", "correction"]),
+  account: z.enum(["drawer", "reserve", "bank"]),
+  to: z.enum(["drawer", "reserve", "bank"]).optional(),
+  amountKurus: z.number().int().min(0).max(1_000_000_000),
+  note: moneyNote.optional(),
+});
+
+export const closeMonthSchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), note: moneyNote.optional() });
+export const reopenMonthSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
 
 export const billListQuerySchema = z.object({
   month: z
@@ -509,6 +536,10 @@ export type AddLoanInput = z.input<typeof addLoanSchema>;
 export type RepayLenderInput = z.input<typeof repayLenderSchema>;
 export type CardSettingsInput = z.input<typeof cardSettingsSchema>;
 export type PayCardInput = z.input<typeof payCardSchema>;
+export type StartMoneyInput = z.input<typeof startMoneySchema>;
+export type MoneyMoveInput = z.input<typeof moneyMoveSchema>;
+export type CloseMonthInput = z.input<typeof closeMonthSchema>;
+export type ReopenMonthInput = z.input<typeof reopenMonthSchema>;
 export type CountStockInput = z.input<typeof countStockSchema>;
 export type WasteStockInput = z.input<typeof wasteStockSchema>;
 export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;

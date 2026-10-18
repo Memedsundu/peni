@@ -19,7 +19,7 @@ import { Button, Notice, Sheet } from "../../kasa/ui";
 import { formatDay, parseTL, tlInput } from "../amounts";
 import { Field, Segmented, Stat, useSave } from "../controls";
 import { billHref } from "../faturalar/bills";
-import { METHOD, PaymentLine, PayForm } from "../pay";
+import { CashFrom, cashReady, defaultFrom, firstDay, FROM_WORD, METHOD, PaymentLine, PayForm } from "../pay";
 import { field, PanelShell, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
 
@@ -428,6 +428,7 @@ function LenderSheet({ t, lang, slug, data, lender, onClose, onSaved }: SheetPro
   const key = useRef(newIdempotencyKey());
   const [amount, setAmount] = useState(tlInput(lender.owedKurus));
   const [method, setMethod] = useState<MoneyMethodDTO>("cash");
+  const [from, setFrom] = useState(defaultFrom(data.cashFrom));
   const [paidOn, setPaidOn] = useState(data.today);
   const save = useSave<DebtsDTO>(lang, (d) => {
     key.current = newIdempotencyKey();
@@ -452,18 +453,37 @@ function LenderSheet({ t, lang, slug, data, lender, onClose, onSaved }: SheetPro
         <section className="flex flex-col gap-4 rounded-3xl bg-panel p-5">
           <h3 className="font-semibold">{t("repay")}</h3>
           <Segmented label={t("repayHow")} value={method} onChange={setMethod} options={MONEY.map((m) => ({ value: m, label: t(METHOD[m]) }))} />
+          {method === "cash" && data.cashFrom && <CashFrom t={t} cashFrom={data.cashFrom} value={from} onChange={setFrom} />}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("payAmount")} value={amount} onChange={setAmount} inputMode="decimal" suffix="₺" />
             <label className="flex flex-col gap-2 text-sm text-muted">
               {t("paidOn")}
-              <input type="date" className={`${field} min-h-12`} value={paidOn} max={data.today} onChange={(e) => setPaidOn(e.target.value)} />
+              <input
+                type="date"
+                className={`${field} min-h-12`}
+                value={paidOn}
+                min={firstDay(data.closedThrough)}
+                max={data.today}
+                onChange={(e) => setPaidOn(e.target.value)}
+              />
             </label>
           </div>
           <div>
             <Button
               kind="primary"
-              disabled={!ok || !paidOn || save.busy}
-              onClick={() => save.run(() => api.staff.debts.repay(slug, { key: key.current, lender: lender.key, amountKurus: amountKurus!, method, paidOn }))}
+              disabled={!ok || !paidOn || (method === "cash" && !cashReady(data.cashFrom)) || save.busy}
+              onClick={() =>
+                save.run(() =>
+                  api.staff.debts.repay(slug, {
+                    key: key.current,
+                    lender: lender.key,
+                    amountKurus: amountKurus!,
+                    method,
+                    paidOn,
+                    ...(method === "cash" && data.cashFrom ? { from } : {}),
+                  }),
+                )
+              }
             >
               {t("repay")} · {formatTL(ok ? amountKurus! : 0)}
             </Button>
@@ -517,9 +537,11 @@ function LenderSheet({ t, lang, slug, data, lender, onClose, onSaved }: SheetPro
               <li key={r.id} className="flex items-center justify-between gap-4 py-3">
                 <span className="flex flex-col gap-0.5">
                   <span className="font-semibold tabular">{formatTL(r.amountKurus)}</span>
-                  <span className="text-sm text-muted">{[t(METHOD[r.method]), formatDay(r.paidOn, lang), r.by].filter(Boolean).join(" · ")}</span>
+                  <span className="text-sm text-muted">
+                    {[t(METHOD[r.method]), r.account && r.method === "cash" ? t(FROM_WORD[r.account]) : null, formatDay(r.paidOn, lang), r.by].filter(Boolean).join(" · ")}
+                  </span>
                 </span>
-                {data.canEdit && (
+                {data.canEdit && !(data.closedThrough && r.paidOn <= data.closedThrough) && (
                   <Button kind="bare" size="sm" disabled={save.busy} onClick={() => save.run(() => api.staff.debts.removeRepayment(slug, r.id))}>
                     {t("undo")}
                   </Button>
@@ -539,6 +561,7 @@ function CardSheet({ t, lang, slug, data, card, onClose, onSaved, onSettings }: 
   const suggested = (c: CardDTO) => (c.statementKurus > 0 ? c.statementKurus : Math.max(c.balanceKurus, 0));
   const [amount, setAmount] = useState(tlInput(suggested(card)));
   const [method, setMethod] = useState<"cash" | "bank">("bank");
+  const [from, setFrom] = useState(defaultFrom(data.cashFrom));
   const [paidOn, setPaidOn] = useState(data.today);
   const save = useSave<DebtsDTO>(lang, (d) => {
     key.current = newIdempotencyKey();
@@ -559,18 +582,30 @@ function CardSheet({ t, lang, slug, data, card, onClose, onSaved, onSettings }: 
             onChange={setMethod}
             options={(["bank", "cash"] as const).map((m) => ({ value: m, label: t(METHOD[m]) }))}
           />
+          {method === "cash" && data.cashFrom && <CashFrom t={t} cashFrom={data.cashFrom} value={from} onChange={setFrom} />}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("payAmount")} value={amount} onChange={setAmount} inputMode="decimal" suffix="₺" />
             <label className="flex flex-col gap-2 text-sm text-muted">
               {t("paidOn")}
-              <input type="date" className={`${field} min-h-12`} value={paidOn} max={data.today} onChange={(e) => setPaidOn(e.target.value)} />
+              <input
+                type="date"
+                className={`${field} min-h-12`}
+                value={paidOn}
+                min={firstDay(data.closedThrough)}
+                max={data.today}
+                onChange={(e) => setPaidOn(e.target.value)}
+              />
             </label>
           </div>
           <div>
             <Button
               kind="primary"
-              disabled={!ok || !paidOn || save.busy}
-              onClick={() => save.run(() => api.staff.debts.payCard(slug, { key: key.current, amountKurus: amountKurus!, method, paidOn }))}
+              disabled={!ok || !paidOn || (method === "cash" && !cashReady(data.cashFrom)) || save.busy}
+              onClick={() =>
+                save.run(() =>
+                  api.staff.debts.payCard(slug, { key: key.current, amountKurus: amountKurus!, method, paidOn, ...(method === "cash" && data.cashFrom ? { from } : {}) }),
+                )
+              }
             >
               {fill(t("payButton"), { tl: formatTL(ok ? amountKurus! : 0) })}
             </Button>
@@ -606,11 +641,15 @@ function CardSheet({ t, lang, slug, data, card, onClose, onSaved, onSettings }: 
               <li key={p.id} className="flex items-center justify-between gap-4 py-3">
                 <span className="flex flex-col gap-0.5">
                   <span className="font-semibold tabular">{formatTL(p.amountKurus)}</span>
-                  <span className="text-sm text-muted">{[t(METHOD[p.method]), formatDay(p.paidOn, lang), p.by].filter(Boolean).join(" · ")}</span>
+                  <span className="text-sm text-muted">
+                    {[t(METHOD[p.method]), p.account && p.method === "cash" ? t(FROM_WORD[p.account]) : null, formatDay(p.paidOn, lang), p.by].filter(Boolean).join(" · ")}
+                  </span>
                 </span>
-                <Button kind="bare" size="sm" disabled={save.busy} onClick={() => save.run(() => api.staff.debts.removeCardPayment(slug, p.id))}>
-                  {t("undo")}
-                </Button>
+                {!(data.closedThrough && p.paidOn <= data.closedThrough) && (
+                  <Button kind="bare" size="sm" disabled={save.busy} onClick={() => save.run(() => api.staff.debts.removeCardPayment(slug, p.id))}>
+                    {t("undo")}
+                  </Button>
+                )}
               </li>
             ))}
           </ul>

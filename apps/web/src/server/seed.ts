@@ -1,5 +1,5 @@
 import { defaultSettings, localDateKey, startOfLocalDay } from "@peni/core";
-import type { Bill, BillLine, Cafe, MenuItem, Post, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier } from "@peni/core";
+import type { Bill, BillLine, Cafe, MenuItem, MoneyMovement, MovementKind, Post, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -625,11 +625,37 @@ async function seedBills(app: PeniApp, p: { leyla: string; murat: string; ece: s
     });
     if (paid) {
       await app.billStore.addPayment({
-        id: `bpy_${b.id}`, cafeId, billId: b.id, amountKurus: totalKurus, method: paid.method, paidOn: paid.on, memberId: p.leyla, createdAt: paidAt!,
+        id: `bpy_${b.id}`, cafeId, billId: b.id, amountKurus: totalKurus, method: paid.method, paidOn: paid.on,
+        account: paid.method === "cash" ? "reserve" : null, memberId: p.leyla, createdAt: paidAt!,
       });
     }
   }
   await seedDebts(app, { ...p, day, rentPaidOn });
+  await seedMoney(app, { ...p, day });
+}
+
+/**
+ * Nakit ve banka (plan piece 20): Leyla started keeping the money in Peni 18 days ago,
+ * just before the cash milk bill, which came out of the reserve. The card payment went
+ * from the bank, Murat was paid back from the reserve, and money was moved and corrected
+ * the way a week goes. No month is closed: September is there to close.
+ */
+async function seedMoney(app: PeniApp, p: { leyla: string; murat: string; on: (daysAgo: number, hh: number, mm?: number) => Date; day: (daysAgo: number) => string }): Promise<void> {
+  const cafeId = "cafe_moda";
+  await app.books.saveStart({ cafeId, startedOn: p.day(18), memberId: p.leyla, createdAt: p.on(18, 9) });
+  const move = (id: string, account: "reserve" | "bank", amountKurus: number, kind: MovementKind, source: string, daysAgo: number, extra: Partial<MoneyMovement> = {}): MoneyMovement => ({
+    id, cafeId, account, amountKurus, kind, counterpart: null, source, day: p.day(daysAgo), note: null, memberId: p.leyla, createdAt: p.on(daysAgo, 9), ...extra,
+  });
+  await app.books.addMovements([
+    move("mmv_seed_open_r", "reserve", 1_200_000, "opening", "opening", 18),
+    move("mmv_seed_open_b", "bank", 8_500_000, "opening", "opening", 18),
+    move("mmv_seed_sut1", "reserve", -86_000, "bill", "bill_payment:bpy_bil_seed_sut1", 16, { createdAt: p.on(16, 17) }),
+    move("mmv_seed_card", "bank", -200_000, "card", "card_payment:cpy_seed_1", 12, { createdAt: p.on(12, 11) }),
+    move("mmv_seed_tr_r", "reserve", -500_000, "transfer", "manual:seed_transfer", 9, { counterpart: "bank", note: "Haftalık yatırma", createdAt: p.on(9, 18) }),
+    move("mmv_seed_tr_b", "bank", 500_000, "transfer", "manual:seed_transfer", 9, { counterpart: "reserve", note: "Haftalık yatırma", createdAt: p.on(9, 18) }),
+    move("mmv_seed_lrp", "reserve", -20_000, "repayment", "repayment:lrp_seed_1", 3, { createdAt: p.on(3, 19) }),
+    move("mmv_seed_fix", "bank", -4_750, "correction", "manual:seed_fix", 2, { note: "Ekstrede hesap işletim ücreti", createdAt: p.on(2, 10) }),
+  ]);
 }
 
 /**
@@ -645,7 +671,7 @@ async function seedDebts(
   const cafeId = "cafe_moda";
   const dayOfMonth = (daysAgo: number) => Math.min(28, Number(p.day(daysAgo).slice(8)));
   await app.debtStore.saveCard({ cafeId, name: "İş kartı", limitKurus: 10_000_000, statementDay: dayOfMonth(20), dueDay: dayOfMonth(10), updatedAt: p.on(30, 9) });
-  await app.debtStore.addCardPayment({ id: "cpy_seed_1", cafeId, amountKurus: 200_000, method: "bank", paidOn: p.day(12), memberId: p.leyla, createdAt: p.on(12, 11) });
+  await app.debtStore.addCardPayment({ id: "cpy_seed_1", cafeId, amountKurus: 200_000, method: "bank", paidOn: p.day(12), account: "bank", memberId: p.leyla, createdAt: p.on(12, 11) });
 
   await app.debtStore.saveCheck({
     id: "chk_seed_kira", cafeId, number: "0048213", bankName: "Ziraat Bankası", payee: null, supplierId: "sup_seed_ev", amountKurus: 4_500_000,
@@ -658,6 +684,6 @@ async function seedDebts(
     borrowedOn: p.day(6), dueDate: null, note: null, billPaymentId: "bpy_bil_seed_sut2", createdById: p.leyla, createdAt: p.on(6, 17),
   });
   await app.debtStore.addRepayment({
-    id: "lrp_seed_1", cafeId, lenderKey: `member:${p.murat}`, amountKurus: 20_000, method: "cash", paidOn: p.day(3), memberId: p.leyla, createdAt: p.on(3, 19),
+    id: "lrp_seed_1", cafeId, lenderKey: `member:${p.murat}`, amountKurus: 20_000, method: "cash", paidOn: p.day(3), account: "reserve", memberId: p.leyla, createdAt: p.on(3, 19),
   });
 }

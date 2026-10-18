@@ -151,6 +151,9 @@ model Cafe {
   loanRepayments LoanRepayment[]
   creditCard     CreditCard?
   cardPayments   CardPayment[]
+  moneyStart     MoneyStart?
+  moneyMoves     MoneyMovement[]
+  monthCloses    MonthClose[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -468,6 +471,7 @@ model Payment {
   @@unique([cafeId, key])
   @@index([cafeId, orderId])
   @@index([cashSessionId])
+  @@index([cafeId, settledAt])
 }
 
 // ─────────────────────────────────────────────────────────── cash sessions (plan piece 9)
@@ -742,6 +746,8 @@ model BillPayment {
   method      BillPayMethod
   /// YYYY-MM-DD in the café's time zone.
   paidOn      String
+  /// Where the money came from (piece 20).
+  account     MoneyAccount?
   memberId    String
   createdAt   DateTime
 
@@ -810,12 +816,13 @@ model Loan {
 }
 
 model LoanRepayment {
-  id          String      @id
+  id          String        @id
   cafeId      String
   lenderKey   String
   amountKurus Int
   method      MoneyMethod
   paidOn      String
+  account     MoneyAccount?
   memberId    String
   createdAt   DateTime
 
@@ -837,11 +844,12 @@ model CreditCard {
 }
 
 model CardPayment {
-  id          String      @id
+  id          String        @id
   cafeId      String
   amountKurus Int
   method      MoneyMethod
   paidOn      String
+  account     MoneyAccount?
   memberId    String
   createdAt   DateTime
 
@@ -1130,4 +1138,78 @@ model ClaimCodeMiss {
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId, at])
+}
+
+// ─────────────────────────────────────────────────────────── money accounts and month close (plan piece 20)
+
+enum MoneyAccount {
+  drawer
+  reserve
+  bank
+}
+
+enum MovementKind {
+  opening
+  transfer
+  deposit
+  withdraw
+  correction
+  bill
+  check
+  repayment
+  card
+}
+
+/// The day the café started keeping its money in Peni, with the reserve's and the bank's opening amounts as movements.
+model MoneyStart {
+  cafeId    String   @id
+  startedOn String
+  memberId  String
+  createdAt DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+}
+
+/// Money into (positive) or out of (negative) the reserve or the bank. The drawer is kept by its cash sessions.
+model MoneyMovement {
+  id          String        @id
+  cafeId      String
+  account     MoneyAccount
+  amountKurus Int
+  kind        MovementKind
+  counterpart MoneyAccount?
+  /// What made it, such as "bill_payment:<id>": one movement per source and account.
+  source      String
+  /// YYYY-MM-DD in the café's time zone.
+  day         String
+  note        String?
+  memberId    String
+  createdAt   DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, source, account])
+  @@index([cafeId, account, day])
+}
+
+/// A closed month: its numbers as they were, and nothing dated in it or before it changes until it is reopened.
+model MonthClose {
+  id            String    @id
+  cafeId        String
+  /// YYYY-MM.
+  month         String
+  /// The month while the close stands, cleared when it is reopened: one standing close per month.
+  standingMonth String?
+  closedAt      DateTime
+  closedById    String
+  note          String?
+  summary       Json
+  reopenedAt    DateTime?
+  reopenedById  String?
+  reopenReason  String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, standingMonth])
+  @@index([cafeId, closedAt])
 }

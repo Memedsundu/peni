@@ -36,6 +36,8 @@ import type {
   TillDeviceDTO,
   ApiErrorBody,
   DebtsDTO,
+  MoneyDTO,
+  MonthsDTO,
 } from "./dto";
 import { errorMessageTr } from "./messages";
 import type {
@@ -91,6 +93,10 @@ import type {
   CardSettingsInput,
   CashCheckInput,
   PayCardInput,
+  StartMoneyInput,
+  MoneyMoveInput,
+  CloseMonthInput,
+  ReopenMonthInput,
   RepayLenderInput,
 } from "./schemas";
 
@@ -343,6 +349,20 @@ export function createPeniClient(options: PeniClientOptions) {
         payCard: (cafeSlug: string, input: PayCardInput) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/card/payments`, input, true),
         removeCardPayment: (cafeSlug: string, paymentId: string) =>
           call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/card/payments/${slug(paymentId)}/remove`, {}, true),
+      },
+      /**
+       * Nakit ve banka and Ay kapanışı (piece 20). Both need "cash.manage"; closing and
+       * reopening a month "cash.periods" (the owner).
+       */
+      money: {
+        get: (cafeSlug: string) => call<MoneyDTO>("GET", `/staff/${slug(cafeSlug)}/money`, undefined, true),
+        start: (cafeSlug: string, input: StartMoneyInput) => call<MoneyDTO>("POST", `/staff/${slug(cafeSlug)}/money/start`, input, true),
+        move: (cafeSlug: string, input: MoneyMoveInput) => call<MoneyDTO>("POST", `/staff/${slug(cafeSlug)}/money/moves`, input, true),
+        undo: (cafeSlug: string, undoId: string) => call<MoneyDTO>("POST", `/staff/${slug(cafeSlug)}/money/moves/${slug(undoId)}/remove`, {}, true),
+        months: (cafeSlug: string) => call<MonthsDTO>("GET", `/staff/${slug(cafeSlug)}/money/months`, undefined, true),
+        closeMonth: (cafeSlug: string, input: CloseMonthInput) => call<MonthsDTO>("POST", `/staff/${slug(cafeSlug)}/money/months`, input, true),
+        reopenMonth: (cafeSlug: string, closeId: string, input: ReopenMonthInput) =>
+          call<MonthsDTO>("POST", `/staff/${slug(cafeSlug)}/money/months/${slug(closeId)}/reopen`, input, true),
       },
       /** Tedarikçiler (piece 18). Viewing needs "suppliers.view"; changes "suppliers.edit". */
       suppliers: {

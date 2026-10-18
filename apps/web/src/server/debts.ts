@@ -10,6 +10,7 @@ import {
   type Check,
   type DebtStore,
   type Loan,
+  type MoneyAccount,
   type MoneyMethod,
   type PeniDirectory,
   type Permission,
@@ -17,6 +18,7 @@ import {
 } from "@peni/core";
 import { AppError } from "./errors";
 import { keyHash, type BillService } from "./bills";
+import type { MoneyService } from "./money";
 import type { StaffContext } from "./staff";
 
 const DAY_MS = 86_400_000;
@@ -55,6 +57,7 @@ export class DebtService {
     private readonly store: DebtStore,
     private readonly bills: BillStore,
     private readonly billService: BillService,
+    private readonly money: MoneyService,
     private readonly directory: PeniDirectory,
     private readonly staff: StaffStore,
     private readonly atomically: <T>(fn: () => Promise<T>) => Promise<T>,
@@ -177,6 +180,8 @@ export class DebtService {
       canEdit: permissions.has("debts.edit"),
       canCard,
       canPayBills: permissions.has("bills.manage"),
+      cashFrom: await this.money.cashFrom(cafeId, permissions),
+      closedThrough: await this.money.closedThrough(cafeId),
     };
   }
 
@@ -194,6 +199,7 @@ export class DebtService {
     this.amount(input.amountKurus);
     const writtenOn = input.writtenOn ?? today;
     this.day(writtenOn, today);
+    await this.money.assertOpen(cafeId, writtenOn);
     if (!validDate(input.dueDate) || input.dueDate < writtenOn)
       throw new AppError("CHECK_DUE_INVALID", "The check's date is before the day it was written", 400);
     const supplier = input.supplierId ? await this.bills.getSupplier(cafeId, input.supplierId) : null;
@@ -224,15 +230,27 @@ export class DebtService {
   async cashCheck(ctx: StaffContext, checkId: string, input: { cashed: boolean; cashedOn?: string }): Promise<DebtsDTO> {
     this.require(ctx, "debts.edit");
     const check = await this.check(ctx, checkId);
+    const label = `Çek · ${check.number}`;
     if (!input.cashed) {
-      if (check.cashedOn) await this.store.saveCheck({ ...check, cashedOn: null, cashedById: null });
+      if (!check.cashedOn) return this.get(ctx);
+      await this.money.assertOpen(ctx.cafe.id, check.cashedOn);
+      await this.atomically(async () => {
+        await this.money.unpost(ctx, `check:${check.id}`, label);
+        await this.store.saveCheck({ ...check, cashedOn: null, cashedById: null });
+      });
       return this.get(ctx);
     }
     if (check.cashedOn) return this.get(ctx);
     const today = await this.today(ctx.cafe.id);
     const cashedOn = input.cashedOn ?? today;
     if (!validDate(cashedOn) || cashedOn > today || cashedOn < check.writtenOn) throw new AppError("CASHED_ON_INVALID", "Check the day it was cashed", 400);
-    await this.store.saveCheck({ ...check, cashedOn, cashedById: ctx.member.id });
+    await this.money.assertOpen(ctx.cafe.id, cashedOn);
+    // The bank paid it out: that day, the money leaves the bank.
+    await this.atomically(async () => {
+      const account = await this.money.accountFor(ctx, "bank", undefined, cashedOn);
+      await this.money.post(ctx, { source: `check:${check.id}`, account, amountKurus: -check.amountKurus, kind: "check", day: cashedOn, label });
+      await this.store.saveCheck({ ...check, cashedOn, cashedById: ctx.member.id });
+    });
     return this.get(ctx);
   }
 
@@ -242,6 +260,7 @@ export class DebtService {
     const check = await this.check(ctx, checkId);
     if (check.billPaymentId) throw new AppError("CHECK_FROM_BILL", "Undo the bill's payment instead", 409);
     if (check.cashedOn) throw new AppError("CHECK_CASHED", "The check was cashed", 409);
+    await this.money.assertOpen(ctx.cafe.id, check.writtenOn);
     await this.store.removeCheck(ctx.cafe.id, checkId);
     return this.get(ctx);
   }
@@ -258,6 +277,7 @@ export class DebtService {
     this.amount(input.amountKurus);
     const borrowedOn = input.borrowedOn ?? today;
     this.day(borrowedOn, today);
+    await this.money.assertOpen(cafeId, borrowedOn);
     const dueDate = input.dueDate || null;
     if (dueDate && (!validDate(dueDate) || dueDate < borrowedOn)) throw new AppError("LOAN_DUE_INVALID", "It can't be due before it was lent", 400);
     const lender = await this.billService.lender(ctx, input.lender);
@@ -284,6 +304,7 @@ export class DebtService {
       const loan = await this.store.getLoan(cafeId, loanId);
       if (!loan) throw new AppError("LOAN_NOT_FOUND", "No such loan", 404);
       if (loan.billPaymentId) throw new AppError("LOAN_FROM_BILL", "Undo the bill's payment instead", 409);
+      await this.money.assertOpen(cafeId, loan.borrowedOn);
       const { borrowed, repaid } = await this.lenderTotals(cafeId, loan.lenderKey);
       if (repaid > borrowed - loan.amountKurus) throw new AppError("LOAN_REPAID", "Some of it was paid back", 409);
       await this.store.removeLoan(cafeId, loanId);
@@ -292,7 +313,7 @@ export class DebtService {
   }
 
   /** "Geri öde": pays the lender's oldest loans first. Not more than they are owed. */
-  async repay(ctx: StaffContext, input: { key: string; lender: string; amountKurus: number; method: MoneyMethod; paidOn?: string }): Promise<DebtsDTO> {
+  async repay(ctx: StaffContext, input: { key: string; lender: string; amountKurus: number; method: MoneyMethod; paidOn?: string; from?: "drawer" | "reserve" }): Promise<DebtsDTO> {
     this.require(ctx, "debts.edit");
     const cafeId = ctx.cafe.id;
     const id = `lrp_${keyHash(cafeId, input.key)}`;
@@ -305,6 +326,10 @@ export class DebtService {
       const { borrowed, repaid } = await this.lenderTotals(cafeId, input.lender);
       if (borrowed === 0) throw new AppError("LENDER_NOT_FOUND", "Nothing is owed to them", 404);
       if (input.amountKurus > borrowed - repaid) throw new AppError("LOAN_OVERPAY", "That's more than they are owed", 409);
+      await this.money.assertOpen(cafeId, paidOn);
+      const account = await this.money.accountFor(ctx, input.method, input.from, paidOn);
+      const name = (await this.store.listLoans(cafeId, { lenderKey: input.lender }))[0]?.lenderName;
+      await this.money.post(ctx, { source: `repayment:${id}`, account, amountKurus: -input.amountKurus, kind: "repayment", day: paidOn, label: `Borç ödemesi · ${name}` });
       await this.store.addRepayment({
         id,
         cafeId,
@@ -312,6 +337,7 @@ export class DebtService {
         amountKurus: input.amountKurus,
         method: input.method,
         paidOn,
+        account,
         memberId: ctx.member.id,
         createdAt: this.now(),
       });
@@ -321,8 +347,15 @@ export class DebtService {
 
   async removeRepayment(ctx: StaffContext, repaymentId: string): Promise<DebtsDTO> {
     this.require(ctx, "debts.edit");
-    if (!(await this.store.getRepayment(ctx.cafe.id, repaymentId))) throw new AppError("REPAYMENT_NOT_FOUND", "No such repayment", 404);
-    await this.store.removeRepayment(ctx.cafe.id, repaymentId);
+    const cafeId = ctx.cafe.id;
+    const repayment = await this.store.getRepayment(cafeId, repaymentId);
+    if (!repayment) throw new AppError("REPAYMENT_NOT_FOUND", "No such repayment", 404);
+    await this.money.assertOpen(cafeId, repayment.paidOn);
+    const name = (await this.store.listLoans(cafeId, { lenderKey: repayment.lenderKey }))[0]?.lenderName;
+    await this.atomically(async () => {
+      await this.money.unpost(ctx, `repayment:${repaymentId}`, `Borç ödemesi · ${name}`);
+      await this.store.removeRepayment(cafeId, repaymentId);
+    });
     return this.get(ctx);
   }
 
@@ -348,7 +381,7 @@ export class DebtService {
   }
 
   /** "Karta ödeme": cash or a transfer, not more than the card owes. */
-  async payCard(ctx: StaffContext, input: { key: string; amountKurus: number; method: "cash" | "bank"; paidOn?: string }): Promise<DebtsDTO> {
+  async payCard(ctx: StaffContext, input: { key: string; amountKurus: number; method: "cash" | "bank"; paidOn?: string; from?: "drawer" | "reserve" }): Promise<DebtsDTO> {
     this.require(ctx, "debts.card");
     const cafeId = ctx.cafe.id;
     const id = `cpy_${keyHash(cafeId, input.key)}`;
@@ -363,12 +396,16 @@ export class DebtService {
       const [charges, payments] = await Promise.all([this.bills.listPayments(cafeId, { method: "credit" }), this.store.listCardPayments(cafeId)]);
       if (input.amountKurus > cardStatement(card, charges, payments, today).balanceKurus)
         throw new AppError("CARD_OVERPAY", "That's more than the card owes", 409);
+      await this.money.assertOpen(cafeId, paidOn);
+      const account = await this.money.accountFor(ctx, input.method, input.from, paidOn);
+      await this.money.post(ctx, { source: `card_payment:${id}`, account, amountKurus: -input.amountKurus, kind: "card", day: paidOn, label: `Kredi kartı · ${card.name}` });
       await this.store.addCardPayment({
         id,
         cafeId,
         amountKurus: input.amountKurus,
         method: input.method,
         paidOn,
+        account,
         memberId: ctx.member.id,
         createdAt: this.now(),
       });
@@ -378,8 +415,15 @@ export class DebtService {
 
   async removeCardPayment(ctx: StaffContext, paymentId: string): Promise<DebtsDTO> {
     this.require(ctx, "debts.card");
-    if (!(await this.store.getCardPayment(ctx.cafe.id, paymentId))) throw new AppError("PAYMENT_NOT_FOUND", "No such payment", 404);
-    await this.store.removeCardPayment(ctx.cafe.id, paymentId);
+    const cafeId = ctx.cafe.id;
+    const payment = await this.store.getCardPayment(cafeId, paymentId);
+    if (!payment) throw new AppError("PAYMENT_NOT_FOUND", "No such payment", 404);
+    await this.money.assertOpen(cafeId, payment.paidOn);
+    const card = await this.store.getCard(cafeId);
+    await this.atomically(async () => {
+      await this.money.unpost(ctx, `card_payment:${paymentId}`, `Kredi kartı · ${card?.name ?? ""}`);
+      await this.store.removeCardPayment(cafeId, paymentId);
+    });
     return this.get(ctx);
   }
 
@@ -387,7 +431,7 @@ export class DebtService {
 
   private lenders(
     loans: Loan[],
-    repayments: { id: string; lenderKey: string; amountKurus: number; method: MoneyMethod; paidOn: string; memberId: string }[],
+    repayments: { id: string; lenderKey: string; amountKurus: number; method: MoneyMethod; paidOn: string; memberId: string; account: MoneyAccount | null }[],
     loanBills: Map<string, Bill>,
     supplierNames: Map<string, string>,
     names: Map<string, string>,
@@ -432,7 +476,7 @@ export class DebtService {
           }),
           repayments: [...paid]
             .reverse()
-            .map((r) => ({ id: r.id, amountKurus: r.amountKurus, method: r.method, paidOn: r.paidOn, by: names.get(r.memberId) ?? null })),
+            .map((r) => ({ id: r.id, amountKurus: r.amountKurus, method: r.method, paidOn: r.paidOn, by: names.get(r.memberId) ?? null, account: r.account })),
         } satisfies LenderDTO;
       })
       .sort((a, b) => b.owedKurus - a.owedKurus || a.name.localeCompare(b.name, "tr"));
@@ -469,7 +513,7 @@ export class DebtService {
       }),
       payments: [...payments]
         .reverse()
-        .map((p) => ({ id: p.id, amountKurus: p.amountKurus, method: p.method, paidOn: p.paidOn, by: names.get(p.memberId) ?? null })),
+        .map((p) => ({ id: p.id, amountKurus: p.amountKurus, method: p.method, paidOn: p.paidOn, by: names.get(p.memberId) ?? null, account: p.account })),
     };
   }
 

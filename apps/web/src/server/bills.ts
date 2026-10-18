@@ -27,6 +27,7 @@ import {
 } from "@peni/core";
 import { createHash, randomUUID } from "node:crypto";
 import { AppError } from "./errors";
+import type { MoneyService } from "./money";
 import type { StaffContext } from "./staff";
 
 const DAY_MS = 86_400_000;
@@ -60,6 +61,8 @@ export interface PayInput {
   check?: { number: string; bankName?: string | null; dueDate: string };
   lender?: { memberId?: string | null; name?: string };
   loanDueDate?: string | null;
+  /** Cash from the drawer or the reserve (piece 20). */
+  from?: "drawer" | "reserve";
 }
 
 export interface SupplierInput {
@@ -86,6 +89,8 @@ export class BillService {
     private readonly staff: StaffStore,
     /** Checks and loans a payment writes (piece 19). */
     private readonly debts: DebtStore,
+    /** Where cash and bank payments come out of, and which months are closed (piece 20). */
+    private readonly money: MoneyService,
     /** Runs the bill, its stock moves and the prices together (the ledger's transaction). */
     private readonly atomically: <T>(fn: () => Promise<T>) => Promise<T>,
     private readonly now: () => Date,
@@ -133,7 +138,7 @@ export class BillService {
    * newer bill already priced it. The same `key` twice adds it once. `paid` marks it paid
    * on the spot, which needs "bills.manage".
    */
-  async add(ctx: StaffContext, input: BillInput & { key: string; paid?: { method: BillPayMethod } }): Promise<BillDTO> {
+  async add(ctx: StaffContext, input: BillInput & { key: string; paid?: { method: BillPayMethod; from?: "drawer" | "reserve" } }): Promise<BillDTO> {
     this.require(ctx, "bills.add");
     if (input.paid) this.require(ctx, "bills.manage");
     const cafeId = ctx.cafe.id;
@@ -141,6 +146,7 @@ export class BillService {
     if (existing) return this.dto(ctx, existing);
     const today = await this.today(cafeId);
     const fields = await this.fields(ctx, input, today, null);
+    await this.money.assertOpen(cafeId, fields.date);
     const now = this.now();
     const bill: Bill = {
       id: `bil_${randomUUID()}`,
@@ -162,8 +168,14 @@ export class BillService {
     const saved = await this.atomically(async () => {
       const again = await this.store.findBillByKey(cafeId, input.key);
       if (again) return again;
+      // The money moves first: an empty drawer stops it before anything is written.
+      const account = input.paid ? await this.money.accountFor(ctx, input.paid.method, input.paid.from, today) : null;
+      const payment = input.paid ? this.payment(ctx, bill, bill.totalKurus, input.paid.method, today, account) : null;
+      if (payment) {
+        await this.money.post(ctx, { source: `bill_payment:${payment.id}`, account, amountKurus: -payment.amountKurus, kind: "bill", day: today, label: await this.label(bill) });
+      }
       await this.store.saveBill(bill);
-      if (input.paid) await this.store.addPayment(this.payment(ctx, bill, bill.totalKurus, input.paid.method, today));
+      if (payment) await this.store.addPayment(payment);
       await this.moveStock(ctx, bill, `bill:${bill.id}:1`, billStock(bill.lines));
       await this.reprice(cafeId, billStock(bill.lines).keys());
       return bill;
@@ -181,6 +193,7 @@ export class BillService {
     const before = await this.bill(ctx, billId);
     this.editable(before, input.version);
     const fields = await this.fields(ctx, input, await this.today(cafeId), before);
+    await this.money.assertOpen(cafeId, before.date, fields.date);
     await this.atomically(async () => {
       const current = await this.bill(ctx, billId);
       this.editable(current, input.version);
@@ -201,6 +214,7 @@ export class BillService {
     await this.atomically(async () => {
       const bill = await this.bill(ctx, billId);
       if (bill.voidedAt) return;
+      await this.money.assertOpen(ctx.cafe.id, bill.date);
       if (bill.paidKurus > 0) throw new AppError("BILL_PAID", "Undo its payment first", 409);
       await this.store.saveBill({ ...bill, voidedAt: this.now(), voidedById: ctx.member.id, voidReason: reason, updatedAt: this.now() });
       const added = billStock(bill.lines);
@@ -232,8 +246,11 @@ export class BillService {
       if (!Number.isInteger(amountKurus) || amountKurus <= 0) throw new AppError("AMOUNT_INVALID", "Check the amount", 400);
       const paidOn = input.paidOn ?? today;
       if (!validDate(paidOn) || paidOn > today || paidOn < bill.date) throw new AppError("PAID_ON_INVALID", "Check the day it was paid", 400);
-      const payment: BillPayment = { id, cafeId, billId, amountKurus, method: input.method, paidOn, memberId: ctx.member.id, createdAt: this.now() };
+      await this.money.assertOpen(cafeId, paidOn);
+      const account = await this.money.accountFor(ctx, input.method, input.from, paidOn);
+      const payment: BillPayment = { id, cafeId, billId, amountKurus, method: input.method, paidOn, account, memberId: ctx.member.id, createdAt: this.now() };
       const debt = await this.debtFor(ctx, bill, payment, input);
+      await this.money.post(ctx, { source: `bill_payment:${id}`, account, amountKurus: -amountKurus, kind: "bill", day: paidOn, label: await this.label(bill) });
       await this.store.addPayment(payment);
       if (debt?.check) await this.debts.saveCheck(debt.check);
       if (debt?.loan) await this.debts.saveLoan(debt.loan);
@@ -256,8 +273,10 @@ export class BillService {
     await this.atomically(async () => {
       const payment = await this.store.getPayment(cafeId, paymentId);
       if (!payment) return;
+      await this.money.assertOpen(cafeId, payment.paidOn);
       const locked = await this.locked(payment);
       if (locked) throw new AppError(locked, locked === "CHECK_CASHED" ? "The check was cashed" : "Some of it was paid back", 409);
+      await this.money.unpost(ctx, `bill_payment:${payment.id}`, await this.label(await this.bill(ctx, billId)));
       const check = await this.debts.findCheckByPayment(cafeId, payment.id);
       if (check) await this.debts.removeCheck(cafeId, check.id);
       const loan = await this.debts.findLoanByPayment(cafeId, payment.id);
@@ -456,8 +475,14 @@ export class BillService {
     }
   }
 
-  private payment(ctx: StaffContext, bill: Bill, amountKurus: number, method: BillPayMethod, paidOn: string) {
-    return { id: `bpy_${randomUUID()}`, cafeId: bill.cafeId, billId: bill.id, amountKurus, method, paidOn, memberId: ctx.member.id, createdAt: this.now() };
+  private payment(ctx: StaffContext, bill: Bill, amountKurus: number, method: BillPayMethod, paidOn: string, account: BillPayment["account"]): BillPayment {
+    return { id: `bpy_${randomUUID()}`, cafeId: bill.cafeId, billId: bill.id, amountKurus, method, paidOn, account, memberId: ctx.member.id, createdAt: this.now() };
+  }
+
+  /** How a bill's money shows at Kasa: "Fatura · Süt Dünyası". */
+  private async label(bill: Bill): Promise<string> {
+    const supplier = bill.supplierId ? await this.store.getSupplier(bill.cafeId, bill.supplierId) : null;
+    return ["Fatura", supplier?.name ?? bill.lines[0]?.name].filter(Boolean).join(" · ");
   }
 
   /** Paying by card, check or loan also needs the right to make that debt. */
@@ -527,7 +552,7 @@ export class BillService {
     return null;
   }
 
-  private async paymentDto(ctx: StaffContext, p: BillPayment, names: Map<string, string>): Promise<BillPaymentDTO> {
+  private async paymentDto(ctx: StaffContext, p: BillPayment, names: Map<string, string>, closedThrough: string | null): Promise<BillPaymentDTO> {
     const check = p.method === "check" ? await this.debts.findCheckByPayment(p.cafeId, p.id) : null;
     const loan = p.method === "loan" ? await this.debts.findLoanByPayment(p.cafeId, p.id) : null;
     const allowed = ctx.permissions.has("bills.manage") && (p.method !== "credit" || ctx.permissions.has("debts.card")) && (!(check || loan) || ctx.permissions.has("debts.edit"));
@@ -540,11 +565,12 @@ export class BillService {
       check: check && { id: check.id, number: check.number, dueDate: check.dueDate, cashedOn: check.cashedOn },
       lender: loan?.lenderName ?? null,
       locked: await this.locked(p),
-      canRemove: allowed,
+      account: p.account,
+      canRemove: allowed && (!closedThrough || p.paidOn > closedThrough),
     };
   }
 
-  private async payOptions(ctx: StaffContext, bill: Bill): Promise<PayOptionsDTO | null> {
+  private async payOptions(ctx: StaffContext, bill: Bill, closedThrough: string | null): Promise<PayOptionsDTO | null> {
     const leftKurus = bill.totalKurus - bill.paidKurus;
     if (bill.voidedAt || leftKurus <= 0 || !ctx.permissions.has("bills.manage")) return null;
     const cafeId = ctx.cafe.id;
@@ -556,7 +582,8 @@ export class BillService {
     const byKey = new Map<string, string>();
     for (const l of canDebt ? await this.debts.listLoans(cafeId) : []) if (!l.lenderMemberId && !byKey.has(l.lenderKey)) byKey.set(l.lenderKey, l.lenderName);
     const lenderNames = [...byKey.values()];
-    return { leftKurus, credit: card?.name ?? null, creditNotSet: canCard && !card, check: canDebt, loan: canDebt, team, lenderNames };
+    const cashFrom = await this.money.cashFrom(cafeId, ctx.permissions);
+    return { leftKurus, credit: card?.name ?? null, creditNotSet: canCard && !card, check: canDebt, loan: canDebt, team, lenderNames, cashFrom, closedThrough };
   }
 
   /** Who is on the team now, by name. */
@@ -579,6 +606,7 @@ export class BillService {
     ]);
     const units = new Map(items.map((i) => [i.id, i.unit]));
     const names = await this.names([bill.createdById, bill.voidedById, ...bill.payments.map((p) => p.memberId)]);
+    const closedThrough = await this.money.closedThrough(cafeId);
     return {
       ...summary(bill, new Map(supplier ? [[supplier.id, supplier.name]] : []), today),
       lines: bill.lines.map((l) => ({
@@ -594,12 +622,13 @@ export class BillService {
       version: bill.version,
       createdBy: names.get(bill.createdById) ?? null,
       createdAt: bill.createdAt.toISOString(),
-      payments: await Promise.all(bill.payments.map((p) => this.paymentDto(ctx, p, names))),
+      payments: await Promise.all(bill.payments.map((p) => this.paymentDto(ctx, p, names, closedThrough))),
       voidedAt: bill.voidedAt?.toISOString() ?? null,
       voidedBy: bill.voidedById ? (names.get(bill.voidedById) ?? null) : null,
       voidReason: bill.voidReason,
       canManage: ctx.permissions.has("bills.manage"),
-      payWith: await this.payOptions(ctx, bill),
+      payWith: await this.payOptions(ctx, bill, closedThrough),
+      closed: !!closedThrough && bill.date <= closedThrough,
     };
   }
 

@@ -39,6 +39,7 @@ function toPayment(p: PaymentRow): BillPayment {
     amountKurus: p.amountKurus,
     method: p.method,
     paidOn: p.paidOn,
+    account: p.account,
     memberId: p.memberId,
     createdAt: p.createdAt,
   };

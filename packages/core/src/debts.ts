@@ -1,3 +1,4 @@
+import type { MoneyAccount } from "./books";
 import type { Kurus } from "./money";
 
 /**
@@ -77,6 +78,8 @@ export interface LoanRepayment {
   amountKurus: Kurus;
   method: MoneyMethod;
   paidOn: string;
+  /** Where the money came from (piece 20); null before the café started keeping its money. */
+  account: MoneyAccount | null;
   memberId: string;
   createdAt: Date;
 }
@@ -100,6 +103,8 @@ export interface CardPayment {
   amountKurus: Kurus;
   method: "cash" | "bank";
   paidOn: string;
+  /** Where the money came from (piece 20); null before the café started keeping its money. */
+  account: MoneyAccount | null;
   memberId: string;
   createdAt: Date;
 }

@@ -383,7 +383,8 @@ function BillSheet({
               <PayForm t={t} lang={lang} slug={slug} bill={bill} today={today} onDone={changed} />
             </section>
           )}
-          {bill.canManage && bill.state !== "voided" && (
+          {bill.canManage && bill.state !== "voided" && bill.closed && <p className="text-sm text-muted">{t("billClosed")}</p>}
+          {bill.canManage && bill.state !== "voided" && !bill.closed && (
             <section className="flex flex-col gap-4">
               {bill.paidKurus > 0 ? (
                 <p className="text-sm text-muted">{t("paidLocked")}</p>

@@ -1,3 +1,4 @@
+import type { MoneyAccount } from "./books";
 import type { Kurus } from "./money";
 import { MILLI } from "./stock";
 
@@ -69,6 +70,8 @@ export interface BillPayment {
   method: BillPayMethod;
   /** The day it was paid, in the café's time zone: "2026-10-18". */
   paidOn: string;
+  /** Where the money came from (piece 20); null for credit, checks and loans, or before the café started keeping its money. */
+  account: MoneyAccount | null;
   memberId: string;
   createdAt: Date;
 }

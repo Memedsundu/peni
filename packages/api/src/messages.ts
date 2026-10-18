@@ -158,6 +158,22 @@ export const errorMessagesTr: Record<string, string> = {
   LOAN_OVERPAY: "Bu kişiye bu kadar borç yok. Tutarı kontrol et.",
   REPAYMENT_NOT_FOUND: "Bu geri ödeme bulunamadı.",
   DATE_INVALID: "Tarihi kontrol et. Bugünden sonra olamaz.",
+  PERIOD_CLOSED: "Bu ay kapatıldı. Kapalı bir aya kayıt eklenemez ya da değiştirilemez; düzeltmeyi bu aya yaz.",
+  MONEY_NOT_STARTED: "Önce Nakit ve banka sayfasında başlangıç tutarlarını gir.",
+  MONEY_STARTED: "Başlangıç tutarları zaten girildi.",
+  CASH_CLOSED_UNDO: "Bu para kapanmış bir kasa gününden çıktı. Geri koymak için önce kasayı aç.",
+  RESERVE_TOO_LOW: "Ayrı kasada bu kadar para yok.",
+  BANK_TOO_LOW: "Bankada bu kadar para görünmüyor. Önce bakiyeyi düzelt.",
+  ACCOUNT_INVALID: "Hesabı kontrol et.",
+  SAME_ACCOUNT: "Aynı hesaba aktarılamaz. Başka bir hesap seç.",
+  SAME_BALANCE: "Bakiye zaten bu kadar.",
+  NOTE_REQUIRED: "Kısa bir not yaz: ne için?",
+  MOVE_NOT_FOUND: "Bu hareket bulunamadı.",
+  MOVE_LOCKED: "Bu hareketin kasa günü kapandı; geri alınamaz.",
+  MONTH_NOT_CLOSABLE: "Bu ay şimdi kapatılamaz. Aylar sırayla ve bittikten sonra kapanır.",
+  MONTH_CLOSED: "Bu ay az önce kapatıldı.",
+  MONTH_NOT_FOUND: "Bu kapanış bulunamadı.",
+  REOPEN_LATEST_ONLY: "Yalnızca son kapanan ay yeniden açılabilir.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {
