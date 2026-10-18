@@ -1,5 +1,5 @@
 /**
- * Turkish text helpers (design-system.md §4.6). Pure functions, no platform code, safe on
+ * Turkish text helpers. Pure functions, no platform code, safe on
  * Hermes: every case mapping pre-maps the dotted/dotless i, every Intl formatter is cached.
  *
  * Dates and times are read in the cafés' time zone (`TIME_ZONE`, Europe/Istanbul) unless a
@@ -8,10 +8,6 @@
  * NEVER attach a suffix to a dynamic café name. Rephrase with "için" or put the name in a
  * legend, unless the café has stored name forms [gap G10].
  */
-import { cafeHueOrder } from "./tokens";
-import type { CafeHue } from "./tokens";
-import { deviceOrder } from "./shapes";
-import type { DeviceKind } from "./shapes";
 
 /** The cafés' time zone. Turkey has been on UTC+3 all year since 2016. */
 export const TIME_ZONE = "Europe/Istanbul";
@@ -455,7 +451,7 @@ export function coinLegend(name: string, district?: string | null, max = 30): st
 }
 
 /* ========================================================================================== */
-/* Café identity                                                                              */
+/* Hashing                                                                                    */
 /* ========================================================================================== */
 
 /** djb2 over code points: `h = 5381; h = ((h << 5) + h + c) >>> 0`. */
@@ -463,16 +459,6 @@ export function djb2(s: string): number {
   let h = 5381;
   for (const ch of s) h = ((h << 5) + h + ch.codePointAt(0)!) >>> 0;
   return h;
-}
-
-/** The café colourway until the café chooses one [gap G9]: moda → murekkep, kuzguncuk → zeytin. */
-export function cafeHue(slug: string): CafeHue {
-  return cafeHueOrder[djb2(slug) % 4]!;
-}
-
-/** The café device: moda → glass, kuzguncuk → fincan. */
-export function cafeDevice(slug: string): DeviceKind {
-  return deviceOrder[(djb2(slug) >>> 2) % 3]!;
 }
 
 /* ========================================================================================== */

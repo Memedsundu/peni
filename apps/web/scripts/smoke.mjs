@@ -20,13 +20,18 @@ async function call(method, path, { body, token, headers = {} } = {}) {
   return { status: res.status, json };
 }
 
-async function signIn(phone) {
-  const code = (await call("POST", "/auth/request-code", { body: { phone } })).json.devCode;
-  const { json } = await call("POST", "/auth/verify", { body: { phone, code } });
-  assert.ok(json.token, `sign-in failed for ${phone}`);
-  assert.equal(json.isNew, false, `${phone} is a seeded neighbour, not new`);
-  assert.deepEqual(json.staffCafes, [], "no demo customer is staff");
-  return json.token;
+/** Demo sign-in: the session cookie's value also works as a bearer token. */
+async function signIn(customerId) {
+  const res = await fetch(`${BASE}/api/v1/auth/demo`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ customerId }),
+  });
+  const token = /peni_session=([^;]+)/.exec(res.headers.get("set-cookie") ?? "")?.[1];
+  assert.ok(token, `sign-in failed for ${customerId}`);
+  const me = (await call("GET", "/me", { token })).json;
+  assert.deepEqual(me.staffCafes, [], "no demo customer is staff");
+  return token;
 }
 
 const step = (name) => console.log(`✓ ${name}`);
@@ -35,58 +40,25 @@ const modaBalance = async (token) =>
 
 // 0. Baseline. Neighbours seeded around the demo customers also hold peni, so the
 //    report check at the end compares changes, not totals.
-const deniz = await signIn("+905320000003");
-const ayse = await signIn("+905320000001");
-const mehmet = await signIn("+905320000002");
+const deniz = await signIn("cus_deniz");
+const ayse = await signIn("cus_ayse");
+const mehmet = await signIn("cus_mehmet");
 const dash0 = (await call("GET", "/staff/moda", { headers: STAFF })).json;
 const wallets0 = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
 
-// 1. Deniz is new and has no peni. Today she takes a tea from the askı.
+// 1. Deniz is new and has no peni; she may take from the askı.
 let cafe = (await call("GET", "/cafes/moda", { token: deniz })).json;
 assert.equal(cafe.membership.balancePeni, 0);
 const askiBefore = cafe.askida.balancePeni;
 assert.ok(cafe.askida.itemsAvailable > 0);
 assert.deepEqual(cafe.askida.myEligibility, { status: "ok" });
 assert.equal((await call("GET", "/cafes/moda")).json.askida.myEligibility.status, "not_member");
-step(`Deniz signs in by phone; the askı holds ${askiBefore} peni and she may take from it`);
-
-let order = (
-  await call("POST", "/orders", {
-    token: deniz,
-    body: { cafeSlug: "moda", lines: [{ productId: "cay", quantity: 1 }, { productId: "simit", quantity: 1 }], askidaProductId: "cay", idempotencyKey: key() },
-  })
-).json;
-assert.equal(order.askidaKurus, 3000);
-assert.equal(order.dueKurus, 2500, "Deniz pays only for the simit");
-assert.equal(order.earnedPeni, null, "nothing earned before paying");
-assert.equal(order.memberCode, cafe.membership.memberCode);
-step(`Deniz orders tea from the askı + a simit; pays ${order.dueKurus / 100} TL at the till`);
-
-assert.equal((await call("GET", "/cafes/moda", { token: deniz })).json.askida.myEligibility.status, "claimed_today");
-const second = await call("POST", "/orders", {
-  token: deniz,
-  body: { cafeSlug: "moda", lines: [{ productId: "cay", quantity: 1 }], askidaProductId: "cay", idempotencyKey: key() },
-});
-assert.equal(second.json.error.code, "ASKIDA_LIMIT");
-step("The take sheet now says claimed_today, and a second askı tea is refused (ASKIDA_LIMIT)");
-
-// 2. The barista works the order through.
+assert.ok(cafe.askida.wall.every((e) => e.type !== "claim"), "claims are never listed");
 const forbidden = await call("GET", "/staff/moda");
 assert.equal(forbidden.status, 403);
-for (const action of ["accept", "ready", "collect"]) {
-  order = (await call("POST", `/staff/moda/orders/${order.id}`, { headers: STAFF, body: { action } })).json;
-}
-assert.equal(order.status, "collected");
-assert.equal(order.earnedPeni, 1, "the fiş shows +1 peni");
-cafe = (await call("GET", "/cafes/moda", { token: deniz })).json;
-assert.equal(cafe.membership.balancePeni, 1, "5 % of the 25 TL she paid");
-assert.ok(cafe.askida.wall.every((e) => e.type !== "claim"), "claims are never listed");
-assert.ok(!JSON.stringify(cafe.askida).includes("Deniz"), "takers are never named");
-const denizLedger = (await call("GET", "/me/wallet", { token: deniz })).json.ledger;
-assert.deepEqual(denizLedger.map((l) => [l.kind, l.peni]), [["earn", 1]], "her history shows the earn, never the ikram");
-step("Barista accepts, readies, gets paid; Deniz earns 1 peni; the askı lists no claim and her history no ikram");
+step(`Deniz signs in; the askı holds ${askiBefore} peni and she may take from it; the staff view needs the key`);
 
-// 3. Ayşe treats Mehmet, then leaves coffee on the askı.
+// 2. Ayşe treats Mehmet, then leaves coffee on the askı.
 const lookup = await call("POST", "/cafes/moda/members/lookup", { token: ayse, body: { phone: "+905320000002" } });
 assert.deepEqual(lookup.json, { firstName: "Mehmet", lastInitial: "K" });
 const unknown = await call("POST", "/cafes/moda/members/lookup", { token: ayse, body: { phone: "+905559999999" } });
@@ -119,31 +91,7 @@ const donation = (await call("POST", "/askida/donate", { token: ayse, body: { ca
 assert.equal(donation.matchedPeni, 30, "Moda matches 50 %");
 step("Ayşe leaves 60 peni on the askı; the café adds 30");
 
-// 4. A rejected order gives the peni back.
-const before = (await call("GET", "/cafes/moda", { token: mehmet })).json.membership.balancePeni;
-let mo = (await call("POST", "/orders", { token: mehmet, body: { cafeSlug: "moda", lines: [{ productId: "latte", quantity: 1 }], usePeni: 40, idempotencyKey: key() } })).json;
-assert.equal(mo.peniDiscountKurus, 4000);
-mo = (await call("POST", `/staff/moda/orders/${mo.id}`, { headers: STAFF, body: { action: "reject", reason: "Süt bitti" } })).json;
-const after = (await call("GET", "/cafes/moda", { token: mehmet })).json.membership.balancePeni;
-assert.equal(after, before);
-const [refund, redeem] = (await call("GET", "/me/wallet", { token: mehmet })).json.ledger;
-assert.deepEqual([refund.kind, refund.peni, redeem.kind, redeem.peni], ["refund", 40, "redeem", -40]);
-step("Mehmet spends 40 peni on a latte; the barista rejects it; the 40 peni come back, both lines in his history");
-
-// 5. Pausing app orders: the original boolean call, then a timed pause.
-await call("POST", "/staff/moda/pause", { headers: STAFF, body: { paused: true } });
-const paused = await call("POST", "/orders", { token: mehmet, body: { cafeSlug: "moda", lines: [{ productId: "cay", quantity: 1 }], idempotencyKey: key() } });
-assert.equal(paused.json.error.code, "ORDERING_CLOSED");
-await call("POST", "/staff/moda/pause", { headers: STAFF, body: { paused: false } });
-const timed = (await call("POST", "/staff/moda/pause", { headers: STAFF, body: { pause: { minutes: 15 } } })).json;
-assert.equal(timed.appOrderingPaused, true);
-assert.ok(Math.abs(new Date(timed.pausedUntil).getTime() - Date.now() - 15 * 60_000) < 60_000);
-assert.equal((await call("GET", "/staff/moda", { headers: STAFF })).json.cafe.pausedUntil, timed.pausedUntil);
-const resumed = (await call("POST", "/staff/moda/pause", { headers: STAFF, body: { pause: null } })).json;
-assert.deepEqual(resumed, { appOrderingPaused: false, pausedUntil: null });
-step("Paused café refuses app orders; a 15-minute pause carries its end time; null resumes");
-
-// 6. Profile, calendar.
+// 3. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
 assert.deepEqual(me.staffCafes, []);
@@ -156,7 +104,7 @@ assert.match(ics.headers.get("content-type") ?? "", /^text\/calendar/);
 assert.match(await ics.text(), /BEGIN:VEVENT\r\n[\s\S]*SUMMARY:Mahalleye bir takas kütüphanesi kursak\?/);
 step("Profil loads and saves; the Peni masası downloads as text/calendar");
 
-// 7. The café report adds up: every change in what is owed is a change in wallets or the askı.
+// 4. The café report adds up: every change in what is owed is a change in wallets or the askı.
 const dash = (await call("GET", "/staff/moda", { headers: STAFF })).json;
 const wallets = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
 const delta = (xs, ys) => ys.reduce((a, b) => a + b, 0) - xs.reduce((a, b) => a + b, 0);

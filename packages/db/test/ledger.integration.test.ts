@@ -22,7 +22,7 @@ describe.skipIf(!url)("PrismaLedgerStore against Postgres", () => {
     directory.settings.set(`c1_${run}`, { ...defaultSettings(`c1_${run}`), askidaProductIds: ["cay"] });
     const joinedAt = new Date("2026-01-01");
     for (const id of ["ayse", "ogrenci"]) {
-      await directory.saveMembership({ id: `${id}_${run}`, cafeId: `c1_${run}`, customerId: id, joinedAt, blocked: false, preorderEnabled: true, consecutiveNoShows: 0 });
+      await directory.saveMembership({ id: `${id}_${run}`, cafeId: `c1_${run}`, customerId: id, joinedAt, blocked: false});
     }
     const ledger = new Ledger(new PrismaLedgerStore(prisma));
     const service = new PeniService(ledger, directory);
@@ -46,7 +46,7 @@ describe.skipIf(!url)("PrismaLedgerStore against Postgres", () => {
 
   it("never overdraws under concurrent spends", async () => {
     const directory = new InMemoryDirectory();
-    await directory.saveMembership({ id: `can_${run}`, cafeId: `c2_${run}`, customerId: "can", joinedAt: new Date(), blocked: false, preorderEnabled: true, consecutiveNoShows: 0 });
+    await directory.saveMembership({ id: `can_${run}`, cafeId: `c2_${run}`, customerId: "can", joinedAt: new Date(), blocked: false});
     const ledger = new Ledger(new PrismaLedgerStore(prisma));
     const service = new PeniService(ledger, directory);
     await service.earnForPaidOrder({ membershipId: `can_${run}`, orderId: `seed_${run}`, paidTotalKurus: 100_000 }); // 50 peni

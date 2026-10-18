@@ -8,7 +8,7 @@ import { assertWholeNumber, type Peni } from "./money";
  * created or destroyed silently: what a café issues shows up as a negative
  * balance on its `issuance` account, and what it gives away shows up on its
  * `redemption` account. Corrections are made with reversing transactions,
- * never by editing history — the same rule Shelby's MoneyMovement follows.
+ * never by editing history.
  *
  * Accounts are plain strings so they store well:
  *

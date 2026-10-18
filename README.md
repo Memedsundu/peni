@@ -2,34 +2,38 @@
 
 > 17. yüzyılda kahvehane, sınıf farkı gözetmeksizin herkesin bir masaya oturup fikir alışverişi yapabildiği "peni üniversitesi"ydi. **Peni** bu geleneği telefonuna taşır: her kafe, mahallesinin küçük kamusal alanı; her müşteri, o alanın eşit bir katılımcısı.
 
-Peni is one product with two sides:
+Peni is one product with two sides, deployed together:
 
-| Side | Who | Where |
+| Side | Who | What |
 |---|---|---|
-| **Customer** | Neighbours, regulars, students | iOS + Android app, and the web |
-| **Café** | Owners and baristas | Web café panel, plus "Kafe modu" in the mobile app |
+| **Café** | Owners and baristas | The till with a small customer-facing screen, and the back office: menu, stock, purchasing, accounting, staff, reports, and an AI assistant for ön muhasebe |
+| **Customer** | Neighbours and regulars | Collect and spend peni (1 peni = 1 TL at that café), gift peni, askıda kahve, the café feed and events. iOS, Android and the web |
 
-What customers do:
+The café side replaces Shelby, the system Shelby Cafe runs on today. The full plan, in 35 small pieces, is in [docs/plan.md](docs/plan.md).
 
-- **Order ahead.** Pay at the till as usual. The app moves no money.
-- **Earn peni.** Each café sets its own rate (e.g. 5 %). At that café, 1 peni = 1 TL.
-- **Treat a friend.** *Ismarla* sends peni to another member of the same café. It's held in escrow until they accept, and returns to the sender after 24 h if they don't.
-- **Askıda kahve.** Leave peni on the café's open *askı*. Anyone who needs it can take a tea or coffee from there, once a day, and their name is never shown. Cash left at the till for an askı coffee goes into the same askı, and the café can add a matching share on top.
-- **Sit at the table.** Each café has a feed: posts from the café, the *Günün sorusu* (question of the day), and *Peni masası* events (a topic, a time, a big table). Members comment, react and RSVP.
+## Where things stand
 
-Peni stands on its own. A café that already runs **[Shelby](docs/shelby-integration.md)** for its till, stock and accounting can connect it, so app orders arrive as ordinary Shelby orders. A café without Shelby uses Peni's standalone mode and marks orders paid in the Peni panel.
+The code is being rebuilt piece by piece. Today it holds:
+
+| Area | State |
+|---|---|
+| Peni rules: earn, spend, gifts, askı, matching, refunds, reports | **Done, tested** (`packages/core`) |
+| Ledger on Postgres: append-only, balanced and non-negative, enforced by the database | **Done, tested on Postgres 16** (`packages/db`) |
+| `/api/v1` for wallets, gifts, askı, the café feed and the staff report | **Done, end-to-end tested.** Records are in memory for now |
+| Web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
 
 ```
 apps/
-  web/       Next.js 16 — customer web, café panel, and the HTTP API (/api/v1) used by every client
-  mobile/    Expo SDK 58 (iOS + Android) — customer app with a café mode for baristas
+  web/       Next.js 16: the HTTP API (/api/v1) used by every client, and the web pages
+  mobile/    Expo SDK 58 (iOS + Android)
 packages/
-  core/      Domain logic, no framework: peni ledger, gifts, askı, order lifecycle, POS adapters
+  core/      Domain logic, no framework: peni ledger, gifts, askı, member codes, menu
   db/        Prisma 7 schema + migrations (Postgres/Neon), Postgres ledger store
   api/       HTTP contract shared by web and mobile: zod schemas, DTOs, typed client, Turkish copy
-docs/        Vision, rules, architecture, Shelby contract, roadmap
+  brand/     Turkish text and number helpers
+docs/        Plan, architecture, peni & askı rules, vision
 ```
 
 ## Run it
@@ -38,24 +42,15 @@ Needs Node 22+ and pnpm 10.
 
 ```bash
 pnpm install
-pnpm dev:web            # http://localhost:3000, demo data, nothing to configure
+pnpm dev:web            # http://localhost:3000, demo data in memory, nothing to configure
 ```
 
-- Go to **/giris** and tap a demo neighbour (Ayşe has peni, Deniz is new). Or sign in with any `+90…` number: in demo mode the SMS code is shown on screen.
-- The café panel is at **/kafe/moda**, staff key `demo-staff`.
-- Demo data lives in memory and resets when the server restarts.
-
-Mobile:
-
-```bash
-cp apps/mobile/.env.example apps/mobile/.env   # point EXPO_PUBLIC_API_URL at the web server
-pnpm dev:mobile                                 # Expo; press i / a, or scan with Expo Go
-```
+The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. The staff key for `/api/v1/staff/moda` is `demo-staff`.
 
 ## Checks
 
 ```bash
-pnpm test                 # core rules (39), web app layer (6), db integration (skipped without a DB)
+pnpm test
 pnpm typecheck
 pnpm --filter @peni/web build
 
@@ -66,15 +61,4 @@ TEST_DATABASE_URL=postgresql://… pnpm --filter @peni/db test
 pnpm --filter @peni/web start & node apps/web/scripts/smoke.mjs
 ```
 
-## Where things stand (v0.1)
-
-| Area | State |
-|---|---|
-| Peni rules: earn, spend, gifts, askı, matching, refunds, no-shows, reports | **Done, tested** (`packages/core`) |
-| Ledger on Postgres: append-only, balanced and non-negative, enforced by the database | **Done, tested on Postgres 16** (`packages/db`) |
-| Web: customer pages, café panel, `/api/v1` | **Done, end-to-end tested.** Records are in memory for now |
-| Mobile: cafés, café page with askı/menu/feed, ordering, order status, wallet, gifts, café mode | **Typechecks and bundles for iOS and Android.** Not yet run on a device |
-| Shelby connection | Peni side done (adapter + signed webhook). The Shelby side is still to build ([contract](docs/shelby-integration.md)) |
-| SMS login, push notifications, Postgres for all records, store release | [Roadmap](docs/roadmap.md) |
-
-Read next: [vision](docs/vision.md) · [peni & askı rules](docs/peni-and-askida.md) · [architecture](docs/architecture.md) · [Shelby integration](docs/shelby-integration.md) · [roadmap](docs/roadmap.md)
+Read next: [plan](docs/plan.md) · [architecture](docs/architecture.md) · [peni & askı rules](docs/peni-and-askida.md) · [vision](docs/vision.md)

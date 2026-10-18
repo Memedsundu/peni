@@ -1,5 +1,3 @@
-import { account } from "@peni/core";
-import { signShelbyWebhook, verifyShelbyWebhook } from "@peni/core/pos/shelby";
 import { beforeEach, describe, expect, it } from "vitest";
 import { PeniApp } from "./app";
 import { DEMO_CUSTOMERS, DEMO_NEIGHBOURS, seed } from "./seed";
@@ -16,14 +14,11 @@ const ayse = () => app.customers.get(DEMO_CUSTOMERS.ayse.id)!;
 const mehmet = () => app.customers.get(DEMO_CUSTOMERS.mehmet.id)!;
 const deniz = () => app.customers.get(DEMO_CUSTOMERS.deniz.id)!;
 const neighbour = (who: keyof typeof DEMO_NEIGHBOURS) => app.customers.get(DEMO_NEIGHBOURS[who].id)!;
-const orderInput = (o: Partial<Parameters<PeniApp["createOrder"]>[1]> = {}) => ({
-  cafeSlug: "moda",
-  lines: [{ productId: "latte", quantity: 1 }],
-  usePeni: 0,
-  askidaProductId: null,
-  idempotencyKey: crypto.randomUUID(),
-  ...o,
-});
+/** Deniz takes one çay from the askı at the till. */
+const claimCay = async () => {
+  const membershipId = (await modaFor(deniz())).membership!.id;
+  return app.peni.claimFromAskida({ membershipId, orderId: crypto.randomUUID(), productId: "cay", unitPriceKurus: 3_000 });
+};
 
 beforeEach(async () => {
   now = new Date("2026-10-16T09:00:00Z");
@@ -31,75 +26,9 @@ beforeEach(async () => {
   await seed(app);
 });
 
-describe("ordering", () => {
-  it("prices from the menu, not the client, and splits one askı unit out of a larger line", async () => {
-    const order = await app.createOrder(deniz(), orderInput({ lines: [{ productId: "cay", quantity: 3 }], askidaProductId: "cay" }));
-    expect(order.lines).toEqual([
-      expect.objectContaining({ productId: "cay", quantity: 2, fromAskida: false }),
-      expect.objectContaining({ productId: "cay", quantity: 1, fromAskida: true }),
-    ]);
-    expect(order.subtotalKurus).toBe(9_000);
-    expect(order.dueKurus).toBe(6_000);
-  });
-
-  it("is idempotent per customer", async () => {
-    const input = orderInput();
-    const a = await app.createOrder(ayse(), input);
-    const b = await app.createOrder(ayse(), input);
-    expect(b.id).toBe(a.id);
-  });
-
-  it("puts the askı item and the peni back if the POS refuses the order", async () => {
-    const pool = await app.ledger.balance(account.askida("cafe_moda"));
-    const wallet = (await app.wallet(ayse())).totalPeni;
-    app.pos.createPendingOrder = async () => {
-      throw new Error("POS down");
-    };
-    await expect(
-      app.createOrder(ayse(), orderInput({ lines: [{ productId: "cay", quantity: 1 }, { productId: "latte", quantity: 1 }], askidaProductId: "cay", usePeni: 50 })),
-    ).rejects.toThrow("POS down");
-    expect(await app.ledger.balance(account.askida("cafe_moda"))).toBe(pool);
-    expect((await app.wallet(ayse())).totalPeni).toBe(wallet);
-  });
-
-  it("earns only on what was paid at the till", async () => {
-    const before = (await app.wallet(ayse())).cafes.find((c) => c.cafeSlug === "moda")!.balancePeni;
-    const order = await app.createOrder(ayse(), orderInput({ usePeni: 100 })); // latte 120 TL, 100 peni off
-    for (const a of ["accept", "ready", "collect"] as const) await app.staffTransition("moda", order.id, a);
-    const after = (await app.wallet(ayse())).cafes.find((c) => c.cafeSlug === "moda")!.balancePeni;
-    expect(after).toBe(before - 100 + 1); // 5 % of 20 TL
-  });
-
-  it("turns pre-ordering off after two no-shows", async () => {
-    for (let i = 0; i < 2; i++) {
-      const o = await app.createOrder(ayse(), orderInput());
-      for (const a of ["accept", "ready", "no_show"] as const) await app.staffTransition("moda", o.id, a);
-    }
-    await expect(app.createOrder(ayse(), orderInput())).rejects.toMatchObject({ code: "PREORDER_DISABLED" });
-  });
-});
-
-describe("Shelby events", () => {
-  it("closes the order and pays peni once, even if Shelby sends order.paid twice", async () => {
-    const order = await app.createOrder(ayse(), orderInput());
-    await app.staffTransition("moda", order.id, "accept");
-    const before = (await app.wallet(ayse())).totalPeni;
-    const event = { type: "order.paid" as const, posOrderId: `standalone_${order.id}`, peniOrderId: order.id, membershipHint: null, paidTotalKurus: 12_000, paidAt: new Date().toISOString() };
-    const raw = JSON.stringify(event);
-    const parsed = verifyShelbyWebhook(raw, signShelbyWebhook(raw, "s"), "s")!;
-    await app.handlePosEvent(parsed);
-    await app.handlePosEvent(parsed);
-    expect((await app.wallet(ayse())).totalPeni).toBe(before + 6);
-    expect(app.orderFor(ayse(), order.id).status).toBe("collected");
-  });
-});
-
-const collect = async (orderId: string) => {
-  for (const a of ["accept", "ready", "collect"] as const) await app.staffTransition("moda", orderId, a);
-};
 const modaFor = (c: ReturnType<typeof ayse> | null) => app.cafeDetail("moda", c);
 
-describe("café cards and the café page (G1, G2, G9, G12, G14)", () => {
+describe("café cards and the café page (G1, G2, G9, G12)", () => {
   it("shows members their balance with goods to read it by; others get null", async () => {
     const [moda] = await app.listCafes(ayse());
     expect(moda).toMatchObject({ slug: "moda", earnRatePercent: 5, hue: "lacivert" });
@@ -132,15 +61,6 @@ describe("café cards and the café page (G1, G2, G9, G12, G14)", () => {
     expect((await app.cafeDetail("kuzguncuk", ayse())).askida.matchPercent).toBeNull();
   });
 
-  it("gives an ETA only from 20+ real accept-to-ready taps", async () => {
-    const moda = await modaFor(null);
-    expect(moda.medianPrepMinutes).toBeGreaterThanOrEqual(4);
-    expect(moda.prepMinutesRange!.low).toBeLessThanOrEqual(moda.medianPrepMinutes!);
-    expect(moda.prepMinutesRange!.high).toBeGreaterThanOrEqual(moda.medianPrepMinutes!);
-    const kuz = await app.cafeDetail("kuzguncuk", null);
-    expect(kuz.medianPrepMinutes).toBeNull();
-    expect(kuz.prepMinutesRange).toBeNull();
-  });
 });
 
 describe("the askı (G3, dignity)", () => {
@@ -151,19 +71,18 @@ describe("the askı (G3, dignity)", () => {
     expect((await app.cafeDetail("kuzguncuk", deniz())).askida.myEligibility).toEqual({ status: "too_new", daysLeft: 3 });
     expect((await app.cafeDetail("kuzguncuk", neighbour("oguz"))).askida.myEligibility).toEqual({ status: "blocked" });
 
-    await app.createOrder(deniz(), orderInput({ lines: [{ productId: "cay", quantity: 1 }], askidaProductId: "cay" }));
+    await claimCay();
     expect((await modaFor(deniz())).askida.myEligibility).toEqual({ status: "claimed_today" });
   });
 
   it("never lists a claim: not on the wall, not in anyone's history", async () => {
-    const order = await app.createOrder(deniz(), orderInput({ lines: [{ productId: "cay", quantity: 1 }, { productId: "simit", quantity: 1 }], askidaProductId: "cay" }));
-    await collect(order.id);
+    await claimCay();
     const moda = await modaFor(ayse());
     expect(moda.askida.claimedLast7Days).toBeGreaterThanOrEqual(3);
     expect(moda.askida.wall.some((e) => e.type === "claim")).toBe(false);
     expect((await app.staffDashboard("moda")).askida.wall.some((e) => e.type === "claim")).toBe(false);
     const history = (await app.wallet(deniz())).ledger;
-    expect(history.map((l) => [l.kind, l.peni])).toEqual([["earn", 1]]); // 5 % of the 25 TL simit
+    expect(history).toEqual([]);
   });
 
   it("names only donors who asked to be named, as 'Ayşe Y.'", async () => {
@@ -174,7 +93,7 @@ describe("the askı (G3, dignity)", () => {
   });
 });
 
-describe("the Masa (G4, G13)", () => {
+describe("the feed and events (G4, G13)", () => {
   it("draws chairs with initials only for visible profiles, and always for me", async () => {
     const event = (await modaFor(ayse())).posts.find((p) => p.id === "post_event_1")!;
     expect(event.title).toBe("Mahalleye bir takas kütüphanesi kursak?");
@@ -220,60 +139,21 @@ describe("the Masa (G4, G13)", () => {
   });
 });
 
-describe("membership and the fiş (G5, G7, G7b)", () => {
-  it("carries the no-show strikes and a stable Peni kodu", async () => {
-    const kerem = (await modaFor(neighbour("kerem"))).membership!;
-    expect(kerem).toMatchObject({ preorderEnabled: false, noShowStrikes: 2 });
+describe("membership (G7b)", () => {
+  it("gives each membership a stable Peni kodu", async () => {
     const mine = (await modaFor(ayse())).membership!;
     expect(mine.memberCode).toMatch(/^[B-DF-HJ-NP-TV-Z2-9]{3}-[B-DF-HJ-NP-TV-Z2-9]{3}$/);
     expect(mine.memberCode).toBe(app.memberCodeFor(mine.id));
     expect((await app.wallet(ayse())).cafes.find((c) => c.cafeSlug === "moda")!.memberCode).toBe(mine.memberCode);
   });
 
-  it("shows what the order earned once it is collected", async () => {
-    const order = await app.createOrder(ayse(), orderInput({ lines: [{ productId: "latte", quantity: 1 }, { productId: "simit", quantity: 1 }] }));
-    expect(order.earnedPeni).toBeNull();
-    expect(order.memberCode).toBe((await modaFor(ayse())).membership!.memberCode);
-    await app.staffTransition("moda", order.id, "accept");
-    expect(app.orderFor(ayse(), order.id).earnedPeni).toBeNull();
-    await app.staffTransition("moda", order.id, "ready");
-    await app.staffTransition("moda", order.id, "collect");
-    expect(app.orderFor(ayse(), order.id).earnedPeni).toBe(7); // 5 % of 145 TL
-    expect(app.ordersFor(ayse())[0]!.earnedPeni).toBe(7);
-  });
-
-  it("lets the till credit a walk-in by Peni kodu, however it was typed", async () => {
-    const membership = (await modaFor(ayse())).membership!;
-    const before = membership.balancePeni;
-    const paid = (posOrderId: string, memberCode: string) => {
-      const raw = JSON.stringify({ type: "order.paid", posOrderId, peniOrderId: null, membershipHint: { memberCode }, paidTotalKurus: 20_000, paidAt: now.toISOString() });
-      return app.handlePosEvent(verifyShelbyWebhook(raw, signShelbyWebhook(raw, "s"), "s")!);
-    };
-    await paid("walkin_1", membership.memberCode);
-    await paid("walkin_1", membership.memberCode); // delivered twice
-    await paid("walkin_2", membership.memberCode.replace("-", "").toLowerCase());
-    expect((await modaFor(ayse())).membership!.balancePeni).toBe(before + 20);
-    await expect(paid("walkin_3", "BBB-BBB")).rejects.toMatchObject({ code: "NOT_FOUND" });
-  });
 });
 
-describe("sign-in and profile (G8, G18, G19)", () => {
-  it("asks a new customer for their name, then remembers it", async () => {
-    await app.requestCode("+905551112233");
-    const first = await app.verifyCode("+905551112233", "000000");
-    expect(first).toMatchObject({ isNew: true, staffCafes: [] });
-    const me = app.customerForToken(first.token)!;
-    expect(app.updateProfile(me, { displayName: "  Ece Tan ", profileVisible: true }).customer).toMatchObject({
-      displayName: "Ece Tan",
-      profileVisible: true,
-    });
-    await app.requestCode("+905551112233");
-    expect((await app.verifyCode("+905551112233", "000000")).isNew).toBe(false);
-  });
-
-  it("is not new for a seeded neighbour, and nobody in the demo is staff", async () => {
-    await app.requestCode(DEMO_CUSTOMERS.ayse.phone);
-    expect(await app.verifyCode(DEMO_CUSTOMERS.ayse.phone, "000000")).toMatchObject({ isNew: false, staffCafes: [] });
+describe("sign-in and profile (G18, G19)", () => {
+  it("signs in a seeded customer with a demo session; nobody in the demo is staff", () => {
+    const token = app.createSessionFor(DEMO_CUSTOMERS.ayse.id);
+    expect(app.customerForToken(token)).toBe(ayse());
+    expect(app.customerForToken("nope")).toBeNull();
     for (const c of [ayse(), mehmet(), deniz()]) expect(app.me(c).staffCafes).toEqual([]);
   });
 
@@ -358,66 +238,23 @@ describe("gifts (G6, G11, G15, G16, G17)", () => {
     await expect(app.giftPreview("nope", null)).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
-  it("writes the full wallet history as signed lines, with order codes and the other person", async () => {
+  it("writes the full wallet history as signed lines, with the other person", async () => {
     const ledger = (await app.wallet(ayse())).ledger;
     const kinds = new Set(ledger.map((l) => l.kind));
-    for (const k of ["earn", "redeem", "gift_out", "gift_in", "gift_return", "askida_donate", "refund"] as const) {
-      if (k !== "refund") expect(kinds).toContain(k);
-    }
+    for (const k of ["earn", "gift_out", "gift_in", "gift_return", "askida_donate"] as const) expect(kinds).toContain(k);
     expect([...ledger].sort((a, b) => b.at.localeCompare(a.at))).toEqual(ledger);
-    expect(ledger.find((l) => l.kind === "redeem")).toMatchObject({ peni: -30, cafeSlug: "moda", orderNumber: expect.stringMatching(/^P-\d{3}$/) });
+    expect(ledger.find((l) => l.kind === "earn")).toMatchObject({ cafeSlug: "moda", orderId: expect.stringMatching(/^till_seed_/) });
     expect(ledger.find((l) => l.kind === "gift_in" && l.cafeSlug === "kuzguncuk")).toMatchObject({ peni: 25, counterpartName: "Nermin Arıkan" });
     expect(ledger.find((l) => l.kind === "askida_donate")).toMatchObject({ peni: -60 });
-
-    // A rejected order shows the peni going out and coming back.
-    const order = await app.createOrder(ayse(), orderInput({ usePeni: 40 }));
-    await app.staffTransition("moda", order.id, "reject", "Malzeme bitti");
-    const [refund, redeem] = (await app.wallet(ayse())).ledger;
-    expect(refund).toMatchObject({ kind: "refund", peni: 40, orderId: order.id, orderNumber: order.orderNumber });
-    expect(redeem).toMatchObject({ kind: "redeem", peni: -40, orderId: order.id });
   });
 });
 
-describe("staff (G20, G21)", () => {
-  it("pauses for a while and resumes by itself", async () => {
-    expect(await app.setPaused("moda", { minutes: 15 })).toEqual({ appOrderingPaused: true, pausedUntil: "2026-10-16T09:15:00.000Z" });
-    expect((await app.staffDashboard("moda")).cafe).toMatchObject({ acceptingOrders: false, pausedUntil: "2026-10-16T09:15:00.000Z" });
-    await expect(app.createOrder(ayse(), orderInput())).rejects.toMatchObject({ code: "ORDERING_CLOSED" });
-    tick(15 * MIN);
-    expect((await app.listCafes(null))[0]!.acceptingOrders).toBe(true);
-    expect((await app.staffDashboard("moda")).cafe).toMatchObject({ appOrderingPaused: false, pausedUntil: null });
-    await app.createOrder(ayse(), orderInput());
-  });
-
-  it("pauses until local midnight", async () => {
-    expect((await app.setPaused("moda", "end_of_day")).pausedUntil).toBe("2026-10-16T21:00:00.000Z");
-    tick(11 * HOUR + 59 * MIN);
-    expect((await app.staffDashboard("moda")).cafe.appOrderingPaused).toBe(true);
-    tick(MIN);
-    expect((await app.staffDashboard("moda")).cafe.appOrderingPaused).toBe(false);
-  });
-
-  it("keeps the original boolean pause, which never ends by itself", async () => {
-    expect(await app.setPaused("moda", true)).toEqual({ appOrderingPaused: true, pausedUntil: null });
-    tick(48 * HOUR);
-    expect((await app.staffDashboard("moda")).cafe.appOrderingPaused).toBe(true);
-    expect(await app.setPaused("moda", false)).toEqual({ appOrderingPaused: false, pausedUntil: null });
-    await app.setPaused("moda", { minutes: 30 });
-    expect(await app.setPaused("moda", null)).toEqual({ appOrderingPaused: false, pausedUntil: null });
-  });
-
+describe("staff (G21)", () => {
   it("reports the previous 30 days next to the current ones", async () => {
     const { report, memberCount } = await app.staffDashboard("moda");
     expect(report.previous.untilIso).toBe(report.sinceIso);
     expect(report.previous.issuedPeni).toBeGreaterThan(0);
     expect(report.previous.memberCount).toBeLessThan(memberCount);
     expect(report.previous.outstandingPeni).toBeLessThan(report.outstandingPeni);
-  });
-
-  it("starts every day's order numbers at P-001", async () => {
-    const first = (await app.staffDashboard("moda")).orders.map((o) => o.orderNumber);
-    expect(first).toEqual(["P-001", "P-002", "P-003", "P-004"]);
-    tick(14 * HOUR); // 02:00 the next day
-    expect((await app.createOrder(ayse(), orderInput())).orderNumber).toBe("P-001");
   });
 });

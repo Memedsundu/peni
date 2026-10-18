@@ -1,8 +1,6 @@
 /** §4.6 and §12.1: every example in the spec, plus the full suffix tables. */
 import { describe, expect, it } from "vitest";
 import {
-  cafeDevice,
-  cafeHue,
   capitalizeTr,
   coinInitials,
   coinLegend,
@@ -305,18 +303,10 @@ describe("initials and the coin", () => {
   });
 });
 
-describe("café identity (djb2)", () => {
+describe("djb2", () => {
   it("is the djb2 hash over code points", () => {
     expect(djb2("")).toBe(5381);
     expect(djb2("a")).toBe((5381 * 33 + 97) >>> 0);
-  });
-  it("moda → mürekkep + glass", () => {
-    expect(cafeHue("moda")).toBe("murekkep");
-    expect(cafeDevice("moda")).toBe("glass");
-  });
-  it("kuzguncuk → zeytin + fincan", () => {
-    expect(cafeHue("kuzguncuk")).toBe("zeytin");
-    expect(cafeDevice("kuzguncuk")).toBe("fincan");
   });
 });
 

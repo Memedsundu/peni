@@ -7,11 +7,7 @@ export const DEMO_CUSTOMERS = {
   deniz: { id: "cus_deniz", phone: "+905320000003", displayName: "Deniz Arslan" },
 } as const;
 
-/**
- * Neighbours who make the cafés feel lived in. In demo mode anyone can sign in
- * with one of these numbers and the code 000000 to see their state:
- * Kerem (pre-ordering off after two no-shows), Oğuz (blocked at Kuzguncuk).
- */
+/** Neighbours who make the cafés feel lived in. Oğuz is blocked at Kuzguncuk. */
 export const DEMO_NEIGHBOURS = {
   zeynep: { id: "cus_zeynep", phone: "+905320000011", displayName: "Zeynep Demir", profileVisible: true },
   can: { id: "cus_can", phone: "+905320000012", displayName: "Can Öztürk", profileVisible: true },
@@ -35,10 +31,9 @@ const DAY = 24 * 60 * MIN;
 
 /**
  * Demo data: two cafés, thirteen neighbours and two months of history, written
- * through the real code paths (orders, the ledger, gifts) with the clock moved
- * back, so every screen has its states: an earn on the fiş, a full HAREKETLER
- * list, a weekly askı line, a filling long table, a question with answers, an
- * ETA from real taps, live tickets on the Tezgâh and trends in the report.
+ * through the real code paths (the ledger, gifts, the askı) with the clock moved
+ * back, so every screen has its states: a full wallet history, a weekly askı
+ * line, a filling event, a question with answers and trends in the report.
  * Deterministic for a given day: no randomness beyond a fixed-seed generator.
  */
 export async function seed(app: PeniApp): Promise<void> {
@@ -61,9 +56,6 @@ export async function seed(app: PeniApp): Promise<void> {
     district: "Kadıköy",
     city: "İstanbul",
     coverImageUrl: null,
-    posKind: "standalone",
-    appOrderingPaused: false,
-    pausedUntil: null,
     referenceProductIds: ["cay", "turk"],
     // Moda chose its own colourway (G9); without a choice the hash would give mürekkep.
     hue: "lacivert",
@@ -76,13 +68,10 @@ export async function seed(app: PeniApp): Promise<void> {
     district: "Üsküdar",
     city: "İstanbul",
     coverImageUrl: null,
-    posKind: "standalone",
-    appOrderingPaused: false,
-    pausedUntil: null,
     hue: null,
   });
 
-  app.pos.setMenu("cafe_moda", [
+  app.menu.setMenu("cafe_moda", [
     { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 3_000, available: true, description: "İnce belli bardakta" },
     { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 9_000, available: true, description: "Yanında lokum" },
     { productId: "filtre", name: "Filtre Kahve", category: "Sıcak", priceKurus: 8_500, available: true, description: "Bu hafta Etiyopya Yirgacheffe" },
@@ -91,7 +80,7 @@ export async function seed(app: PeniApp): Promise<void> {
     { productId: "simit", name: "Simit", category: "Yiyecek", priceKurus: 2_500, available: true, description: "Sabah fırından" },
     { productId: "cheesecake", name: "San Sebastian", category: "Tatlı", priceKurus: 18_000, available: true, description: null },
   ]);
-  app.pos.setMenu("cafe_kuzguncuk", [
+  app.menu.setMenu("cafe_kuzguncuk", [
     { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 2_500, available: true, description: "Demlikte, tavşan kanı" },
     { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 8_000, available: true, description: null },
     { productId: "sahlep", name: "Salep", category: "Sıcak", priceKurus: 10_000, available: true, description: "Tarçınlı" },
@@ -154,55 +143,22 @@ export async function seed(app: PeniApp): Promise<void> {
   const walkIn = (who: Who, slug: Slug, at: Date, tl: number) =>
     plan(at, () =>
       app.at(at, () =>
-        app.handlePosEvent({
-          type: "order.paid",
-          posOrderId: `till_seed_${++n}`,
-          peniOrderId: null,
-          membershipHint: { memberCode: app.memberCodeFor(members[slug][who]!) },
-          paidTotalKurus: tl * 100,
-          paidAt: at.toISOString(),
-        }),
+        app.peni.earnForPaidOrder({ membershipId: members[slug][who]!, orderId: `till_seed_${++n}`, paidTotalKurus: tl * 100 }),
       ),
     );
 
-  type End = "submitted" | "accepted" | "ready" | "collected" | "rejected" | "no_show";
-  /** An app order walked through by the barista, minute by minute. */
-  const order = (o: {
-    who: Who;
-    slug: Slug;
-    at: Date;
-    lines: [string, number][];
-    end: End;
-    askida?: string;
-    usePeni?: number;
-    note?: string;
-    prep?: number;
-    pickup?: number;
-    reason?: string;
-  }) =>
-    plan(o.at, async () => {
-      const after = (min: number) => new Date(Math.min(o.at.getTime() + min * MIN, Math.max(o.at.getTime(), now.getTime())));
-      const created = await app.at(o.at, () =>
-        app.createOrder(customer(o.who), {
-          cafeSlug: o.slug,
-          lines: o.lines.map(([productId, quantity]) => ({ productId, quantity })),
-          usePeni: o.usePeni ?? 0,
-          askidaProductId: o.askida ?? null,
-          customerNote: o.note,
-          idempotencyKey: `seed_order_${++n}`,
+  /** One item taken from the askı at the till. */
+  const claim = (who: Who, slug: Slug, at: Date, productId: string) =>
+    plan(at, async () => {
+      const item = (await app.menu.listMenu(CAFE_ID[slug])).find((m) => m.productId === productId)!;
+      await app.at(at, () =>
+        app.peni.claimFromAskida({
+          membershipId: members[slug][who]!,
+          orderId: `till_seed_${++n}`,
+          productId,
+          unitPriceKurus: item.priceKurus,
         }),
       );
-      const staff = (min: number, action: "accept" | "ready" | "collect" | "reject" | "no_show") =>
-        app.at(after(min), () => app.staffTransition(o.slug, created.id, action, o.reason));
-      if (o.end === "submitted") return;
-      if (o.end === "rejected") return staff(2, "reject");
-      await staff(1, "accept");
-      if (o.end === "accepted") return;
-      const ready = 1 + (o.prep ?? 6);
-      await staff(ready, "ready");
-      if (o.end === "ready") return;
-      if (o.end === "no_show") return staff(ready + 25, "no_show");
-      await staff(ready + (o.pickup ?? 3), "collect");
     });
 
   const gift = (o: { from: Who; to: Who; slug: Slug; at: Date; peni: number; message: string }) => {
@@ -251,63 +207,16 @@ export async function seed(app: PeniApp): Promise<void> {
   // The askı over the last nine days. Takers are never named, anywhere.
   till("moda", on(9, 10, 15), 85);
   donate("ayse", "moda", on(6, 8, 5), 60, true);
-  order({ who: "kerem", slug: "moda", at: on(6, 9, 30), lines: [["simit", 1], ["cay", 1]], askida: "simit", end: "collected", prep: 4 });
-  order({ who: "elif", slug: "moda", at: on(5, 8, 40), lines: [["cay", 1], ["simit", 1]], askida: "cay", end: "collected", prep: 3 });
+  claim("kerem", "moda", on(6, 9, 30), "simit");
+  claim("elif", "moda", on(5, 8, 40), "cay");
   donate("zeynep", "moda", on(4, 18, 30), 30, true);
-  order({ who: "burak", slug: "moda", at: on(3, 16, 20), lines: [["cay", 1]], askida: "cay", end: "collected", prep: 4 });
+  claim("burak", "moda", on(3, 16, 20), "cay");
   donate("can", "moda", on(2, 13, 0), 30, false);
-  order({ who: "oguz", slug: "moda", at: on(2, 11, 5), lines: [["cay", 1], ["simit", 1]], askida: "cay", end: "collected", prep: 5 });
+  claim("oguz", "moda", on(2, 11, 5), "cay");
   donate("irem", "moda", on(1, 17, 45), 25, true);
   till("moda", on(1, 19, 10), 60);
   till("kuzguncuk", on(5, 12, 0), 75);
-  order({ who: "oguz", slug: "kuzguncuk", at: on(4, 10, 20), lines: [["cay", 1], ["pogaca", 1]], askida: "cay", end: "collected", prep: 5 });
-
-  // Ayşe's own orders: Siparişlerim has a past, and "Her zamanki" is Latte + Simit.
-  order({ who: "ayse", slug: "moda", at: on(6, 9, 40), lines: [["latte", 1], ["simit", 1]], end: "collected", prep: 6 });
-  order({ who: "ayse", slug: "moda", at: on(4, 15, 20), lines: [["turk", 2]], usePeni: 30, end: "collected", prep: 8 });
-  order({ who: "ayse", slug: "moda", at: on(3, 10, 5), lines: [["latte", 1]], end: "rejected", reason: "Malzeme bitti" });
-  order({ who: "ayse", slug: "moda", at: on(1, 8, 50), lines: [["latte", 1], ["simit", 1]], end: "collected", prep: 5 });
-  order({ who: "ayse", slug: "kuzguncuk", at: on(8, 11, 30), lines: [["cay", 2], ["pogaca", 1]], end: "collected", prep: 4 });
-  order({ who: "ayse", slug: "kuzguncuk", at: on(5, 16, 0), lines: [["sahlep", 1]], end: "collected", prep: 7 });
-
-  // Mehmet missed one pickup, then came back.
-  order({ who: "mehmet", slug: "moda", at: on(7, 12, 15), lines: [["filtre", 1]], end: "collected", prep: 5 });
-  order({ who: "mehmet", slug: "moda", at: on(2, 17, 30), lines: [["latte", 1]], end: "no_show", prep: 6 });
-
-  // Kerem missed two in a row: pre-ordering is off for him at Moda.
-  order({ who: "kerem", slug: "moda", at: on(4, 17, 40), lines: [["latte", 1]], end: "no_show", prep: 6 });
-  order({ who: "kerem", slug: "moda", at: on(2, 18, 10), lines: [["filtre", 1]], end: "no_show", prep: 5 });
-
-  // A busy week at Moda: enough real taps (20+) for "genelde 5–8 dk".
-  const usual: Partial<Record<Who, [string, number][][]>> = {
-    zeynep: [[["filtre", 1]], [["filtre", 1], ["simit", 1]]],
-    can: [[["cay", 2]], [["turk", 1]]],
-    elif: [[["latte", 1]], [["latte", 1], ["cheesecake", 1]]],
-    emre: [[["turk", 1]], [["filtre", 1]]],
-    selin: [[["limonata", 1]], [["latte", 1]]],
-    burak: [[["cay", 1], ["simit", 1]]],
-    irem: [[["latte", 1], ["simit", 1]]],
-  };
-  const prepMinutes = [4, 5, 6, 6, 7, 7, 7, 8, 8, 9];
-  const regularsAtModa = Object.keys(usual) as Who[];
-  for (let day = 7; day >= 1; day--) {
-    const count = 3 + Math.floor(rand() * 2);
-    for (let i = 0; i < count; i++) {
-      const who = regularsAtModa[Math.floor(rand() * regularsAtModa.length)]!;
-      const options = usual[who]!;
-      order({
-        who,
-        slug: "moda",
-        at: on(day, 8 + Math.floor(rand() * 11), Math.floor(rand() * 60)),
-        lines: options[Math.floor(rand() * options.length)]!,
-        end: "collected",
-        prep: prepMinutes[Math.floor(rand() * prepMinutes.length)]!,
-        pickup: 1 + Math.floor(rand() * 5),
-      });
-    }
-  }
-  order({ who: "nermin", slug: "kuzguncuk", at: on(6, 10, 10), lines: [["turk", 1]], end: "collected", prep: 6 });
-  order({ who: "can", slug: "kuzguncuk", at: on(3, 15, 45), lines: [["sahlep", 2]], end: "collected", prep: 8 });
+  claim("oguz", "kuzguncuk", on(4, 10, 20), "cay");
 
   // Gifts: one thanked, one that ran out, two still waiting.
   const toMehmet = gift({ from: "ayse", to: "mehmet", slug: "moda", at: on(3, 12, 10), peni: 30, message: "Geçen haftaki çayın karşılığı." });
@@ -324,15 +233,9 @@ export async function seed(app: PeniApp): Promise<void> {
   );
 
   // Today.
-  order({ who: "mehmet", slug: "moda", at: earlierToday(190), lines: [["cay", 1], ["simit", 1]], askida: "cay", end: "collected", prep: 3 });
+  claim("mehmet", "moda", earlierToday(190), "cay");
   gift({ from: "mehmet", to: "ayse", slug: "moda", at: earlierToday(120), peni: 30, message: "Afiyet olsun!" });
   gift({ from: "ayse", to: "zeynep", slug: "moda", at: earlierToday(50), peni: 45, message: "Takas rafı fikri için sağ ol." });
-  // Live tickets on the Tezgâh: one ready, one being made, one just in.
-  order({ who: "emre", slug: "moda", at: earlierToday(16), lines: [["filtre", 1], ["cheesecake", 1]], usePeni: 20, end: "ready", prep: 6 });
-  order({ who: "can", slug: "moda", at: earlierToday(8), lines: [["cay", 2]], end: "accepted" });
-  order({ who: "zeynep", slug: "moda", at: earlierToday(2), lines: [["latte", 1], ["simit", 1]], note: "az şekerli, yulaf sütlü", end: "submitted" });
-  order({ who: "nermin", slug: "kuzguncuk", at: earlierToday(4), lines: [["sahlep", 1]], note: "Tarçını bol olsun.", end: "submitted" });
-
   steps.sort((a, b) => a.at.getTime() - b.at.getTime());
   for (const step of steps) await step.run();
 
@@ -340,7 +243,7 @@ export async function seed(app: PeniApp): Promise<void> {
   const blocked = (await app.directory.getMembership(members.kuzguncuk.oguz!))!;
   await app.directory.saveMembership({ ...blocked, blocked: true });
 
-  // ─────────────────────────────────────────── the Masa
+  // ─────────────────────────────────────────── the feed
 
   const post = (p: Omit<PostRecord, "reactions" | "rsvps" | "comments">, extra?: Partial<PostRecord>): void => {
     app.posts.set(p.id, { ...p, reactions: new Set(), rsvps: new Set(), comments: [], ...extra });

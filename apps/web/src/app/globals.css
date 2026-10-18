@@ -1,112 +1,24 @@
-/* Peni "İlan" design system — web foundation (design-system.md §12.4).
-   Colour values live in ./tokens.css, generated from packages/brand/src/tokens.ts (`pnpm brand:css`).
-   NEVER write a hex or rgb literal in a component: use these tokens. */
+/* Placeholder styles until the new design system lands (plan piece 4, docs/plan.md).
+   Colours follow the approved direction: black, white, and one green when needed. */
 @import "tailwindcss";
-@import "./fonts.css";
-@import "./tokens.css";
 
-/* `dark:` follows the same rule as tokens.css: an explicit data-theme wins, otherwise the system. */
-@custom-variant dark {
-  &:where([data-theme="dark"], [data-theme="dark"] *) {
-    @slot;
-  }
-  @media (prefers-color-scheme: dark) {
-    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
-      @slot;
-    }
-  }
-}
-
-@theme {
-  --font-display: "Brygada 1918 Variable", Georgia, serif;
-  --font-sans: "Archivo Variable", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --text-legend: .8125rem;  --text-legend--line-height: 1rem;      --text-legend--letter-spacing: .08em; --text-legend--font-weight: 600;
-  --text-plate: .8125rem;   --text-plate--line-height: 1rem;       --text-plate--letter-spacing: .06em;  --text-plate--font-weight: 600;
-  --text-meta: .8125rem;    --text-meta--line-height: 1.125rem;
-  --text-body: .9375rem;    --text-body--line-height: 1.375rem;
-  --text-body-lg: 1rem;     --text-body-lg--line-height: 1.5rem;
-  --text-button: .9375rem;  --text-button--line-height: 1.25rem;   --text-button--font-weight: 600;
-  --text-item: 1.0625rem;   --text-item--line-height: 1.375rem;    --text-item--font-weight: 600; --text-item--letter-spacing: -.005em;
-  --text-h3: 1.375rem;      --text-h3--line-height: 1.625rem;      --text-h3--font-weight: 600; --text-h3--letter-spacing: -.01em;
-  --text-h2: 1.875rem;      --text-h2--line-height: 2.125rem;      --text-h2--font-weight: 600; --text-h2--letter-spacing: -.015em;
-  --text-h1: clamp(2.25rem, 1.6rem + 3.2vw, 3.5rem); --text-h1--line-height: 1.02; --text-h1--font-weight: 600; --text-h1--letter-spacing: -.02em;
-  --text-question: 1.375rem; --text-question--line-height: 1.75rem; --text-question--font-weight: 500;
-  --text-balance: 2.5rem;   --text-balance--line-height: 1;        --text-balance--font-weight: 600; --text-balance--letter-spacing: -.01em;
-  --text-code: 4.5rem;      --text-code--line-height: .9;          --text-code--font-weight: 600; --text-code--letter-spacing: -.02em;
-  --text-ticket: 2.5rem;    --text-ticket--line-height: 1;         --text-ticket--font-weight: 600;
-  --radius-tag: 4px; --radius-btn: 10px; --radius-card: 14px; --radius-sheet: 22px;
-  --ease-out-strong: cubic-bezier(.23,1,.32,1);
-  --ease-drawer: cubic-bezier(.32,.72,0,1);
-}
-@theme inline {
-  --color-bg: var(--bg); --color-surface: var(--surface); --color-surface-2: var(--surface-2);
-  --color-ink: var(--ink); --color-ink-2: var(--ink-2); --color-line: var(--line); --color-line-strong: var(--line-strong);
-  --color-primary: var(--primary); --color-on-primary: var(--on-primary); --color-primary-pressed: var(--primary-pressed);
-  --color-peni: var(--peni); --color-on-peni: var(--on-peni); --color-peni-ink: var(--peni-ink); --color-peni-soft: var(--peni-soft);
-  --color-aski: var(--aski); --color-on-aski: var(--on-aski); --color-aski-pressed: var(--aski-pressed); --color-aski-ink: var(--aski-ink); --color-aski-soft: var(--aski-soft); --color-hook: var(--hook);
-  --color-masa: var(--masa); --color-on-masa: var(--on-masa); --color-masa-ink: var(--masa-ink); --color-masa-soft: var(--masa-soft);
-  --color-success: var(--success); --color-on-success: var(--on-success); --color-on-success-2: var(--on-success-2); --color-success-ink: var(--success-ink); --color-success-soft: var(--success-soft);
-  --color-danger: var(--danger); --color-danger-soft: var(--danger-soft);
-  --color-warning: var(--warning); --color-warning-ink: var(--warning-ink); --color-warning-soft: var(--warning-soft);
-  --color-focus: var(--focus); --color-press: var(--press); --color-on-press: var(--on-press); --color-on-press-2: var(--on-press-2);
-  --shadow-raised: var(--elev-1); --shadow-floating: var(--elev-2);
-}
-
-/* Motion durations (§7.1) and layout variables (§5). */
 :root {
-  --dur-press: 150ms; --dur-ui: 200ms; --dur-move: 250ms; --dur-state: 300ms; --dur-sheet: 450ms;
-  --header-h: 56px;
-  --nav-h: calc(64px + env(safe-area-inset-bottom));
-  --seg-h: 48px;
-  --cartbar-h: calc(64px + env(safe-area-inset-bottom));
-}
-@media (min-width: 768px) {
-  :root { --header-h: 64px; }
+  --ink: #111111;
+  --paper: #ffffff;
+  --green: #1e4d3b;
+  --muted: #6b6b6b;
 }
 
-/* The §12.4 element rules, in the base layer so that utilities (`truncate`, `text-nowrap`,
-   `outline-*`) can still override them on a single element. */
-@layer base {
-  html { background: var(--bg); color: var(--ink); -webkit-text-size-adjust: 100%; }
-  body { font-family: var(--font-sans); background: var(--grain), var(--bg); -webkit-font-smoothing: antialiased; }
-  h1,h2,h3 { text-wrap: balance; } p { text-wrap: pretty; }
-  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f5f5f5;
+    --paper: #111111;
+    --muted: #a3a3a3;
+  }
 }
 
-@utility legend { font-family: var(--font-sans); font-size: var(--text-legend); line-height: 1rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
-@utility plate  { font-family: var(--font-sans); font-stretch: 75%; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
-@utility rule-oxford { height: 6px; color: var(--ink); background: linear-gradient(currentColor 0 0) top/100% 3px no-repeat, linear-gradient(currentColor 0 0) bottom/100% 1px no-repeat; }
-@utility rule-hair { border-top: 1px solid var(--line); }
-@utility rule-ink { border-top: 1px solid var(--ink); }
-@utility trim { padding-block: .3em; }
-@supports (text-box: trim-both cap alphabetic) { .trim { text-box: trim-both cap alphabetic; padding-block: .35em; } }
-
-/* Fiş (§6.3): the mask clips box-shadow, so the shadow sits on the wrapper. */
-@utility fis-shadow { filter: var(--fis-shadow); }
-@utility fis {
-  background: var(--surface);
-  border-radius: 14px 14px 0 0;
-  padding: 20px 20px 28px;
-  -webkit-mask: radial-gradient(6px at 50% 100%, #0000 97%, #000) 50% / 16px 100%;
-  mask: radial-gradient(6px at 50% 100%, #0000 97%, #000) 50% / 16px 100%;
-}
-.fis[data-tone="ready"] {
-  background: var(--success); color: var(--on-success);
-  --focus: var(--on-success); --ink: var(--on-success); --ink-2: var(--on-success-2); --line-strong: var(--on-success-2);
-  transition: background-color 300ms var(--ease-out-strong), color 300ms var(--ease-out-strong);
-}
-@media (prefers-reduced-motion: reduce) {
-  .fis[data-tone="ready"] { transition: none; }
-}
-
-/* View transitions (A16). The chrome is the fixed reference: header and bottom nav never
-   move or fade while the café cover morphs underneath them. */
-::view-transition { pointer-events: none; }
-::view-transition-group(*) { animation-duration: 300ms; animation-timing-function: var(--ease-out-strong); }
-::view-transition-group(site-header), ::view-transition-group(bottom-nav) { animation: none; z-index: 100; }
-::view-transition-old(site-header), ::view-transition-old(bottom-nav) { display: none; }
-::view-transition-new(site-header), ::view-transition-new(bottom-nav) { animation: none; }
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation-duration: 0s; }
-  html:focus-within { scroll-behavior: auto; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, sans-serif;
 }

@@ -3,10 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Peni domain logic: the peni ledger, gifts, askıda kahve and the app-order lifecycle. Framework-free.",
+  "description": "Peni domain logic: the peni ledger, gifts, askıda kahve and the menu. Framework-free.",
   "exports": {
-    ".": "./src/index.ts",
-    "./pos/shelby": "./src/pos/shelby.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "test": "vitest run",

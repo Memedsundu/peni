@@ -6,22 +6,15 @@ import type {
   GiftPreviewDTO,
   MeDTO,
   MemberLookupDTO,
-  OrderDTO,
-  SessionDTO,
   StaffDashboardDTO,
   ApiErrorBody,
 } from "./dto";
 import { errorMessageTr } from "./messages";
 import type {
-  CreateOrderInput,
   DonateAskidaInput,
-  PauseDuration,
-  RequestCodeInput,
   SendGiftInput,
-  StaffTransitionInput,
   TillDonationInput,
   UpdateProfileInput,
-  VerifyCodeInput,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -84,12 +77,6 @@ export function createPeniClient(options: PeniClientOptions) {
   const slug = (s: string) => encodeURIComponent(s);
 
   return {
-    auth: {
-      requestCode: (input: RequestCodeInput) =>
-        call<{ sent: true; devCode?: string }>("POST", "/auth/request-code", input),
-      /** `isNew` asks for the name step; then save it with `me.updateProfile`. */
-      verifyCode: (input: VerifyCodeInput) => call<SessionDTO>("POST", "/auth/verify", input),
-    },
     me: {
       /** The signed-in customer and the cafés they work at. [G18, G19] */
       get: () => call<MeDTO>("GET", "/me"),
@@ -118,12 +105,6 @@ export function createPeniClient(options: PeniClientOptions) {
     wallet: {
       get: () => call<FullWalletDTO>("GET", "/me/wallet"),
     },
-    orders: {
-      create: (input: CreateOrderInput) => call<OrderDTO>("POST", "/orders", input),
-      get: (id: string) => call<OrderDTO>("GET", `/orders/${slug(id)}`),
-      mine: () => call<{ orders: OrderDTO[] }>("GET", "/orders"),
-      cancel: (id: string) => call<OrderDTO>("POST", `/orders/${slug(id)}/cancel`, {}),
-    },
     gifts: {
       send: (input: SendGiftInput) => call<GiftDTO>("POST", "/gifts", input),
       accept: (id: string) => call<GiftDTO>("POST", `/gifts/${slug(id)}/accept`, {}),
@@ -141,21 +122,8 @@ export function createPeniClient(options: PeniClientOptions) {
     },
     staff: {
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
-      transition: (cafeSlug: string, orderId: string, input: StaffTransitionInput) =>
-        call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}`, input, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>
         call<{ balancePeni: number }>("POST", `/staff/${slug(cafeSlug)}/askida/till`, input, true),
-      /**
-       * `true` pauses with no end and `false` resumes (the original call).
-       * `{ minutes: 15 }` or `"end_of_day"` pause with auto-resume; `null` resumes. [G20]
-       */
-      setPaused: (cafeSlug: string, pause: boolean | PauseDuration | null) =>
-        call<{ appOrderingPaused: boolean; pausedUntil: string | null }>(
-          "POST",
-          `/staff/${slug(cafeSlug)}/pause`,
-          typeof pause === "boolean" ? { paused: pause } : { pause },
-          true,
-        ),
     },
   };
 }

@@ -12,7 +12,7 @@ export class PrismaDirectory implements PeniDirectory {
   async saveMembership(m: Membership): Promise<void> {
     await this.prisma.membership.update({
       where: { id: m.id },
-      data: { blocked: m.blocked, preorderEnabled: m.preorderEnabled, consecutiveNoShows: m.consecutiveNoShows },
+      data: { blocked: m.blocked },
     });
   }
 
@@ -37,7 +37,6 @@ export class PrismaDirectory implements PeniDirectory {
       askidaMinMembershipDays: s.askidaMinMembershipDays,
       askidaMatchBps: s.askidaMatchBps,
       askidaMatchMonthlyCapPeni: s.askidaMatchMonthlyCapPeni,
-      noShowStrikeLimit: s.noShowStrikeLimit,
     };
   }
 

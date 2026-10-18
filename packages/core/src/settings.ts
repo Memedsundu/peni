@@ -28,9 +28,6 @@ export interface CafePeniSettings {
   askidaMatchBps: number;
   /** Ceiling for café matching per calendar month, in peni. 0 = no matching. */
   askidaMatchMonthlyCapPeni: number;
-
-  /** Consecutive no-shows that switch off pre-ordering for a member. */
-  noShowStrikeLimit: number;
 }
 
 export function defaultSettings(cafeId: string): CafePeniSettings {
@@ -49,6 +46,5 @@ export function defaultSettings(cafeId: string): CafePeniSettings {
     askidaMinMembershipDays: 0,
     askidaMatchBps: 0,
     askidaMatchMonthlyCapPeni: 0,
-    noShowStrikeLimit: 2,
   };
 }
