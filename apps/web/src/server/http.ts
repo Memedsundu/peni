@@ -41,6 +41,18 @@ export function errorResponse(error: unknown): NextResponse {
   return NextResponse.json({ error: { code: "INTERNAL", message: "Unexpected error" } }, { status: 500 });
 }
 
+/** Puts a customer session in the httpOnly cookie the web app relies on. 90 days, like the session. */
+export function setSessionCookie(res: NextResponse, req: NextRequest, token: string): NextResponse {
+  res.cookies.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: req.nextUrl.protocol === "https:",
+    path: "/",
+    maxAge: 90 * 24 * 3600,
+  });
+  return res;
+}
+
 /** Mobile sends `Authorization: Bearer`; the web app relies on the httpOnly session cookie. */
 export function tokenFrom(req: NextRequest): string | null {
   const auth = req.headers.get("authorization");

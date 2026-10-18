@@ -35,7 +35,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       [ayse, `+90532${run.length}${Date.now() % 1_000_000}1`],
       [mehmet, `+90532${run.length}${Date.now() % 1_000_000}2`],
     ] as const) {
-      await stores.identity.saveCustomer({ id, phone, displayName: id, avatarUrl: null, profileVisible: true });
+      await stores.identity.saveCustomer({ id, phone, email: null, displayName: id, avatarUrl: null, profileVisible: true });
     }
   });
   afterAll(() => prisma?.$disconnect());
@@ -129,6 +129,26 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
         { role: "barista", permission: "till.history", allowed: false },
       ]),
     );
+  });
+
+  it("keeps customer logins and email codes", async () => {
+    const email = `ayse.${run}@example.com`;
+    await stores.identity.saveCustomer({ ...(await stores.identity.getCustomer(ayse))!, email });
+    expect((await stores.identity.getCustomerByEmail(email.toUpperCase()))!.id).toBe(ayse);
+    await stores.identity.addLogin({ customerId: ayse, provider: "google", subject: `g_${run}`, email });
+    await stores.identity.addLogin({ customerId: ayse, provider: "google", subject: `g_${run}`, email });
+    await stores.identity.addLogin({ customerId: ayse, provider: "email", subject: email, email });
+    expect(await stores.identity.findLogin("google", `g_${run}`)).toEqual({ customerId: ayse, provider: "google", subject: `g_${run}`, email });
+    expect((await stores.identity.loginsOf(ayse)).map((l) => l.provider)).toEqual(["google", "email"]);
+
+    const code = { id: `ec_${run}`, email, codeHash: "h", createdAt: at, expiresAt: new Date(at.getTime() + 600_000), attempts: 0, usedAt: null };
+    await stores.identity.saveEmailCode(code);
+    await stores.identity.saveEmailCode({ ...code, id: `ec2_${run}`, createdAt: new Date(at.getTime() + 1000) });
+    expect((await stores.identity.liveEmailCode(email, at))!.id).toBe(`ec2_${run}`);
+    await stores.identity.saveEmailCode({ ...code, id: `ec2_${run}`, createdAt: new Date(at.getTime() + 1000), usedAt: at, attempts: 1 });
+    expect((await stores.identity.liveEmailCode(email, at))!.id).toBe(`ec_${run}`);
+    expect(await stores.identity.liveEmailCode(email, new Date(at.getTime() + 700_000))).toBeNull();
+    expect(await stores.identity.countEmailCodes(email, new Date(at.getTime() - 1))).toBe(2);
   });
 
   it("keeps the feed with reactions, RSVPs in order and comments", async () => {

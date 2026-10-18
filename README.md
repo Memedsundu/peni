@@ -21,6 +21,7 @@ The code is being rebuilt piece by piece. Today it holds:
 | Ledger on Postgres: append-only, balanced and non-negative, enforced by the database | **Done, tested on Postgres 16** (`packages/db`) |
 | `/api/v1` for wallets, gifts, askı, the café feed and the staff report | **Done, end-to-end tested** on Postgres and in memory |
 | Staff sign-in, the team, and roles (owner, manager, chef, barista) with per-café permissions | **Done, end-to-end tested** ([staff and roles](docs/staff-and-roles.md)) |
+| Customer sign-in with Google, Apple or an email code | **Done, end-to-end tested** (email; Google and Apple need their client ids) |
 | Web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
@@ -48,7 +49,7 @@ pnpm dev:web            # http://localhost:3000, demo data in memory, nothing to
 
 To keep data in Postgres, set `DATABASE_URL` in `apps/web/.env` and apply the migrations once with `DATABASE_URL=… pnpm --filter @peni/db migrate:deploy`. An empty database gets the demo cafés on first start.
 
-The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista). Ece's till PIN is 2580 once an owner has set a computer up as a till.
+The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista). Ece's till PIN is 2580 once an owner has set a computer up as a till. Email sign-in works in the demo without an email service: `POST /api/v1/auth/email/start` with any address, then read the code from `GET /api/v1/auth/demo/outbox?email=…`.
 
 ## Checks
 

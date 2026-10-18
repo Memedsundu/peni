@@ -2,7 +2,9 @@
 
 export interface CustomerDTO {
   id: string;
-  phone: string;
+  /** Null for customers who signed in with Google, Apple or email and haven't added one. */
+  phone: string | null;
+  email: string | null;
   displayName: string;
   avatarUrl: string | null;
   profileVisible: boolean;
@@ -17,6 +19,14 @@ export interface StaffCafeDTO {
   role: StaffRole;
 }
 
+/** `GET /auth/providers`: which sign-in buttons to show. */
+export interface AuthProvidersDTO {
+  google: boolean;
+  apple: boolean;
+  email: boolean;
+}
+
+/** `POST /auth/email/verify`, `/auth/google`, `/auth/apple`. The web app uses the cookie; the app keeps `token`. */
 export interface SessionDTO {
   token: string;
   customer: CustomerDTO;
@@ -192,7 +202,7 @@ export interface MemberLookupDTO {
 /** Someone this customer treated before, at one café. Newest first. [G6] */
 export interface RecentRecipientDTO {
   cafeSlug: string;
-  /** To send again. The sender typed it the first time. */
+  /** To send again. The sender typed it the first time. Recipients without a phone are left out. */
   phone: string;
   firstName: string;
   lastInitial: string | null;

@@ -1,8 +1,9 @@
 import { createPrismaClient, createPrismaStores } from "@peni/db";
 import { PeniApp, inMemoryStores } from "./app";
+import { JoseIdTokenVerifier, OutboxEmailSender, ResendEmailSender, type EmailSender } from "./customer-auth";
 import { seed } from "./seed";
 
-const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp> };
+const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp>; peniOutbox?: OutboxEmailSender };
 
 /**
  * One app instance per server process (kept across dev hot reloads).
@@ -10,15 +11,38 @@ const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp> };
  * With DATABASE_URL set, every record lives in Postgres; without it, in memory.
  * In demo mode (PENI_DEMO, on unless "0") an empty database gets the demo cafés
  * and their history once; an in-memory app gets them on every start.
+ *
+ * Customer sign-in reads GOOGLE_CLIENT_IDS and APPLE_CLIENT_IDS (comma-separated:
+ * the web client and each app's) and RESEND_API_KEY with EMAIL_FROM. Without
+ * Resend, the demo keeps sign-in emails in an outbox instead of sending them.
  */
 export function getApp(): Promise<PeniApp> {
   globalForPeni.peniApp ??= (async () => {
     const demo = process.env.PENI_DEMO !== "0";
     const url = process.env.DATABASE_URL;
     const stores = url ? createPrismaStores(createPrismaClient(url)) : inMemoryStores();
-    const app = new PeniApp({ demo }, stores);
+    const app = new PeniApp({ demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) } }, stores);
     if (demo && (await app.identity.listCafes()).length === 0) await seed(app);
     return app;
   })();
   return globalForPeni.peniApp;
+}
+
+/** The demo's outbox, when sign-in emails are kept instead of sent. */
+export function demoOutbox(): OutboxEmailSender | null {
+  return globalForPeni.peniOutbox ?? null;
+}
+
+function verifierFromEnv(): JoseIdTokenVerifier {
+  const list = (name: string) => (process.env[name] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  return new JoseIdTokenVerifier({ google: { audiences: list("GOOGLE_CLIENT_IDS") }, apple: { audiences: list("APPLE_CLIENT_IDS") } });
+}
+
+function emailFromEnv(demo: boolean): EmailSender | null {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.EMAIL_FROM;
+  if (key && from) return new ResendEmailSender(key, from);
+  if (!demo) return null;
+  globalForPeni.peniOutbox ??= new OutboxEmailSender();
+  return globalForPeni.peniOutbox;
 }

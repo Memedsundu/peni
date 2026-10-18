@@ -1,4 +1,4 @@
-import type { Cafe, Customer, IdentityStore } from "@peni/core";
+import type { Cafe, Customer, CustomerLogin, EmailCode, IdentityStore, LoginProvider } from "@peni/core";
 import type { Db } from "./db";
 import { Prisma } from "./generated/client";
 
@@ -13,7 +13,8 @@ const CAFE = {
   referenceProductIds: true,
   hue: true,
 } as const;
-const CUSTOMER = { id: true, phone: true, displayName: true, avatarUrl: true, profileVisible: true } as const;
+const CUSTOMER = { id: true, phone: true, email: true, displayName: true, avatarUrl: true, profileVisible: true } as const;
+const LOGIN = { customerId: true, provider: true, subject: true, email: true } as const;
 
 export class PrismaIdentityStore implements IdentityStore {
   constructor(private readonly db: Db) {}
@@ -46,6 +47,42 @@ export class PrismaIdentityStore implements IdentityStore {
 
   async getCustomerByPhone(phone: string): Promise<Customer | null> {
     return this.db().customer.findUnique({ where: { phone }, select: CUSTOMER });
+  }
+
+  async getCustomerByEmail(email: string): Promise<Customer | null> {
+    return this.db().customer.findUnique({ where: { email: email.trim().toLowerCase() }, select: CUSTOMER });
+  }
+
+  async findLogin(provider: LoginProvider, subject: string): Promise<CustomerLogin | null> {
+    return this.db().customerLogin.findUnique({ where: { provider_subject: { provider, subject } }, select: LOGIN });
+  }
+
+  async addLogin(login: CustomerLogin): Promise<void> {
+    await this.db().customerLogin.upsert({
+      where: { provider_subject: { provider: login.provider, subject: login.subject } },
+      create: login,
+      update: {},
+    });
+  }
+
+  async loginsOf(customerId: string): Promise<CustomerLogin[]> {
+    return this.db().customerLogin.findMany({ where: { customerId }, select: LOGIN, orderBy: { createdAt: "asc" } });
+  }
+
+  async saveEmailCode(code: EmailCode): Promise<void> {
+    const { id, ...update } = code;
+    await this.db().emailCode.upsert({ where: { id }, create: code, update });
+  }
+
+  async liveEmailCode(email: string, now: Date): Promise<EmailCode | null> {
+    return this.db().emailCode.findFirst({
+      where: { email, usedAt: null, expiresAt: { gt: now } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async countEmailCodes(email: string, since: Date): Promise<number> {
+    return this.db().emailCode.count({ where: { email, createdAt: { gt: since } } });
   }
 
   async saveCustomer(customer: Customer): Promise<void> {

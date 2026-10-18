@@ -48,7 +48,7 @@ Shelby Cafe is the pilot. Other cafés join later, so every record belongs to on
 - **Customer display:** both screens hang off the same PC, so the till window and the customer-screen window talk through the browser (`BroadcastChannel`). There's nothing to install and no network delay. *(default)*
 - **Earning peni:** when an order is paid, the server makes a one-time **claim** with a QR token and a 4-digit code. The customer screen shows both, the customer scans or types it in the app, and peni is credited at the café's rate (D7, D11). Unclaimed claims expire. *(default: end of day)*
 - **Spending peni:** the customer shows their member QR in the app, the barista scans it or types the code, and peni pays any part of the bill (D11).
-- **Sign-in:** customers use Google, Apple or an email code; staff use an email and password, with a short PIN for baristas at the till. Both work on web and Expo. *(default library: Better Auth; Auth.js as in Shelby is the alternative)*
+- **Sign-in:** customers use Google, Apple or an email code; staff use an email and password, with a short PIN for baristas at the till. Both work on web and Expo. Peni's own sessions, no auth library (D27).
 - **Background work** (reading documents, the weekly letter, alerts): a Postgres job table run by Vercel Cron and a worker route. Nothing extra to host. *(default)*
 - **Money is append-only:** peni already uses a double-entry ledger with database guards. Café money (cash, bank, card) follows the same rule, as Shelby's money movements already do.
 - **Personal data:** KVKK privacy notice, account deletion, and the standard-contract notice for sending data to OpenAI and other services abroad. All three are needed before launch.
