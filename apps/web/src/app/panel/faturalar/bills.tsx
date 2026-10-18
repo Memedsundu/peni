@@ -41,6 +41,7 @@ export const CATEGORY: Record<BillCategoryDTO, TextKey> = {
 const EXPENSE_CATEGORIES: BillCategoryDTO[] = ["rent", "utilities", "services", "wages", "ingredients", "supplies", "other"];
 /** "Paid?" on a new bill: settled on the spot. Card, check and pocket come after, with "Öde". */
 const QUICK_METHODS = ["cash", "card", "bank"] as const satisfies readonly BillPayMethodDTO[];
+type DraftPaid = (typeof QUICK_METHODS)[number] | "credit";
 
 /**
  * Faturalar (plan piece 18): every bill and receipt, one kind of record whether it brought
@@ -473,7 +474,8 @@ const KDV_CHOICES = [20, 10, 1, 18, 8];
 /**
  * "Fatura ekle", or "Düzelt" when given the bill. Given a draft (piece 24), it's the
  * assistant's reading to check: filled in from it, shown in the page rather than over it,
- * and saved with "Onayla" (never paid from here: the assistant doesn't pay, D21).
+ * and saved with "Onayla". A quick entry that said how it was paid (piece 28) comes with
+ * that payment chosen; it's paid only when the person confirming keeps it (D21).
  */
 export function BillForm({
   t,
@@ -507,7 +509,7 @@ export function BillForm({
   const [number, setNumber] = useState(bill?.number ?? proposal?.number ?? "");
   const [dueDate, setDueDate] = useState(bill?.dueDate ?? proposal?.dueDate ?? "");
   const [note, setNote] = useState(bill?.note ?? "");
-  const [paid, setPaid] = useState<"no" | (typeof QUICK_METHODS)[number]>("no");
+  const [paid, setPaid] = useState<"no" | DraftPaid>(() => (proposal?.paid && data.canManage ? proposal.paid.method : "no"));
   const [lines, setLines] = useState<LineForm[]>(() =>
     (bill ?? proposal)
       ? (bill ?? proposal)!.lines.map((l, i) => ({
@@ -597,7 +599,7 @@ export function BillForm({
       };
       const yes = allowDuplicate ? { allowDuplicate: true } : {};
       try {
-        if (draft) return await api.staff.drafts.confirm(slug, draft.id, { ...fields, ...yes });
+        if (draft) return await api.staff.drafts.confirm(slug, draft.id, { ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
         return bill
           ? await api.staff.bills.correct(slug, bill.id, { version: bill.version, ...fields })
           : await api.staff.bills.add(slug, { key: key.current, ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
@@ -720,7 +722,7 @@ export function BillForm({
                 {l.read && (
                   <span className="order-6 col-span-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm text-muted @lg:order-none @lg:col-span-4">
                     <span>
-                      {fill(t("readAs"), { name: readLine(l.read, lang) })}
+                      {fill(t(draft?.entry ? "readAsNote" : "readAs"), { name: readLine(l.read, lang) })}
                       {l.kind === "stock" && l.read.itemId === l.itemId && l.read.matchedBy && (
                         <span className={l.read.matchedBy === "model" ? "text-ink" : ""}>
                           {" · "}
@@ -819,14 +821,19 @@ export function BillForm({
         )}
       </section>
 
-      {!bill && !draft && data.canManage && (
+      {!bill && data.canManage && (!draft || draft.proposal.paid) && (
         <Segmented
           label={t("paidQuestion")}
           value={paid}
           onChange={setPaid}
-          options={[{ value: "no", label: t("notPaidYet") }, ...QUICK_METHODS.map((m) => ({ value: m, label: t(METHOD[m]) }))]}
+          options={[
+            { value: "no", label: t("notPaidYet") },
+            // The credit card shows when the note said it, since it needs the card set up.
+            ...[...QUICK_METHODS, ...(proposal?.paid?.method === "credit" ? (["credit"] as const) : [])].map((m) => ({ value: m, label: t(METHOD[m]) })),
+          ]}
         />
       )}
+      {draft?.proposal.paid && !data.canManage && <Notice>{fill(t("qePaidSaid"), { method: t(METHOD[draft.proposal.paid.method]).toLocaleLowerCase(lang) })}</Notice>}
       {paid === "no" && (
         <label className="flex flex-col gap-2 text-sm text-muted">
           {t("billDue")}

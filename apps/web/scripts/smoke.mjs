@@ -741,6 +741,43 @@ assert.deepEqual([zChecked.outcome.unmatched, zChecked.outcome.note], [2, "Bir i
 assert.equal((await call("POST", `/staff/moda/drafts/${zDraft.id}/check`, { headers: ecePos3, body: { note: "x" } })).json.error.code, "FORBIDDEN");
 step("Statements: the sample bank statement matches card sales less commission, finds the SGK payment Peni lacks, and sets the bank balance once; the Z report's ₺50 cash gap needs a note; not for the till");
 
+// 5v. Quick entry (piece 28): Murat writes "Tesisatçıya 450 lira nakit ödedim"; a retry sends
+//     it once. The stand-in drafts a ₺450 repair paid in cash, with no document but his words.
+//     Leyla confirms it paid as it said. Ece at the till says one; the demo hears a sample.
+const note = { key: `smoke-note-${Date.now()}`, text: "Tesisatçıya 450 lira nakit ödedim" };
+const noteSent = (await call("POST", "/staff/moda/notes", { headers: MURAT, body: note })).json;
+assert.deepEqual([noteSent.reading.source, noteSent.reading.documentName], ["note", note.text]);
+assert.equal((await call("POST", "/staff/moda/notes", { headers: MURAT, body: note })).json.reading.jobId, noteSent.reading.jobId);
+let noteDraft = null;
+for (let i = 0; i < 20 && !noteDraft; i++) {
+  noteDraft = (await call("GET", "/staff/moda/drafts", { headers: STAFF })).json.open.find((d) => d.entry?.text === note.text) ?? null;
+  if (!noteDraft) await new Promise((r) => setTimeout(r, 250));
+}
+assert.ok(noteDraft, "the note became a draft");
+assert.deepEqual(
+  [noteDraft.document, noteDraft.entry.voice, noteDraft.proposal.paid, noteDraft.proposal.lines.map((l) => [l.totalKurus, l.category])],
+  [null, false, { method: "cash" }, [[45_000, "services"]]],
+);
+const noteBody = {
+  supplierId: null,
+  date: noteDraft.proposal.date,
+  lines: noteDraft.proposal.lines.map((l, from) => ({ itemId: null, name: l.name, category: l.category, totalKurus: l.totalKurus, from })),
+  paid: { method: "cash", from: "reserve" },
+};
+const noteConfirmed = (await call("POST", `/staff/moda/drafts/${noteDraft.id}/confirm`, { headers: STAFF, body: noteBody })).json;
+const noteBill = (await call("GET", `/staff/moda/bills/${noteConfirmed.resultId}`, { headers: STAFF })).json;
+assert.deepEqual([noteBill.state, noteBill.totalKurus, noteBill.payments.map((x) => [x.method, x.amountKurus])], ["paid", 45_000, [["cash", 45_000]]]);
+const webm = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01]);
+const heard = await fetch(`${BASE}/api/v1/staff/moda/notes/voice?lang=tr`, { method: "POST", headers: { "content-type": "audio/webm", ...ecePos3 }, body: webm }).then((r) => r.json());
+assert.match(heard.text, /450 lira/);
+const tillNote = (await call("POST", "/staff/moda/notes", { headers: ecePos3, body: { key: `smoke-till-${Date.now()}`, text: heard.text, voice: true } })).json;
+assert.equal(tillNote.reading.source, "note");
+const notAudio = await fetch(`${BASE}/api/v1/staff/moda/notes/voice`, { method: "POST", headers: ecePos3, body: new TextEncoder().encode("hello") });
+assert.equal((await notAudio.json()).error.code, "AUDIO_TYPE");
+const eceMine = (await call("GET", "/staff/moda/documents/mine", { headers: ecePos3 })).json;
+assert.ok(eceMine.canSpeak && eceMine.uploads.some((u) => u.source === "note" && u.documentName === heard.text));
+step("Quick entry: a typed line becomes a ₺450 repair draft that says it was paid in cash, sent once and confirmed paid; Ece says one at the till and sees it in what she sent");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

@@ -1497,6 +1497,8 @@ model AiDraft {
   duplicateOf   Json?
   /// A statement or Z report: what the person saw when they said it was checked (piece 27).
   outcome       Json?
+  /// A quick entry (piece 28): what was typed or said, and whether it was said. The recording isn't kept.
+  entry         Json?
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 

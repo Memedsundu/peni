@@ -16,6 +16,20 @@ const day = z.string().describe("YYYY-MM-DD");
 export const DOCUMENT_KINDS = ["bill", "bankStatement", "cardStatement", "zReport", "other"] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
+/** One line of a bill, read off a document or out of a quick entry (piece 28). */
+export const readLineSchema = z.object({
+  name: z.string().describe("What was bought, short, as a person would say it: 'Süt 1 L', 'Kira Ekim'"),
+  quantity: z.number().nullable().describe("How many units, when shown"),
+  unit: z.enum(["adet", "kg", "g", "l", "ml"]).nullable(),
+  total: z.number().describe("The line's amount in TL with its KDV included"),
+  category: z.enum(READ_CATEGORIES),
+  stockItem: z
+    .number()
+    .nullable()
+    .describe("The number of the café's stock item this line is, from the list given; null when it is none of them or you aren't sure"),
+  stockQuantity: z.number().nullable().describe("With stockItem: how much of that item came, in the item's own unit (kg, l or adet)"),
+});
+
 export const billReadingSchema = z.object({
   kind: z
     .enum(DOCUMENT_KINDS)
@@ -28,22 +42,7 @@ export const billReadingSchema = z.object({
   date: day.nullable().describe("The document's date, YYYY-MM-DD"),
   dueDate: day.nullable().describe("Son ödeme tarihi when printed, YYYY-MM-DD"),
   total: z.number().nullable().describe("Genel toplam / ödenecek tutar in TL, KDV included"),
-  lines: z
-    .array(
-      z.object({
-        name: z.string().describe("What was bought, short, as a person would say it: 'Süt 1 L', 'Kira Ekim'"),
-        quantity: z.number().nullable().describe("How many units, when shown"),
-        unit: z.enum(["adet", "kg", "g", "l", "ml"]).nullable(),
-        total: z.number().describe("The line's amount in TL with its KDV included"),
-        category: z.enum(READ_CATEGORIES),
-        stockItem: z
-          .number()
-          .nullable()
-          .describe("The number of the café's stock item this line is, from the list given; null when it is none of them or you aren't sure"),
-        stockQuantity: z.number().nullable().describe("With stockItem: how much of that item came, in the item's own unit (kg, l or adet)"),
-      }),
-    )
-    .describe("One entry per item line. Leave out KDV, discount and total rows; fold them into the item lines"),
+  lines: z.array(readLineSchema).describe("One entry per item line. Leave out KDV, discount and total rows; fold them into the item lines"),
   kdv: z
     .array(z.object({ rate: z.number().describe("The KDV rate in percent: 1, 10 or 20"), amount: z.number().describe("The KDV at that rate in TL") }))
     .describe("The KDV amounts printed on the document, one per rate. Empty when the document doesn't show them"),
@@ -62,7 +61,7 @@ If this isn't a bill (a bank or card statement, a Z report, a menu, a photo of a
 When the document shows its KDV ("KDV %20 ... 301,67", "Toplam KDV"), copy the amount for each rate into "kdv"; never work it out yourself.
 Write "doubts" in Turkish, short and plain, for the café owner.`;
 
-const STOCK_INSTRUCTIONS = `The café keeps stock of the items listed below. For each line that is one of them, set stockItem to its number and stockQuantity to how much of it came, in that item's unit.
+export const STOCK_INSTRUCTIONS = `The café keeps stock of the items listed below. For each line that is one of them, set stockItem to its number and stockQuantity to how much of it came, in that item's unit.
 For example, with "Süt" kept in l: "Süt 1 L x 24" is 24, "2 koli x 12 x 1 L" is 24. With "Espresso çekirdeği" kept in kg: "1000 g" is 1. With an item kept in adet, count the pieces: "1000 adet" is 1000.
 Match only what is clearly the same thing: "Tam yağlı süt 1 L" is Süt, but "Krema" isn't. When unsure, leave stockItem and stockQuantity null.`;
 

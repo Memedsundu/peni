@@ -2,6 +2,7 @@
 
 import type { UploadsDTO } from "@peni/api";
 import { useCallback, useEffect, useState } from "react";
+import { QuickEntry } from "../panel/quick";
 import { CameraIcon, MyUploads, Repeats, ScanInput, useScan } from "../panel/scan";
 import { fill, text as panelText } from "../panel/text";
 import { api } from "./api";
@@ -10,7 +11,8 @@ import { Notice } from "./ui";
 
 /**
  * "Fatura" at the till (plan piece 25): the barista photographs a delivery's bill or
- * receipt and sends it; the assistant reads it and a manager confirms it in Taslaklar.
+ * receipt and sends it, or writes or says what was paid (piece 28); the assistant reads
+ * it and a manager confirms it in Taslaklar.
  * Below, what they sent today and what became of each.
  */
 export function TillScan({ t, slug, onError, lang }: TillProps) {
@@ -67,6 +69,9 @@ export function TillScan({ t, slug, onError, lang }: TillProps) {
             )}
             <Repeats t={words} lang={lang} slug={slug} scan={scan} links={{ drafts: false, bills: false }} />
           </div>
+        )}
+        {data && data.ai !== "off" && (
+          <QuickEntry big t={words} lang={lang} slug={slug} canSpeak={data.canSpeak} checkHere={false} onSent={() => void load()} />
         )}
         {data && (
           <section className="flex flex-col gap-3">

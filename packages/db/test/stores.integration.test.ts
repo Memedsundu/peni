@@ -690,7 +690,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.assistant.getDocument("cafe_other", doc.id)).toBeNull();
 
     const proposal = { supplierId: null, supplierName: "Moda Süt", supplierTaxNumber: null, number: "A1", date: "2026-10-14", dueDate: null, totalKurus: 12_000, lines: [{ itemId: null, name: "Süt", category: "ingredients" as const, qtyMilli: 24_000, totalKurus: 12_000, readName: "SÜT 1 LT", readQtyMilli: 24_000, readUnit: "adet", matchedBy: null }], kdv: [] };
-    const draft = { id: `drf_${run}`, cafeId, kind: "bill" as const, status: "open" as const, title: "Moda Süt", proposal, doubts: ["Tarih silik."], documentId: doc.id, jobId: null, createdAt: at, decidedById: null, decidedAt: null, resultId: null, changed: [], dismissReason: null, duplicateOf: null as { kind: "bill" | "draft"; id: string; title: string; why: "file" | "number" | "dayTotal" } | null, outcome: null };
+    const draft = { id: `drf_${run}`, cafeId, kind: "bill" as const, status: "open" as const, title: "Moda Süt", proposal, doubts: ["Tarih silik."], documentId: doc.id, jobId: null, createdAt: at, decidedById: null, decidedAt: null, resultId: null, changed: [], dismissReason: null, duplicateOf: null as { kind: "bill" | "draft"; id: string; title: string; why: "file" | "number" | "dayTotal" } | null, outcome: null, entry: null as { text: string; voice: boolean } | null };
     await stores.assistant.saveDraft(draft);
     await stores.assistant.saveDraft({ ...draft, id: `drf2_${run}`, createdAt: new Date(at.getTime() + 1000) });
     expect(await stores.assistant.getDraft(cafeId, draft.id)).toEqual(draft);
@@ -718,6 +718,18 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     };
     await stores.assistant.saveDraft(z);
     expect(await stores.assistant.getDraft(cafeId, z.id)).toEqual(z);
+    // A quick entry (piece 28) keeps what was said, and how it was paid.
+    const said = {
+      ...draft,
+      id: `drf5_${run}`,
+      documentId: null,
+      createdAt: new Date(at.getTime() - 2000),
+      status: "dismissed" as const,
+      proposal: { ...draft.proposal, paid: { method: "cash" as const } },
+      entry: { text: "Tesisatçıya 450 lira nakit ödedim", voice: true },
+    };
+    await stores.assistant.saveDraft(said);
+    expect(await stores.assistant.getDraft(cafeId, said.id)).toEqual(said);
 
     // What people confirmed lines to be: one per supplier and read name.
     const match = { cafeId, supplierId: null, readKey: "süt 1 lt", itemId: "stk_sut", perUnitMilli: 1000, updatedAt: at };
@@ -732,7 +744,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.assistant.listLineMatches(cafeId)).map((m) => m.supplierId)).toEqual(["sup_x"]);
     const done = { ...draft, status: "confirmed" as const, decidedById: "stf_a", decidedAt: at, resultId: "bil_1", changed: ["date"] };
     await stores.assistant.saveDraft(done);
-    expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id, `drf3_${run}`, `drf4_${run}`]);
+    expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id, `drf3_${run}`, `drf4_${run}`, `drf5_${run}`]);
     expect(await stores.assistant.listDrafts(cafeId, { status: "confirmed", limit: 10 })).toEqual([done, z]);
 
     // Due jobs are taken once each, even by two passes at the same moment.

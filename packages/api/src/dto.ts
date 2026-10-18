@@ -1580,6 +1580,8 @@ export interface BillProposalDTO {
   lines: ProposalLineDTO[];
   /** The KDV printed on it, per rate (piece 25). */
   kdv: BillKdvDTO[];
+  /** A quick entry that said it was already paid, and how (piece 28): "credit" is the café's credit card. */
+  paid: { method: "cash" | "card" | "bank" | "credit" } | null;
 }
 
 export interface ProposalLineDTO {
@@ -1631,6 +1633,8 @@ interface DraftBaseDTO {
   /** What the assistant wasn't sure of, for the owner. */
   doubts: string[];
   document: DocumentRefDTO | null;
+  /** Or what was typed or said, for a quick entry (piece 28). */
+  entry: { text: string; voice: boolean } | null;
   decidedBy: string | null;
   decidedAt: string | null;
   /** The bill it became. */
@@ -1768,8 +1772,12 @@ export interface UploadDTO {
  */
 export interface UploadsDTO {
   ai: "on" | "demo" | "off";
+  /** Quick entry can be said as well as typed (piece 28). */
+  canSpeak: boolean;
   uploads: {
     jobId: string;
+    /** A document, or a quick entry (piece 28), whose `documentName` is what was typed or said. */
+    source: "document" | "note";
     documentName: string;
     at: string;
     /** Still reading, couldn't be read, not a bill, waiting to be checked, saved as a bill, or dismissed. */
@@ -1780,9 +1788,16 @@ export interface UploadsDTO {
   }[];
 }
 
+/** `POST /staff/:slug/notes/voice`: what was heard, for the person to read and fix before sending (piece 28). */
+export interface HeardDTO {
+  text: string;
+}
+
 /** A document being read, or one that couldn't become a draft. */
 export interface ReadingDTO {
   jobId: string;
+  /** A document, or a quick entry (piece 28), whose `documentName` is what was typed or said. */
+  source: "document" | "note";
   documentName: string;
   at: string;
   state: "reading" | "failed" | "notBill";
@@ -1807,11 +1822,13 @@ export interface DraftsDTO {
   canConfirm: boolean;
   /** Can say a statement or Z report is checked ("cash.manage"). */
   canCheck: boolean;
+  /** Quick entry can be said as well as typed (piece 28): speech to text is set up. */
+  canSpeak: boolean;
   /** Bills' form needs these to check a draft. */
   billForm: BillsDTO;
 }
 
-export type AiEventKindDTO = "document.uploaded" | "email.received" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
+export type AiEventKindDTO = "document.uploaded" | "email.received" | "note.sent" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
 
 /** `GET /staff/:slug/assistant/log`: what the assistant did and what people did with it. */
 export interface AiLogDTO {

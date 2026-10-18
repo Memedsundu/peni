@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { AiError, OpenAiModel, ScriptedModel, billReadingRequest, readBill, type BillReading } from "../src";
+import { AiError, OpenAiModel, OpenAiTranscriber, ScriptedModel, billReadingRequest, readBill, type BillReading } from "../src";
 
 const request = {
   purpose: "test",
@@ -152,5 +152,39 @@ describe("Reading a bill", () => {
     const r = await model.run(billReadingRequest({ name: "", contentType: "image/png", bytes: new Uint8Array([1]) }));
     expect(r.output.supplierName).toBe("  Moda Süt Ürünleri ");
     expect(model.calls[0]!.purpose).toBe("document.read");
+  });
+});
+
+describe("OpenAiTranscriber (plan piece 28)", () => {
+  it("sends the recording with its language and the words it may hear, and reads back the text", async () => {
+    const sent: { url: string; form: FormData }[] = [];
+    const fetch = (async (url: string, init: RequestInit) => {
+      sent.push({ url, form: init.body as FormData });
+      return new Response(JSON.stringify({ text: " Simitçiye 120 lira verdim. ", usage: { input_tokens: 30, output_tokens: 9 } }), { status: 200 });
+    }) as unknown as typeof globalThis.fetch;
+    const r = await new OpenAiTranscriber({ apiKey: "k", fetch }).transcribe(
+      { bytes: new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]), contentType: "audio/webm" },
+      { language: "tr", prompt: "Tedarikçiler: Fırıncı Hasan." },
+    );
+    expect(r).toMatchObject({ text: "Simitçiye 120 lira verdim.", model: "gpt-4o-mini-transcribe", inputTokens: 30, outputTokens: 9 });
+    expect(sent[0]!.url).toBe("https://api.openai.com/v1/audio/transcriptions");
+    const form = sent[0]!.form;
+    expect([form.get("model"), form.get("language"), form.get("prompt")]).toEqual(["gpt-4o-mini-transcribe", "tr", "Tedarikçiler: Fırıncı Hasan."]);
+    expect((form.get("file") as File).name).toBe("kayit.webm");
+  });
+
+  it("tries once more after a server error, and doesn't retry a refusal", async () => {
+    let calls = 0;
+    const down = (async () => (calls++, new Response("{}", { status: 503 }))) as unknown as typeof fetch;
+    const e = await new OpenAiTranscriber({ apiKey: "k", fetch: down, backoffMs: [1] })
+      .transcribe({ bytes: new Uint8Array([1]), contentType: "audio/webm" }, { language: "tr" })
+      .catch((x) => x);
+    expect([e.code, calls]).toEqual(["AI_UNAVAILABLE", 2]);
+    calls = 0;
+    const no = (async () => (calls++, new Response('{"error":{"message":"bad file"}}', { status: 400 }))) as unknown as typeof fetch;
+    const f = await new OpenAiTranscriber({ apiKey: "k", fetch: no })
+      .transcribe({ bytes: new Uint8Array([1]), contentType: "audio/webm" }, { language: "tr" })
+      .catch((x) => x);
+    expect([f.code, calls]).toEqual(["AI_REJECTED", 1]);
   });
 });

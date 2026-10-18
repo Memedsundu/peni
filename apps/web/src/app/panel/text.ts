@@ -873,6 +873,7 @@ const TEXT = {
   chg_dueDate: { tr: "son ödeme", en: "due date" },
   chg_lines: { tr: "satırlar", en: "lines" },
   chg_kdv: { tr: "KDV", en: "VAT" },
+  chg_paid: { tr: "ödeme", en: "payment" },
   drMonth: { tr: "Bu ay {calls} okuma, {tokens} token.", en: "This month: {calls} readings, {tokens} tokens." },
   drMore: { tr: "Daha eski", en: "Older" },
   drLogEmpty: { tr: "Henüz kayıt yok.", en: "Nothing logged yet." },
@@ -920,6 +921,7 @@ const TEXT = {
   dupOpen: { tr: "Ona bak", en: "Look at it" },
   dupAllow: { tr: "Bu ayrı bir fatura, yine de kaydet", en: "It's a different bill; save it anyway" },
   readAs: { tr: "Belgede: {name}", en: "On the document: {name}" },
+  readAsNote: { tr: "Notta: {name}", en: "In the note: {name}" },
   readLearned: { tr: "Geçen sefer böyle onaylandı", en: "Confirmed like this last time" },
   readModel: { tr: "Asistan eşleştirdi, kontrol et", en: "Matched by the assistant; check it" },
   makeStock: { tr: "Stoğa ekle", en: "Add to stock" },
@@ -964,6 +966,7 @@ const TEXT = {
   drEmails: { tr: "E-postalar", en: "Emails" },
   drByEmail: { tr: "e-postayla: {sender}", en: "by email: {sender}" },
   ev_email_received: { tr: "E-posta geldi", en: "Email received" },
+  ev_note_sent: { tr: "Hızlı giriş gönderildi", en: "Quick entry sent" },
   // ── statements and Z reports (plan piece 27)
   ckSamples: { tr: "Demo örnekleri:", en: "Demo samples:" },
   ckSampleBank: { tr: "Banka ekstresi", en: "Bank statement" },
@@ -1061,6 +1064,31 @@ const TEXT = {
   guess_loan: { tr: "kredi", en: "loan" },
   guess_check: { tr: "çek", en: "check" },
   guess_other: { tr: "başka", en: "other" },
+  // ── quick entry by text or voice (plan piece 28)
+  qeTitle: { tr: "Hızlı giriş", en: "Quick entry" },
+  qeHelp: {
+    tr: "Bir gideri bir cümleyle yaz; asistan taslağını hazırlasın. Ör. “Tesisatçıya 450 lira nakit ödedim”.",
+    en: "Write an expense in a sentence and the assistant drafts it. e.g. “Paid the plumber 450 lira in cash”.",
+  },
+  qeHelpVoice: {
+    tr: "Bir gideri bir cümleyle yaz ya da mikrofona söyle; asistan taslağını hazırlasın. Ör. “Tesisatçıya 450 lira nakit ödedim”.",
+    en: "Write an expense in a sentence or say it, and the assistant drafts it. e.g. “Paid the plumber 450 lira in cash”.",
+  },
+  qePlaceholder: { tr: "Dün Fırıncı Hasan'a 320 lira simit, kartla", en: "Yesterday 320 lira of simit from Fırıncı Hasan, by card" },
+  qeSpeak: { tr: "Söyle", en: "Speak" },
+  qeStop: { tr: "Bitir", en: "Stop" },
+  qeSend: { tr: "Gönder", en: "Send" },
+  qeSending: { tr: "Gönderiliyor…", en: "Sending…" },
+  qeListening: { tr: "Dinliyor… {s} sn (en çok {max} sn). Bitince durdur.", en: "Listening… {s} s (up to {max} s). Stop when you're done." },
+  qeHearing: { tr: "Yazıya çevriliyor…", en: "Turning it into text…" },
+  qeCheckHeard: { tr: "Duyduğunu yukarıya yazdı; yanlış varsa düzelt, sonra gönder. Ses kaydı saklanmaz.", en: "What it heard is written above; fix anything wrong, then send. The recording isn't kept." },
+  qeSent: { tr: "Gönderildi; asistan taslağı yazıyor.", en: "Sent; the assistant is writing the draft." },
+  qeSentHere: { tr: "Birazdan aşağıda kontrol edip onaylarsın.", en: "In a moment, check and confirm it below." },
+  qeNoMic: { tr: "Mikrofona izin verilmedi ya da mikrofon yok.", en: "The microphone isn't allowed or there isn't one." },
+  qeWrote: { tr: "Yazılan", en: "What was written" },
+  qeSaid: { tr: "Söylenen", en: "What was said" },
+  qeNoExpense: { tr: "Gider bulunamadı", en: "No expense found" },
+  qePaidSaid: { tr: "Notta ödendiği yazıyor: {method}. Ödemeyi faturayı kaydettikten sonra yöneticin girer.", en: "The note says it was paid: {method}. A manager enters the payment once the bill is saved." },
 } as const;
 
 export type TextKey = keyof typeof TEXT;

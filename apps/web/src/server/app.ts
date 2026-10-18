@@ -98,11 +98,11 @@ import { PayService } from "./pay";
 import { TaskService } from "./tasks";
 import { AlertService } from "./alerts";
 import { SalesReportService } from "./sales-report";
-import { AssistantService, demoModel, type AiMode } from "./assistant";
+import { AssistantService, demoModel, demoTranscriber, type AiMode } from "./assistant";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
-import type { AiModel } from "@peni/ai";
+import type { AiModel, Transcriber } from "@peni/ai";
 import { shiftEmail } from "./shift-email";
 import { ShiftService } from "./shifts";
 import { AppError } from "./errors";
@@ -192,7 +192,7 @@ export interface PeniAppOptions {
   /** The site's own address ("https://peni.app"), for links in emails. Without it no gift email goes out. */
   publicUrl?: string;
   /** The assistant's model (piece 24): OpenAI with a key, the demo's stand-in, or none (off). */
-  ai?: { model: AiModel | null; mode: AiMode };
+  ai?: { model: AiModel | null; mode: AiMode; transcriber?: Transcriber | null };
   /**
    * The domain cafés' bill addresses are at (piece 26), when this server takes email.
    * The demo shows addresses at fatura.peni.test, which take only its sample email.
@@ -332,7 +332,11 @@ export class PeniApp {
     this.paymentStore = stores.payments;
     this.salesReports = new SalesReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
     this.jobs = new JobRunner(stores.assistant, () => this.now());
-    const ai = options.ai ?? (options.demo ? { model: demoModel(() => localDateKey(this.now(), "Europe/Istanbul")), mode: "demo" as const } : { model: null, mode: "off" as const });
+    const ai =
+      options.ai ??
+      (options.demo
+        ? { model: demoModel(() => localDateKey(this.now(), "Europe/Istanbul")), mode: "demo" as const, transcriber: demoTranscriber() }
+        : { model: null, mode: "off" as const });
     const checks = new ChecksService(stores.assistant, this.money, stores.payments, stores.bills, stores.debts, this.directory, () => this.now());
     this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, checks, ai, () => this.now());
     this.inbox = new InboxService(
