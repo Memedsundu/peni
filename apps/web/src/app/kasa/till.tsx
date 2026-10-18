@@ -7,6 +7,7 @@ import { Cash } from "./cash";
 import { Sales } from "./sales";
 import { Sell } from "./sell";
 import { Setup } from "./setup";
+import { TillScan } from "./scan";
 import { TillTasks } from "./tasks";
 import { SignIn } from "./sign-in";
 import { errorText, text, type Lang, type T } from "./text";
@@ -30,7 +31,7 @@ export function Till() {
   const [lang, setLang] = useState<Lang>("tr");
   const [dark, setDark] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
-  const [view, setView] = useState<"sell" | "sales" | "cash" | "tasks">("sell");
+  const [view, setView] = useState<"sell" | "sales" | "cash" | "tasks" | "scan">("sell");
   /** The drawer, for the "closed" note on the till and the Kasa view. */
   const [cash, setCash] = useState<CashStateDTO | null>(null);
   const t = text(lang);
@@ -123,7 +124,29 @@ export function Till() {
     api.staff.tasks.day(slug).then(countTasks, () => setTasksLeft(null));
   }, [slug, canTasks, countTasks]);
 
-  const title = stage.kind !== "open" ? t("title") : view === "sales" ? t("sales") : view === "cash" ? t("drawer") : view === "tasks" ? t("tasks") : t("title");
+  /** "Fatura" shows when the barista adds bills and the assistant is on. */
+  const canBills = !!access?.permissions.includes("bills.add");
+  const [canScan, setCanScan] = useState(false);
+  useEffect(() => {
+    if (!slug || !canBills) return setCanScan(false);
+    api.staff.drafts.mine(slug).then(
+      (d) => setCanScan(d.ai !== "off"),
+      () => setCanScan(false),
+    );
+  }, [slug, canBills]);
+
+  const title =
+    stage.kind !== "open"
+      ? t("title")
+      : view === "sales"
+        ? t("sales")
+        : view === "cash"
+          ? t("drawer")
+          : view === "tasks"
+            ? t("tasks")
+            : view === "scan"
+              ? t("scanTitle")
+              : t("title");
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-paper text-ink">
@@ -158,6 +181,11 @@ export function Till() {
                 <Button size="sm" onClick={() => setView("tasks")}>
                   {t("tasks")}
                   {tasksLeft !== null && tasksLeft > 0 && <span className="rounded-full bg-ink px-2 py-0.5 text-xs text-paper tabular">{tasksLeft}</span>}
+                </Button>
+              )}
+              {view !== "scan" && canScan && (
+                <Button size="sm" onClick={() => setView("scan")}>
+                  {t("scanTitle")}
                 </Button>
               )}
               {view !== "cash" && canDrawer && (
@@ -224,6 +252,7 @@ export function Till() {
         )}
         {stage.kind === "open" && view === "sales" && <Sales t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
         {stage.kind === "open" && view === "tasks" && <TillTasks t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} onChanged={countTasks} />}
+        {stage.kind === "open" && view === "scan" && <TillScan t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
         {stage.kind === "open" && view === "cash" && <Cash t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} state={cash} onChanged={setCash} />}
       </main>
     </div>

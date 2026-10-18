@@ -456,13 +456,16 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     const bill = (id: string, date: string, qty: number, kurus: number) => ({
       id: `${id}_${run}`, cafeId, supplierId: supplier.id, number: null, date, dueDate: null, note: null,
       lines: [{ itemId: item.id, name: "Süt", category: "ingredients" as const, qtyMilli: qty, totalKurus: kurus }],
-      totalKurus: kurus, paidKurus: 0, paidAt: null, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
+      totalKurus: kurus, kdv: [] as { ratePct: number; amountKurus: number }[], documentId: null as string | null, paidKurus: 0, paidAt: null, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
       createdById: "stf_x", createdAt: at, updatedAt: at, createKey: `${id}_key_${run}`,
     });
     const sep = bill("bil_sep", "2026-09-28", 20_000, 86_000);
     const oct = bill("bil_oct", "2026-10-10", 12_000, 54_000);
     const late = bill("bil_late", "2026-10-02", 10_000, 40_000);
     for (const b of [sep, oct, late]) await stores.bills.saveBill(b);
+    // KDV and the scan it came from (piece 25) come back as saved.
+    await stores.bills.saveBill({ ...late, kdv: [{ ratePct: 1, amountKurus: 396 }], documentId: "doc_x" });
+    expect(await stores.bills.getBill(cafeId, late.id)).toMatchObject({ kdv: [{ ratePct: 1, amountKurus: 396 }], documentId: "doc_x" });
     // A correction replaces the lines.
     await stores.bills.saveBill({
       ...oct, version: 2, totalKurus: 59_000,
@@ -516,7 +519,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.bills.saveBill({
       id: payment.billId, cafeId, supplierId: null, number: null, date: "2026-10-01", dueDate: null, note: null,
       lines: [{ itemId: null, name: "Kira", category: "rent", qtyMilli: null, totalKurus: 450_000 }],
-      totalKurus: 450_000, paidKurus: 450_000, paidAt: at, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
+      totalKurus: 450_000, kdv: [], documentId: null, paidKurus: 450_000, paidAt: at, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
       createdById: "stf_x", createdAt: at, updatedAt: at, createKey: `debt_${run}`,
     });
     await stores.bills.addPayment(payment);
@@ -686,15 +689,37 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.assistant.getDocument(cafeId, doc.id)).toEqual(doc);
     expect(await stores.assistant.getDocument("cafe_other", doc.id)).toBeNull();
 
-    const proposal = { supplierId: null, supplierName: "Moda Süt", supplierTaxNumber: null, number: "A1", date: "2026-10-14", dueDate: null, totalKurus: 12_000, lines: [{ itemId: null, name: "Süt", category: "ingredients" as const, qtyMilli: 24_000, totalKurus: 12_000 }] };
-    const draft = { id: `drf_${run}`, cafeId, kind: "bill" as const, status: "open" as const, title: "Moda Süt", proposal, doubts: ["Tarih silik."], documentId: doc.id, jobId: null, createdAt: at, decidedById: null, decidedAt: null, resultId: null, changed: [], dismissReason: null };
+    const proposal = { supplierId: null, supplierName: "Moda Süt", supplierTaxNumber: null, number: "A1", date: "2026-10-14", dueDate: null, totalKurus: 12_000, lines: [{ itemId: null, name: "Süt", category: "ingredients" as const, qtyMilli: 24_000, totalKurus: 12_000, readName: "SÜT 1 LT", readQtyMilli: 24_000, readUnit: "adet", matchedBy: null }], kdv: [] };
+    const draft = { id: `drf_${run}`, cafeId, kind: "bill" as const, status: "open" as const, title: "Moda Süt", proposal, doubts: ["Tarih silik."], documentId: doc.id, jobId: null, createdAt: at, decidedById: null, decidedAt: null, resultId: null, changed: [], dismissReason: null, duplicateOf: null as { kind: "bill" | "draft"; id: string; title: string; why: "file" | "number" | "dayTotal" } | null };
     await stores.assistant.saveDraft(draft);
     await stores.assistant.saveDraft({ ...draft, id: `drf2_${run}`, createdAt: new Date(at.getTime() + 1000) });
     expect(await stores.assistant.getDraft(cafeId, draft.id)).toEqual(draft);
     expect(await stores.assistant.countOpenDrafts(cafeId)).toBe(2);
+    // The same file again is found by its hash; its draft by the document.
+    expect((await stores.assistant.findDocuments(cafeId, doc.sha256)).map((d) => [d.id, "bytes" in d])).toEqual([[doc.id, false]]);
+    expect(await stores.assistant.findDocuments(cafeId, "cd".repeat(32))).toEqual([]);
+    expect(await stores.assistant.getDocumentInfo(cafeId, doc.id)).toEqual({ ...doc, bytes: undefined });
+    expect(await stores.assistant.getDocumentInfo("cafe_other", doc.id)).toBeNull();
+    expect((await stores.assistant.getDraftByDocument(cafeId, doc.id))?.documentId).toBe(doc.id);
+    const dup = { ...draft, id: `drf3_${run}`, documentId: null, duplicateOf: { kind: "bill" as const, id: "bil_1", title: "Moda Süt · ₺120", why: "number" as const } };
+    await stores.assistant.saveDraft(dup);
+    expect(await stores.assistant.getDraft(cafeId, dup.id)).toEqual(dup);
+    await stores.assistant.saveDraft({ ...dup, status: "dismissed" });
+
+    // What people confirmed lines to be: one per supplier and read name.
+    const match = { cafeId, supplierId: null, readKey: "süt 1 lt", itemId: "stk_sut", perUnitMilli: 1000, updatedAt: at };
+    await stores.assistant.saveLineMatch(match);
+    await stores.assistant.saveLineMatch({ ...match, perUnitMilli: 500 });
+    await stores.assistant.saveLineMatch({ ...match, supplierId: "sup_x", itemId: "stk_krema" });
+    expect((await stores.assistant.listLineMatches(cafeId)).sort((a, b) => a.itemId.localeCompare(b.itemId))).toEqual([
+      { ...match, supplierId: "sup_x", itemId: "stk_krema" },
+      { ...match, perUnitMilli: 500 },
+    ]);
+    await stores.assistant.deleteLineMatch(cafeId, null, "süt 1 lt");
+    expect((await stores.assistant.listLineMatches(cafeId)).map((m) => m.supplierId)).toEqual(["sup_x"]);
     const done = { ...draft, status: "confirmed" as const, decidedById: "stf_a", decidedAt: at, resultId: "bil_1", changed: ["date"] };
     await stores.assistant.saveDraft(done);
-    expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id]);
+    expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id, `drf3_${run}`]);
     expect(await stores.assistant.listDrafts(cafeId, { status: "confirmed", limit: 10 })).toEqual([done]);
 
     // Due jobs are taken once each, even by two passes at the same moment.

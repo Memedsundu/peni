@@ -134,6 +134,8 @@ export const errorMessagesTr: Record<string, string> = {
   BILL_LINE_INVALID: "Satırları kontrol et: stok satırında miktar, diğerlerinde ne için olduğu yazmalı.",
   BILL_LINE_DUPLICATE: "Bir malzeme faturada bir kez olur. Miktarını ve tutarını birleştir.",
   BILL_TOTAL_ZERO: "Faturanın toplamı sıfır olamaz.",
+  BILL_DUPLICATE: "Bu fatura daha önce girilmiş görünüyor. Ayrı bir faturaysa kutuyu işaretleyip yine de kaydedebilirsin.",
+  KDV_INVALID: "KDV'yi kontrol et: oran %1, %8, %10, %18 ya da %20 olur, toplamı faturadan az olmalı.",
   BILL_CHANGED: "Bu fatura sen bakarken değişti. Yeniden aç ve tekrar dene.",
   BILL_PAID: "Ödenmiş fatura değişmez. Önce ödemeyi geri al.",
   BILL_VOIDED: "Bu fatura iptal edilmiş.",

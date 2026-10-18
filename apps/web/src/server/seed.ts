@@ -596,7 +596,7 @@ async function seedBills(app: PeniApp, p: { leyla: string; murat: string; ece: s
   const other = (name: string, category: BillLine["category"], totalKurus: number): BillLine => ({ itemId: null, name, category, qtyMilli: null, totalKurus });
   const thisMonth = day(0).slice(0, 8);
   const rentPaidOn = [`${thisMonth}03`, day(0)].sort()[0]!;
-  const bills: (Omit<Bill, "cafeId" | "totalKurus" | "paidKurus" | "paidAt" | "payments" | "version" | "voidedAt" | "voidedById" | "voidReason" | "updatedAt" | "createKey"> & {
+  const bills: (Omit<Bill, "cafeId" | "totalKurus" | "kdv" | "documentId" | "paidKurus" | "paidAt" | "payments" | "version" | "voidedAt" | "voidedById" | "voidReason" | "updatedAt" | "createKey"> & {
     paid?: { method: Bill["payments"][number]["method"]; on: string; daysAgo: number };
   })[] = [
     {
@@ -643,7 +643,7 @@ async function seedBills(app: PeniApp, p: { leyla: string; murat: string; ece: s
     const totalKurus = b.lines.reduce((s, l) => s + l.totalKurus, 0);
     const paidAt = paid ? (paid.on === rentPaidOn && b.id === "bil_seed_kira" ? new Date(`${rentPaidOn}T09:00:00Z`) : p.on(paid.daysAgo, 17)) : null;
     await app.billStore.saveBill({
-      ...b, cafeId, totalKurus, paidKurus: paid ? totalKurus : 0, paidAt, payments: [], version: 1,
+      ...b, cafeId, totalKurus, kdv: [], documentId: null, paidKurus: paid ? totalKurus : 0, paidAt, payments: [], version: 1,
       voidedAt: null, voidedById: null, voidReason: null, updatedAt: b.createdAt, createKey: `seed:${b.id}`,
     });
     if (paid) {
@@ -1005,7 +1005,7 @@ async function seedSales(app: PeniApp, p: { murat: string; ece: string; leyla: s
     const totalKurus = b.lines.reduce((s, l) => s + l.totalKurus, 0);
     const at = new Date(`${b.date}T09:00:00Z`);
     await app.billStore.saveBill({
-      id: b.id, cafeId, supplierId: b.supplierId, number: null, date: b.date, dueDate: null, note: null, lines: b.lines, totalKurus, paidKurus: totalKurus,
+      id: b.id, cafeId, supplierId: b.supplierId, number: null, date: b.date, dueDate: null, note: null, lines: b.lines, totalKurus, kdv: [], documentId: null, paidKurus: totalKurus,
       paidAt: at, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null, createdById: p.leyla, createdAt: at, updatedAt: at, createKey: `seed:${b.id}`,
     });
     await app.billStore.addPayment({ id: `bpy_${b.id}`, cafeId, billId: b.id, amountKurus: totalKurus, method: b.method, paidOn: b.date, account: null, memberId: p.leyla, createdAt: at });
@@ -1033,6 +1033,7 @@ async function seedDrafts(app: PeniApp): Promise<void> {
     { text: "Peçete" },
     { text: "  20 paket x 18,00              360,00" },
     { text: "----------------------------------------" },
+    { text: "KDV %20                         301,67" },
     { text: "TOPLAM (KDV DAHIL)            1.810,00", bold: true },
   ]);
   await app.assistant.upload(murat, pdf, "ambalaj-dunyasi.pdf");

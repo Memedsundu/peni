@@ -306,7 +306,11 @@ export class PeniApp {
     this.books = stores.books;
     const atomically = <T>(fn: () => Promise<T>) => stores.ledger.atomically(fn);
     this.money = new MoneyService(stores.books, stores.cash, stores.payments, stores.bills, stores.debts, stores.shifts, this.directory, stores.staff, atomically, () => this.now());
-    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, stores.debts, this.money, atomically, () => this.now());
+    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, stores.debts, this.money, atomically, () => this.now(), {
+      // The assistant is made below; by the time anyone lists bills, it's there.
+      mode: () => this.assistant?.mode ?? "off",
+      documents: stores.assistant,
+    });
     this.debts = new DebtService(stores.debts, stores.bills, this.bills, this.money, stores.shifts, this.directory, stores.staff, atomically, () => this.now());
     this.shiftStore = stores.shifts;
     this.staffStore = stores.staff;
@@ -319,7 +323,7 @@ export class PeniApp {
     this.salesReports = new SalesReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
     this.jobs = new JobRunner(stores.assistant, () => this.now());
     const ai = options.ai ?? (options.demo ? { model: demoModel(() => localDateKey(this.now(), "Europe/Istanbul")), mode: "demo" as const } : { model: null, mode: "off" as const });
-    this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.staff, this.directory, ai, () => this.now());
+    this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, ai, () => this.now());
     this.alerts = new AlertService({
       stock: this.stock,
       debts: this.debts,

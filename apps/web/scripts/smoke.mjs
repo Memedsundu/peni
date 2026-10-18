@@ -625,11 +625,11 @@ const uploadDoc = async (bytes, type, headers) =>
 const receipt = new TextEncoder().encode("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
 const uploaded = await uploadDoc(receipt, "application/pdf", MURAT);
 assert.equal(uploaded.status, 200);
-assert.equal(uploaded.json.documentName, "fis.pdf");
+assert.equal(uploaded.json.reading.documentName, "fis.pdf");
 let drafts = null;
 for (let i = 0; i < 20; i++) {
   drafts = (await call("GET", "/staff/moda/drafts", { headers: STAFF })).json;
-  if (!drafts.reading.some((r) => r.jobId === uploaded.json.jobId && r.state === "reading")) break;
+  if (!drafts.reading.some((r) => r.jobId === uploaded.json.reading.jobId && r.state === "reading")) break;
   await new Promise((r) => setTimeout(r, 250));
 }
 assert.equal(drafts.ai, "demo");
@@ -639,23 +639,50 @@ assert.ok(fresh, "the upload became a draft");
 assert.equal(fresh.proposal.supplierId, "sup_seed_ambalaj");
 const docRes = await fetch(`${BASE}${fresh.document.url}`, { headers: STAFF });
 assert.deepEqual([docRes.status, docRes.headers.get("content-type"), (await docRes.arrayBuffer()).byteLength], [200, "application/pdf", receipt.length]);
+// Piece 25: the cups are linked to their stock item, the KDV is read, and it's marked as
+// the same bill as the demo's draft (both say A-20511).
+assert.deepEqual(
+  fresh.proposal.lines.map((l) => [l.itemId, l.qtyMilli, l.matchedBy]),
+  [
+    ["stk_bardak", 1_000_000, "model"],
+    [null, null, null],
+  ],
+);
+assert.deepEqual(fresh.proposal.kdv, [{ ratePct: 20, amountKurus: 30_167 }]);
+assert.deepEqual([fresh.duplicateOf?.kind, fresh.duplicateOf?.why], ["draft", "number"]);
 const confirmBody = {
   supplierId: fresh.proposal.supplierId,
   number: "A-20512",
   date: fresh.proposal.date,
-  lines: fresh.proposal.lines.map((l) => ({ itemId: null, name: l.name, category: l.category, totalKurus: l.totalKurus })),
+  lines: fresh.proposal.lines.map((l, from) =>
+    l.itemId ? { itemId: l.itemId, qtyMilli: l.qtyMilli, totalKurus: l.totalKurus, from } : { itemId: null, name: l.name, category: l.category, totalKurus: l.totalKurus, from },
+  ),
+  kdv: fresh.proposal.kdv,
 };
 const confirmed = (await call("POST", `/staff/moda/drafts/${fresh.id}/confirm`, { headers: STAFF, body: confirmBody })).json;
 assert.deepEqual([confirmed.status, confirmed.decidedBy, confirmed.changed], ["confirmed", "Leyla Kara", ["number"]]);
 assert.equal((await call("POST", `/staff/moda/drafts/${fresh.id}/confirm`, { headers: STAFF, body: confirmBody })).json.resultId, confirmed.resultId);
 const draftBill = (await call("GET", `/staff/moda/bills/${confirmed.resultId}`, { headers: STAFF })).json;
 assert.deepEqual([draftBill.number, draftBill.totalKurus, draftBill.createdBy], ["A-20512", 181_000, "Leyla Kara"]);
+assert.deepEqual([draftBill.lines[0].itemId, draftBill.kdv, draftBill.document?.name], ["stk_bardak", [{ ratePct: 20, amountKurus: 30_167 }], "fis.pdf"]);
+// The same file again isn't read; the same number again by hand needs a yes.
+const sameFile = await uploadDoc(receipt, "application/pdf", MURAT);
+assert.deepEqual([sameFile.json.reading, sameFile.json.duplicate?.billId], [null, confirmed.resultId]);
+const byHand = { key: `smoke-dup-${Date.now()}`, supplierId: "sup_seed_ambalaj", number: "a 20512", date: fresh.proposal.date, lines: confirmBody.lines.slice(1) };
+const dupBill = await call("POST", "/staff/moda/bills", { headers: STAFF, body: byHand });
+assert.deepEqual([dupBill.status, dupBill.json.error.code], [409, "BILL_DUPLICATE"]);
+const mine = (await call("GET", "/staff/moda/documents/mine", { headers: MURAT })).json;
+assert.deepEqual(
+  mine.uploads.filter((u) => u.documentName === "fis.pdf").map((u) => u.state),
+  ["saved"],
+);
 const aiLog = (await call("GET", "/staff/moda/drafts/log", { headers: STAFF })).json;
 assert.equal(aiLog.events[0].kind, "draft.confirmed");
 assert.equal((await call("GET", "/staff/moda/drafts", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
 const notDoc = await uploadDoc(new TextEncoder().encode("<html></html>"), "text/html", MURAT);
 assert.deepEqual([notDoc.status, notDoc.json.error.code], [415, "DOCUMENT_TYPE"]);
 step("Taslaklar: an uploaded receipt is read in the background into a draft, checked beside its document and confirmed once in Leyla's name; not for the till, and only photos and PDFs");
+step("Scanning: lines linked to stock, KDV read and kept, the same file and the same bill number caught, and Murat sees his upload saved");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;

@@ -166,6 +166,7 @@ model Cafe {
   alertDigests   AlertDigest[]
   alertMutes     AlertMute[]
   documents      CafeDocument[]
+  lineMatches    AiLineMatch[]
   drafts         AiDraft[]
   jobs           Job[]
   aiEvents       AiEvent[]
@@ -713,6 +714,10 @@ model Bill {
   dueDate     String?
   note        String?
   totalKurus  Int
+  /// The KDV printed on it, [{ratePct, amountKurus}] (piece 25); [] when nobody entered it.
+  kdv         Json      @default("[]")
+  /// The scan it was confirmed from (piece 25).
+  documentId  String?
   paidKurus   Int       @default(0)
   /// When the last of it was paid; null while anything is owed.
   paidAt      DateTime?
@@ -1452,10 +1457,28 @@ model AiDraft {
   resultId      String?
   changed       String[]
   dismissReason String?
+  /// An earlier bill or draft it may repeat (piece 25).
+  duplicateOf   Json?
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@index([cafeId, status, createdAt])
+  @@index([cafeId, documentId])
+}
+
+/// What a person confirmed a read bill line to be, so the next bill matches it the same way (piece 25).
+model AiLineMatch {
+  cafeId       String
+  /// "" for a bill with no supplier.
+  supplierKey  String
+  readKey      String
+  itemId       String
+  perUnitMilli Int?
+  updatedAt    DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, supplierKey, readKey])
 }
 
 /// Background work, run right after it's added and retried on later passes.

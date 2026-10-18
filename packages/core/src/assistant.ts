@@ -1,4 +1,4 @@
-import type { BillCategory } from "./bills";
+import type { BillCategory, BillKdv } from "./bills";
 import { sniffImageType, type ImageType } from "./images";
 
 /**
@@ -62,7 +62,35 @@ export interface BillProposal {
   dueDate: string | null;
   /** The total printed on the document, to compare the lines with. */
   totalKurus: number | null;
-  lines: { itemId: string | null; name: string; category: BillCategory; qtyMilli: number | null; totalKurus: number }[];
+  lines: ProposalLine[];
+  /** The KDV printed on it, per rate (piece 25). */
+  kdv: BillKdv[];
+}
+
+export interface ProposalLine {
+  /** The stock item it was matched to (piece 25), or null for an expense line. */
+  itemId: string | null;
+  /** The item's name for a stock line, else what was read. */
+  name: string;
+  category: BillCategory;
+  /** Stock lines: how much came, in thousandths of the item's unit; null when it couldn't be worked out. */
+  qtyMilli: number | null;
+  totalKurus: number;
+  /** The line as printed, so the person can see what it was matched from. */
+  readName: string;
+  readQtyMilli: number | null;
+  readUnit: string | null;
+  /** How it was matched: the model's guess, or what a person confirmed for this line before. */
+  matchedBy: "model" | "learned" | null;
+}
+
+/** An earlier bill or draft that looks like the same document (piece 25's duplicate guard). */
+export interface DuplicateRef {
+  kind: "bill" | "draft";
+  id: string;
+  title: string;
+  /** Why it looks the same: the same file, the same number, or the same day and total. */
+  why: "file" | "number" | "dayTotal";
 }
 
 export interface Draft {
@@ -87,6 +115,34 @@ export interface Draft {
   /** Which fields the person changed before confirming, for the log: "date", "lines". */
   changed: string[];
   dismissReason: string | null;
+  /** What it may repeat; confirming it anyway needs a second word. */
+  duplicateOf: DuplicateRef | null;
+}
+
+/**
+ * What a person confirmed a read line to be (piece 25): "SÜT 1LT TAM YAĞLI" from Moda Süt
+ * is the stock item Süt, one of them being a litre. The next bill from them is matched the
+ * same way without asking the model to guess again.
+ */
+export interface LineMatch {
+  cafeId: string;
+  /** The supplier it was learned for; null for a bill with no supplier. */
+  supplierId: string | null;
+  /** The read name, tidied (see `lineKey`). */
+  readKey: string;
+  itemId: string;
+  /** Thousandths of the item's unit per one read unit; null when the quantity wasn't read. */
+  perUnitMilli: number | null;
+  updatedAt: Date;
+}
+
+/** "SÜT 1 LT. Tam-Yağlı" and "süt 1 lt tam yağlı" are the same line. */
+export function lineKey(name: string): string {
+  return name
+    .toLocaleLowerCase("tr-TR")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .slice(0, 120);
 }
 
 export const DISMISS_REASON_MAX = 200;
@@ -161,8 +217,14 @@ export interface AssistantStore {
   saveDocument(doc: StoredDocument): Promise<void>;
   getDocument(cafeId: string, id: string): Promise<StoredDocument | null>;
 
+  /** A document without its bytes: for a link to it. */
+  getDocumentInfo(cafeId: string, id: string): Promise<Omit<StoredDocument, "bytes"> | null>;
+  /** Earlier uploads of the same bytes, newest first, without their bytes. */
+  findDocuments(cafeId: string, sha256: string): Promise<Omit<StoredDocument, "bytes">[]>;
+
   saveDraft(draft: Draft): Promise<void>;
   getDraft(cafeId: string, id: string): Promise<Draft | null>;
+  getDraftByDocument(cafeId: string, documentId: string): Promise<Draft | null>;
   /** Newest first. */
   listDrafts(cafeId: string, opts: { status?: DraftStatus; limit: number }): Promise<Draft[]>;
   /** Open drafts, for Bugün's count. */
@@ -185,6 +247,11 @@ export interface AssistantStore {
   listEvents(cafeId: string, opts: { limit: number; before?: Date }): Promise<AiEvent[]>;
   /** Calls to the model and the tokens they used, from `from` up to `to`. */
   usage(cafeId: string, from: Date, to: Date): Promise<{ calls: number; inputTokens: number; outputTokens: number }>;
+
+  listLineMatches(cafeId: string): Promise<LineMatch[]>;
+  /** One per café, supplier and read name: a newer one replaces it. */
+  saveLineMatch(match: LineMatch): Promise<void>;
+  deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void>;
 }
 
 export class InMemoryAssistantStore implements AssistantStore {
@@ -192,6 +259,7 @@ export class InMemoryAssistantStore implements AssistantStore {
   private readonly drafts = new Map<string, Draft>();
   private readonly jobs = new Map<string, Job>();
   private readonly events: AiEvent[] = [];
+  private readonly matches = new Map<string, LineMatch>();
 
   async saveDocument(doc: StoredDocument) {
     this.documents.set(doc.id, { ...doc, bytes: doc.bytes.slice() });
@@ -201,12 +269,29 @@ export class InMemoryAssistantStore implements AssistantStore {
     return d && d.cafeId === cafeId ? { ...d, bytes: d.bytes.slice() } : null;
   }
 
+  async getDocumentInfo(cafeId: string, id: string) {
+    const d = this.documents.get(id);
+    if (!d || d.cafeId !== cafeId) return null;
+    const { bytes: _bytes, ...info } = d;
+    return info;
+  }
+  async findDocuments(cafeId: string, sha256: string) {
+    return [...this.documents.values()]
+      .filter((d) => d.cafeId === cafeId && d.sha256 === sha256)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map(({ bytes: _bytes, ...d }) => d);
+  }
+
   async saveDraft(draft: Draft) {
     this.drafts.set(draft.id, structuredClone(draft));
   }
   async getDraft(cafeId: string, id: string) {
     const d = this.drafts.get(id);
     return d && d.cafeId === cafeId ? structuredClone(d) : null;
+  }
+  async getDraftByDocument(cafeId: string, documentId: string) {
+    const d = [...this.drafts.values()].find((x) => x.cafeId === cafeId && x.documentId === documentId);
+    return d ? structuredClone(d) : null;
   }
   async listDrafts(cafeId: string, opts: { status?: DraftStatus; limit: number }) {
     return [...this.drafts.values()]
@@ -261,5 +346,15 @@ export class InMemoryAssistantStore implements AssistantStore {
       inputTokens: calls.reduce((s, e) => s + e.inputTokens, 0),
       outputTokens: calls.reduce((s, e) => s + e.outputTokens, 0),
     };
+  }
+
+  async listLineMatches(cafeId: string) {
+    return [...this.matches.values()].filter((m) => m.cafeId === cafeId).map((m) => ({ ...m }));
+  }
+  async saveLineMatch(match: LineMatch) {
+    this.matches.set(`${match.cafeId}|${match.supplierId ?? ""}|${match.readKey}`, { ...match });
+  }
+  async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string) {
+    this.matches.delete(`${cafeId}|${supplierId ?? ""}|${readKey}`);
   }
 }

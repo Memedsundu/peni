@@ -1,4 +1,4 @@
-import { AiError, ScriptedModel, type BillReading } from "@peni/ai";
+import { AiError, ScriptedModel, type AiRequest, type BillReading } from "@peni/ai";
 import { beforeEach, describe, expect, it } from "vitest";
 import { inMemoryStores, PeniApp, type PeniStores } from "./app";
 import { DEMO_STAFF, DEMO_STAFF_PASSWORD, seed } from "./seed";
@@ -7,7 +7,7 @@ import type { StaffContext } from "./staff";
 let app: PeniApp;
 let stores: PeniStores;
 let now: Date;
-let answer: () => unknown;
+let answer: (request: AiRequest<unknown>) => unknown;
 let model: ScriptedModel;
 let leyla: StaffContext;
 let murat: StaffContext;
@@ -34,15 +34,16 @@ const milk: BillReading = {
   dueDate: "2026-10-30",
   total: 1260,
   lines: [
-    { name: "Süt 1 L", quantity: 24, unit: "adet", total: 960, category: "ingredients" },
-    { name: "Krema 1 L", quantity: 4, unit: "adet", total: 300, category: "ingredients" },
+    { name: "Süt 1 L", quantity: 24, unit: "adet", total: 960, category: "ingredients", stockItem: null, stockQuantity: null },
+    { name: "Krema 1 L", quantity: 4, unit: "adet", total: 300, category: "ingredients", stockItem: null, stockQuantity: null },
   ],
+  kdv: [],
   doubts: ["Fatura numarasının son hanesi silik."],
 };
 
 /** Uploads and lets the background run, as the route does after answering. */
-async function read(ctx: StaffContext, bytes = PDF, name = "sut.pdf") {
-  const reading = await app.assistant.upload(ctx, bytes, name);
+async function read(ctx: StaffContext, bytes = PDF, name = "sut.pdf", again = false) {
+  const reading = await app.assistant.upload(ctx, bytes, name, { again });
   await app.assistant.runSoon();
   return reading;
 }
@@ -51,7 +52,7 @@ beforeEach(async () => {
   // Friday 16 October, 12:00 in Istanbul.
   now = new Date("2026-10-16T09:00:00Z");
   answer = () => milk;
-  model = new ScriptedModel(() => answer(), "test-model");
+  model = new ScriptedModel((r) => answer(r), "test-model");
   stores = inMemoryStores();
   app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now, ai: { model, mode: "on" } }, stores);
   await seed(app, { sales: false, drafts: false });
@@ -60,7 +61,7 @@ beforeEach(async () => {
 
 describe("The assistant's ground (plan piece 24)", () => {
   it("reads an uploaded bill in the background into a draft, with the supplier it knows and what it wasn't sure of", async () => {
-    const reading = await app.assistant.upload(murat, PDF, "sut.pdf");
+    const { reading } = await app.assistant.upload(murat, PDF, "sut.pdf");
     expect(reading).toMatchObject({ documentName: "sut.pdf", state: "reading", error: null });
     expect((await app.assistant.list(leyla)).reading.map((r) => r.state)).toEqual(["reading"]);
     expect(model.calls).toHaveLength(0);
@@ -81,8 +82,28 @@ describe("The assistant's ground (plan piece 24)", () => {
       document: { name: "sut.pdf", contentType: "application/pdf", size: PDF.length },
     });
     expect(draft!.proposal.lines).toEqual([
-      { itemId: null, name: "Süt 1 L", category: "ingredients", qtyMilli: null, totalKurus: 96_000 },
-      { itemId: null, name: "Krema 1 L", category: "ingredients", qtyMilli: null, totalKurus: 30_000 },
+      {
+        itemId: null,
+        name: "Süt 1 L",
+        category: "ingredients",
+        qtyMilli: null,
+        totalKurus: 96_000,
+        readName: "Süt 1 L",
+        readQtyMilli: 24_000,
+        readUnit: "adet",
+        matchedBy: null,
+      },
+      {
+        itemId: null,
+        name: "Krema 1 L",
+        category: "ingredients",
+        qtyMilli: null,
+        totalKurus: 30_000,
+        readName: "Krema 1 L",
+        readQtyMilli: 4_000,
+        readUnit: "adet",
+        matchedBy: null,
+      },
     ]);
     expect(draft!.document!.url).toBe(`/api/v1/staff/moda/documents/${draft!.document!.id}`);
 
@@ -199,8 +220,8 @@ describe("The assistant's ground (plan piece 24)", () => {
     expect(await code(app.assistant.upload(murat, new Uint8Array(10 * 1024 * 1024 + 1).fill(0x25), "big.pdf"))).toBe("DOCUMENT_TOO_LARGE");
 
     // Ece adds bills at the till but doesn't use the assistant.
-    const reading = await read(ece, PNG, "");
-    expect(reading.state).toBe("reading");
+    const { reading } = await read(ece, PNG, "");
+    expect(reading!.state).toBe("reading");
     expect(await code(app.assistant.list(ece))).toBe("FORBIDDEN");
     const [draft] = (await app.assistant.list(leyla)).open;
     expect(
@@ -220,5 +241,178 @@ describe("The assistant's ground (plan piece 24)", () => {
     const ctx = await off.staff.at((await off.staff.signIn(DEMO_STAFF.leyla.email, DEMO_STAFF_PASSWORD)).token, "moda");
     expect(await code(off.assistant.upload(ctx, PDF, ""))).toBe("AI_OFF");
     expect(await off.assistant.list(ctx)).toMatchObject({ ai: "off", canUpload: false, canConfirm: true });
+  });
+});
+
+/** The number the model was shown for a stock item, as the model would answer it. */
+const shown = (request: AiRequest<unknown>, name: string) => {
+  const text = request.parts.find((p) => p.type === "text")?.text ?? "";
+  const m = new RegExp(`^(\\d+)\\. ${name} \\(`, "m").exec(text);
+  if (!m) throw new Error(`${name} not in the stock list`);
+  return Number(m[1]);
+};
+const bytes = (n: number) => new TextEncoder().encode(`%PDF-1.4\n% bill ${n}\n`);
+const asInput = (d: {
+  proposal: {
+    supplierId: string | null;
+    number: string | null;
+    date: string | null;
+    lines: { itemId: string | null; name: string; category: string; qtyMilli: number | null; totalKurus: number }[];
+  };
+}) => ({
+  supplierId: d.proposal.supplierId,
+  number: d.proposal.number,
+  date: d.proposal.date!,
+  lines: d.proposal.lines.map((l, from) => ({
+    itemId: l.itemId,
+    name: l.name,
+    category: l.category as "ingredients",
+    qtyMilli: l.qtyMilli,
+    totalKurus: l.totalKurus,
+    from,
+  })),
+});
+
+describe("Scanning bills (plan piece 25)", () => {
+  it("links read lines to stock items, carries the KDV, and learns each supplier's lines from what people confirm", async () => {
+    answer = (r) => ({
+      ...milk,
+      lines: [{ ...milk.lines[0]!, stockItem: shown(r, "Süt"), stockQuantity: 24 }, milk.lines[1]!],
+      kdv: [{ rate: 1, amount: 12.48 }],
+    });
+    await read(murat);
+    expect(model.calls[0]!.parts.find((p) => p.type === "text")!.text).toContain("Stock items:\n");
+    const [first] = (await app.assistant.list(leyla)).open;
+    expect(first!.proposal.lines[0]).toMatchObject({
+      itemId: "stk_sut",
+      name: "Süt",
+      category: "ingredients",
+      qtyMilli: 24_000,
+      readName: "Süt 1 L",
+      matchedBy: "model",
+    });
+    expect(first!.proposal.kdv).toEqual([{ ratePct: 1, amountKurus: 1_248 }]);
+
+    const stockBefore = (await app.stock.view(leyla)).items.find((i) => i.id === "stk_sut")!.qtyMilli;
+    const done = await app.assistant.confirm(leyla, first!.id, { ...asInput(first!), kdv: first!.proposal.kdv });
+    const bill = await app.bills.get(leyla, done.resultId!);
+    expect(bill.kdv).toEqual([{ ratePct: 1, amountKurus: 1_248 }]);
+    expect(bill.document).toMatchObject({ name: "sut.pdf", url: first!.document!.url });
+    expect(bill.lines[0]).toMatchObject({ itemId: "stk_sut", qtyMilli: 24_000 });
+    expect((await app.stock.view(leyla)).items.find((i) => i.id === "stk_sut")!.qtyMilli).toBe(stockBefore + 24_000);
+
+    // The next milk bill: the model didn't link it, but Leyla did last time; 12 bottles is 12 litres.
+    answer = () => ({ ...milk, number: "MS-0450", lines: [{ ...milk.lines[0]!, quantity: 12, total: 480 }], total: 480 });
+    await read(murat, bytes(2), "sut2.pdf");
+    const [second] = (await app.assistant.list(leyla)).open;
+    expect(second!.proposal.lines[0]).toMatchObject({ itemId: "stk_sut", qtyMilli: 12_000, matchedBy: "learned" });
+    expect(second!.doubts).toEqual(milk.doubts);
+
+    // Murat says it isn't stock after all: it's forgotten.
+    await app.assistant.confirm(murat, second!.id, { ...asInput(second!), lines: [{ ...asInput(second!).lines[0]!, itemId: null, qtyMilli: null }] });
+    answer = () => ({ ...milk, number: "MS-0470", lines: [milk.lines[0]!] });
+    await read(murat, bytes(3), "sut3.pdf");
+    expect((await app.assistant.list(leyla)).open[0]!.proposal.lines[0]).toMatchObject({ itemId: null, matchedBy: null });
+  });
+
+  it("links one stock item once, and asks for the amount when the model didn't give one", async () => {
+    answer = (r) => ({
+      ...milk,
+      lines: [
+        { ...milk.lines[0]!, stockItem: shown(r, "Süt"), stockQuantity: null },
+        { ...milk.lines[1]!, stockItem: shown(r, "Süt"), stockQuantity: 4 },
+        { ...milk.lines[1]!, name: "Yoğurt", stockItem: 999, stockQuantity: 1 },
+      ],
+      total: 1560,
+      doubts: [],
+    });
+    await read(murat);
+    const [draft] = (await app.assistant.list(leyla)).open;
+    expect(draft!.proposal.lines.map((l) => [l.itemId, l.qtyMilli])).toEqual([
+      ["stk_sut", null],
+      [null, null],
+      [null, null],
+    ]);
+    expect(draft!.doubts).toEqual(["Süt için gelen miktarı yaz.", '"Krema 1 L" satırını stoğa bağlamadım: Süt başka bir satırda var.']);
+  });
+
+  it("doesn't read the same file twice unless asked, and says what became of the first one", async () => {
+    const first = await read(murat);
+    expect(first.duplicate).toBeNull();
+    const again = await app.assistant.upload(ece, PDF, "IMG_2231.pdf");
+    const [draft] = (await app.assistant.list(leyla)).open;
+    expect(again).toEqual({ reading: null, duplicate: { at: now.toISOString(), name: "sut.pdf", title: draft!.title, draftId: draft!.id, billId: null } });
+    expect(model.calls).toHaveLength(1);
+
+    // While the first is still being read, too.
+    await app.assistant.upload(murat, PNG, "a.png");
+    expect((await app.assistant.upload(murat, PNG, "b.png")).duplicate).toMatchObject({ name: "a.png", draftId: null });
+    await app.assistant.runSoon();
+
+    // "Yine de oku" reads it again, and the two drafts point at each other's bill.
+    const forced = await read(murat, PDF, "sut.pdf", true);
+    expect(forced.reading!.state).toBe("reading");
+    const open = (await app.assistant.list(leyla)).open;
+    expect(open.find((d) => d.id !== draft!.id && d.duplicateOf?.id === draft!.id)?.duplicateOf).toMatchObject({ kind: "draft", why: "number" });
+
+    // Once confirmed, the same file points at the bill; once dismissed, it can be read anew.
+    const done = await app.assistant.confirm(leyla, draft!.id, asInput(draft!));
+    expect((await app.assistant.upload(murat, PDF, "x.pdf")).duplicate).toMatchObject({ billId: done.resultId });
+    for (const d of (await app.assistant.list(leyla)).open) await app.assistant.dismiss(leyla, d.id, {});
+    const png = await app.assistant.upload(murat, PNG, "c.png");
+    expect(png.reading?.state).toBe("reading");
+  });
+
+  it("marks a draft that looks like a bill already entered, and confirming it needs a yes", async () => {
+    // The seeded Ambalaj Dünyası bill A-20418, read with different punctuation.
+    answer = () => ({
+      ...milk,
+      supplierName: "Ambalaj Dünyası",
+      number: "a 20418",
+      lines: [{ ...milk.lines[0]!, name: "Bardak", category: "supplies" }],
+      total: 960,
+    });
+    await read(murat);
+    const [draft] = (await app.assistant.list(leyla)).open;
+    expect(draft!.duplicateOf).toEqual({ kind: "bill", id: "bil_seed_ambalaj", title: "Ambalaj Dünyası · #A-20418 · ₺3.700", why: "number" });
+    expect(await code(app.assistant.confirm(leyla, draft!.id, asInput(draft!)))).toBe("BILL_DUPLICATE");
+    expect((await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), allowDuplicate: true })).status).toBe("confirmed");
+
+    // No number: the same supplier, day and total (within a lira) is enough.
+    const sut1 = await app.bills.get(leyla, "bil_seed_sut1");
+    answer = () => ({ ...milk, number: null, date: sut1.date, lines: [{ ...milk.lines[0]!, total: 860.5 }], total: 860.5 });
+    await read(murat, bytes(2));
+    expect((await app.assistant.list(leyla)).open[0]!.duplicateOf).toMatchObject({ kind: "bill", id: "bil_seed_sut1", why: "dayTotal" });
+  });
+
+  it("stops a hand-entered bill with a number the supplier already has, and checks the KDV", async () => {
+    const bill = {
+      supplierId: "sup_seed_ambalaj",
+      date: "2026-10-15",
+      lines: [{ itemId: null, name: "Peçete", category: "supplies" as const, totalKurus: 36_000 }],
+    };
+    expect(await code(app.bills.add(ece, { ...bill, number: "A20418", key: "k1" }))).toBe("BILL_DUPLICATE");
+    expect(await code(app.bills.add(ece, { ...bill, number: "A20418", key: "k1", allowDuplicate: true }))).toBe("ok");
+    expect(await code(app.bills.add(ece, { ...bill, key: "k2", kdv: [{ ratePct: 7, amountKurus: 100 }] }))).toBe("KDV_INVALID");
+    expect(await code(app.bills.add(ece, { ...bill, key: "k3", kdv: [{ ratePct: 20, amountKurus: 36_000 }] }))).toBe("KDV_INVALID");
+    expect(await code(app.bills.add(ece, { ...bill, key: "k4", kdv: [{ ratePct: 20, amountKurus: 6_000 }] }))).toBe("ok");
+  });
+
+  it("shows each person what they sent and what became of it, for the till", async () => {
+    await read(ece, PNG, "");
+    answer = () => ({ ...milk, isBill: false, lines: [], doubts: [] });
+    now = new Date(now.getTime() + 60_000);
+    await read(ece, bytes(2), "menu.pdf");
+    now = new Date(now.getTime() + 60_000);
+    await app.assistant.upload(ece, bytes(3), "fis.pdf");
+    expect((await app.assistant.mine(ece)).uploads.map((u) => [u.documentName, u.state, u.title])).toEqual([
+      ["fis.pdf", "reading", null],
+      ["menu.pdf", "notBill", null],
+      ["", "waiting", "MODA SÜT ÜRÜNLERİ GIDA TİC. LTD. ŞTİ. · ₺1.260"],
+    ]);
+    const [draft] = (await app.assistant.list(leyla)).open;
+    await app.assistant.confirm(leyla, draft!.id, asInput(draft!));
+    expect((await app.assistant.mine(ece)).uploads[2]!.state).toBe("saved");
+    expect((await app.assistant.mine(murat)).uploads).toEqual([]);
   });
 });

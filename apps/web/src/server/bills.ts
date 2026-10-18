@@ -1,5 +1,7 @@
 import type { BillDTO, BillPaymentDTO, BillsDTO, BillSummaryDTO, PayOptionsDTO, SupplierDTO, SupplierPriceDTO, SuppliersDTO, SupplierSummaryDTO } from "@peni/api";
 import {
+  KDV_RATES,
+  billNumberKey,
   billState,
   billStock,
   billTotal,
@@ -12,7 +14,9 @@ import {
   unitCost,
   validDate,
   type Bill,
+  type AssistantStore,
   type BillCategory,
+  type BillKdv,
   type BillLine,
   type BillPayment,
   type BillPayMethod,
@@ -41,6 +45,8 @@ export interface BillLineInput {
   category?: BillCategory;
   qtyMilli?: number | null;
   totalKurus: number;
+  /** Confirming a draft (piece 25): which of its read lines this is. Bills ignore it. */
+  from?: number;
 }
 
 export interface BillInput {
@@ -50,6 +56,8 @@ export interface BillInput {
   dueDate?: string | null;
   note?: string | null;
   lines: BillLineInput[];
+  /** The KDV printed on it, per rate (piece 25). */
+  kdv?: BillKdv[];
 }
 
 export interface PayInput {
@@ -94,6 +102,11 @@ export class BillService {
     /** Runs the bill, its stock moves and the prices together (the ledger's transaction). */
     private readonly atomically: <T>(fn: () => Promise<T>) => Promise<T>,
     private readonly now: () => Date,
+    /** Scanning (piece 25): whether the assistant reads, and the scans bills were confirmed from. */
+    private readonly scans: { mode: () => "on" | "demo" | "off"; documents: Pick<AssistantStore, "getDocumentInfo"> } = {
+      mode: () => "off",
+      documents: { getDocumentInfo: async () => null },
+    },
   ) {}
 
   // ─────────────────────────────────────────────── Faturalar
@@ -125,6 +138,8 @@ export class BillService {
       canAdd: ctx.permissions.has("bills.add"),
       canManage: ctx.permissions.has("bills.manage"),
       canAddSupplier: ctx.permissions.has("suppliers.edit"),
+      canScan: ctx.permissions.has("bills.add") && this.scans.mode() !== "off",
+      canSeeDrafts: ctx.permissions.has("assistant.use"),
     };
   }
 
@@ -136,9 +151,19 @@ export class BillService {
   /**
    * "Fatura ekle". Stock lines add their amount to the item and set its price, unless a
    * newer bill already priced it. The same `key` twice adds it once. `paid` marks it paid
-   * on the spot, which needs "bills.manage".
+   * on the spot, which needs "bills.manage". A number the supplier's bills already have
+   * stops it (piece 25's duplicate guard) unless `allowDuplicate` says it's another bill.
    */
-  async add(ctx: StaffContext, input: BillInput & { key: string; paid?: { method: BillPayMethod; from?: "drawer" | "reserve" } }): Promise<BillDTO> {
+  async add(
+    ctx: StaffContext,
+    input: BillInput & {
+      key: string;
+      paid?: { method: BillPayMethod; from?: "drawer" | "reserve" };
+      allowDuplicate?: boolean;
+      /** The scan it was confirmed from; only the assistant sets it. */
+      documentId?: string | null;
+    },
+  ): Promise<BillDTO> {
     this.require(ctx, "bills.add");
     if (input.paid) this.require(ctx, "bills.manage");
     const cafeId = ctx.cafe.id;
@@ -147,11 +172,15 @@ export class BillService {
     const today = await this.today(cafeId);
     const fields = await this.fields(ctx, input, today, null);
     await this.money.assertOpen(cafeId, fields.date);
+    if (!input.allowDuplicate && (await this.sameNumber(cafeId, fields.supplierId, fields.number))) {
+      throw new AppError("BILL_DUPLICATE", "This supplier already has a bill with this number", 409);
+    }
     const now = this.now();
     const bill: Bill = {
       id: `bil_${randomUUID()}`,
       cafeId,
       ...fields,
+      documentId: input.documentId ?? null,
       paidKurus: 0,
       paidAt: null,
       payments: [],
@@ -434,6 +463,12 @@ export class BillService {
     if (new Set(stockIds).size !== stockIds.length) throw new AppError("BILL_LINE_DUPLICATE", "Each item once per bill", 400);
     const totalKurus = billTotal(lines);
     if (totalKurus <= 0) throw new AppError("BILL_TOTAL_ZERO", "The bill's total can't be zero", 400);
+    const kdv = [...(input.kdv ?? [])].sort((a, b) => a.ratePct - b.ratePct);
+    const kdvOk =
+      kdv.every((k) => KDV_RATES.includes(k.ratePct) && Number.isInteger(k.amountKurus) && k.amountKurus > 0) &&
+      new Set(kdv.map((k) => k.ratePct)).size === kdv.length &&
+      kdv.reduce((sum, k) => sum + k.amountKurus, 0) < totalKurus;
+    if (!kdvOk) throw new AppError("KDV_INVALID", "Check the KDV", 400);
     return {
       supplierId: input.supplierId,
       number: input.number?.trim() || null,
@@ -442,7 +477,15 @@ export class BillService {
       note: input.note?.trim() || null,
       lines,
       totalKurus,
+      kdv: kdv.map((k) => ({ ratePct: k.ratePct, amountKurus: k.amountKurus })),
     };
+  }
+
+  /** A live bill from the same supplier with the same number ("A-20511" and "A20511" are one). */
+  async sameNumber(cafeId: string, supplierId: string | null, number: string | null): Promise<Bill | null> {
+    const key = billNumberKey(number);
+    if (!supplierId || !key) return null;
+    return (await this.store.listBills(cafeId, { supplierId })).find((b) => !b.voidedAt && billNumberKey(b.number) === key) ?? null;
   }
 
   private editable(bill: Bill, version: number): void {
@@ -606,6 +649,7 @@ export class BillService {
     ]);
     const units = new Map(items.map((i) => [i.id, i.unit]));
     const names = await this.names([bill.createdById, bill.voidedById, ...bill.payments.map((p) => p.memberId)]);
+    const doc = bill.documentId ? await this.scans.documents.getDocumentInfo(cafeId, bill.documentId) : null;
     const closedThrough = await this.money.closedThrough(cafeId);
     return {
       ...summary(bill, new Map(supplier ? [[supplier.id, supplier.name]] : []), today),
@@ -629,6 +673,10 @@ export class BillService {
       canManage: ctx.permissions.has("bills.manage"),
       payWith: await this.payOptions(ctx, bill, closedThrough),
       closed: !!closedThrough && bill.date <= closedThrough,
+      kdv: bill.kdv,
+      document: doc
+        ? { id: doc.id, name: doc.name, contentType: doc.contentType, size: doc.size, url: `/api/v1/staff/${encodeURIComponent(ctx.cafe.slug)}/documents/${doc.id}` }
+        : null,
     };
   }
 

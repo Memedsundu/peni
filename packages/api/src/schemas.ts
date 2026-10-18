@@ -311,7 +311,12 @@ const billLine = z.object({
   category: z.enum(["ingredients", "supplies", "rent", "utilities", "services", "wages", "other"]).optional(),
   qtyMilli: milli.nullable().optional(),
   totalKurus: z.number().int().min(0).max(100_000_000),
+  /** Confirming a draft: which of its read lines this is, so the match is learned (piece 25). */
+  from: z.number().int().min(0).max(49).optional(),
 });
+
+/** The KDV printed on the bill, per rate (piece 25). */
+const billKdv = z.object({ ratePct: z.number().int().min(0).max(100), amountKurus: z.number().int().min(1).max(100_000_000) });
 
 const billFields = {
   supplierId: z.string().min(1).max(100).nullable(),
@@ -320,6 +325,7 @@ const billFields = {
   dueDate: billDay.nullable().optional(),
   note: optionalText(300),
   lines: z.array(billLine).min(1, "En az bir satır ekle").max(50),
+  kdv: z.array(billKdv).max(5).optional(),
 };
 
 const payMethod = z.enum(["cash", "card", "bank"]);
@@ -330,10 +336,16 @@ const lender = z.object({ memberId: z.string().min(1).max(100).nullable().option
 /** Cash comes out of the drawer or the reserve (piece 20); left out, the drawer when it's open. */
 const cashFrom = z.enum(["drawer", "reserve"]);
 
-export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.object({ method: payMethod, from: cashFrom.optional() }).optional() });
+/** `allowDuplicate`: the supplier already has a bill with this number, and this is another one anyway (piece 25). */
+export const addBillSchema = z.object({
+  key: actionKey,
+  ...billFields,
+  paid: z.object({ method: payMethod, from: cashFrom.optional() }).optional(),
+  allowDuplicate: z.boolean().optional(),
+});
 
 /** "Onayla": a draft bill as the person checked it; it's added in their name. */
-export const confirmDraftSchema = z.object(billFields);
+export const confirmDraftSchema = z.object({ ...billFields, allowDuplicate: z.boolean().optional() });
 
 export const dismissDraftSchema = z.object({ reason: optionalText(200) });
 

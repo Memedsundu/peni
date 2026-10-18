@@ -90,9 +90,14 @@ describe("Reading a bill", () => {
     dueDate: "2026-02-30",
     total: 1234.5,
     lines: [
-      { name: "Süt 1 L", quantity: 24, unit: "adet", total: 984.5, category: "ingredients" },
-      { name: "Bardak", quantity: null, unit: null, total: 200, category: "supplies" },
-      { name: " ", quantity: 1, unit: null, total: 5, category: "other" },
+      { name: "Süt 1 L", quantity: 24, unit: "adet", total: 984.5, category: "ingredients", stockItem: 1, stockQuantity: 24 },
+      { name: "Bardak", quantity: null, unit: null, total: 200, category: "supplies", stockItem: 7, stockQuantity: 50 },
+      { name: " ", quantity: 1, unit: null, total: 5, category: "other", stockItem: null, stockQuantity: null },
+    ],
+    kdv: [
+      { rate: 1, amount: 9.75 },
+      { rate: 20, amount: 33.33 },
+      { rate: 7, amount: 2 },
     ],
     doubts: ["Fiş biraz bulanık."],
   };
@@ -109,17 +114,37 @@ describe("Reading a bill", () => {
   });
 
   it("turns lira into kuruş, drops empty lines, and says what doesn't add up", () => {
-    const r = readBill(reading);
+    const r = readBill(reading, 2);
     expect(r).toMatchObject({ supplierName: "Moda Süt Ürünleri", number: "A-1024", date: "2026-10-14", dueDate: null, totalKurus: 123_450 });
     expect(r.lines).toEqual([
-      { name: "Süt 1 L", quantityMilli: 24_000, unit: "adet", totalKurus: 98_450, category: "ingredients" },
-      { name: "Bardak", quantityMilli: null, unit: null, totalKurus: 20_000, category: "supplies" },
+      { name: "Süt 1 L", quantityMilli: 24_000, unit: "adet", totalKurus: 98_450, category: "ingredients", stockIndex: 0, stockQtyMilli: 24_000 },
+      // Item 7 isn't one of the two given.
+      { name: "Bardak", quantityMilli: null, unit: null, totalKurus: 20_000, category: "supplies", stockIndex: null, stockQtyMilli: null },
+    ]);
+    expect(r.kdv).toEqual([
+      { ratePct: 1, amountKurus: 975 },
+      { ratePct: 20, amountKurus: 3_333 },
     ]);
     expect(r.doubts).toEqual([
       "Fiş biraz bulanık.",
       'Son ödeme tarihi okunamadı ("2026-02-30").',
       "Satırların toplamı ₺1.184,50, belgedeki toplam ₺1.234,50. Satırları kontrol et.",
+      "KDV oranı okunamadı (%7).",
     ]);
+  });
+
+  it("lists the café's stock items for the model to pick from, by number", () => {
+    const req = billReadingRequest({ name: "", contentType: "image/png", bytes: new Uint8Array([1]) }, [
+      { name: "Süt", unit: "l" },
+      { name: "Karton  bardak", unit: "adet" },
+    ]);
+    expect(req.parts[0]).toEqual({ type: "text", text: "Read this document.\n\nStock items:\n1. Süt (l)\n2. Karton bardak (adet)" });
+    expect(req.instructions).toContain("stockQuantity");
+    expect(billReadingRequest({ name: "", contentType: "image/png", bytes: new Uint8Array([1]) }).instructions).not.toContain("stockQuantity");
+  });
+
+  it("drops KDV that can't be right", () => {
+    expect(readBill({ ...reading, kdv: [{ rate: 20, amount: 5000 }] }).kdv).toEqual([]);
   });
 
   it("runs through a scripted model like any other", async () => {

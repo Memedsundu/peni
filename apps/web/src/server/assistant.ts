@@ -1,8 +1,10 @@
 import { billReadingRequest, isAiError, readBill, ScriptedModel, type AiModel, type BillReading, type ReadBill } from "@peni/ai";
-import type { AiLogDTO, BillProposalDTO, DraftDTO, DraftsDTO, ReadingDTO } from "@peni/api";
+import type { AiLogDTO, BillProposalDTO, DraftDTO, DraftsDTO, ReadingDTO, UploadDTO, UploadsDTO } from "@peni/api";
 import {
   DOCUMENT_NAME_MAX,
   MAX_DOCUMENT_BYTES,
+  billNumberKey,
+  lineKey,
   localDateKey,
   sniffDocumentType,
   startOfLocalDay,
@@ -11,10 +13,15 @@ import {
   type BillProposal,
   type BillStore,
   type Draft,
+  type DuplicateRef,
   type Job,
+  type LineMatch,
   type PeniDirectory,
   type Permission,
+  type ProposalLine,
   type StaffStore,
+  type StockItem,
+  type StockStore,
   type Supplier,
 } from "@peni/core";
 import { formatTL, trLower } from "@peni/brand/format";
@@ -32,6 +39,10 @@ const READ = "document.read";
 const READING_SHOWN_MS = 24 * 3_600_000;
 const RECENT_DRAFTS = 20;
 const LOG_PAGE = 50;
+/** The most stock items the model is shown to match lines against. */
+const STOCK_SHOWN = 300;
+/** Two bills from one supplier on one day whose totals are this close look like one bill. */
+const SAME_TOTAL_KURUS = 100;
 
 /**
  * The assistant's ground floor (plan piece 24): documents in, drafts out, a person
@@ -46,6 +57,7 @@ export class AssistantService {
     private readonly jobs: JobRunner,
     private readonly bills: BillService,
     private readonly billStore: BillStore,
+    private readonly stock: StockStore,
     private readonly staff: StaffStore,
     private readonly directory: PeniDirectory,
     private readonly ai: { model: AiModel | null; mode: AiMode },
@@ -58,13 +70,22 @@ export class AssistantService {
     return this.ai.mode;
   }
 
-  /** A photo or PDF of a bill. It's read in the background; the draft shows up on Taslaklar. */
-  async upload(ctx: StaffContext, bytes: Uint8Array, name: string): Promise<ReadingDTO> {
+  /**
+   * A photo or PDF of a bill. It's read in the background; the draft shows up on Taslaklar.
+   * The same file again (piece 25) isn't read twice: the answer says what became of it,
+   * unless `again` asks for another reading.
+   */
+  async upload(ctx: StaffContext, bytes: Uint8Array, name: string, opts: { again?: boolean } = {}): Promise<UploadDTO> {
     this.require(ctx, "bills.add");
     if (!this.ai.model) throw new AppError("AI_OFF", "The assistant is off", 409);
     if (bytes.length > MAX_DOCUMENT_BYTES) throw new AppError("DOCUMENT_TOO_LARGE", "Documents can be at most 10 MB", 413);
     const contentType = sniffDocumentType(bytes);
     if (!contentType) throw new AppError("DOCUMENT_TYPE", "Send a photo or a PDF", 415);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (!opts.again) {
+      const duplicate = await this.sameFile(ctx.cafe.id, sha256);
+      if (duplicate) return { reading: null, duplicate };
+    }
     const now = this.now();
     const doc = {
       id: `doc_${randomUUID()}`,
@@ -73,14 +94,56 @@ export class AssistantService {
       contentType,
       bytes,
       size: bytes.length,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
+      sha256,
       uploadedBy: ctx.member.id,
       createdAt: now,
     };
     await this.store.saveDocument(doc);
     const job = await this.jobs.add(ctx.cafe.id, READ, { documentId: doc.id, by: ctx.member.id });
     await this.record({ cafeId: ctx.cafe.id, kind: "document.uploaded", memberId: ctx.member.id, documentId: doc.id, jobId: job.id, detail: doc.name || null });
-    return this.reading(job, doc.name);
+    return { reading: this.reading(job, doc.name), duplicate: null };
+  }
+
+  /** An earlier upload of the same bytes that is still being read or became a draft nobody dismissed. */
+  private async sameFile(cafeId: string, sha256: string): Promise<UploadDTO["duplicate"]> {
+    for (const doc of await this.store.findDocuments(cafeId, sha256)) {
+      const draft = await this.store.getDraftByDocument(cafeId, doc.id);
+      const found = { at: doc.createdAt.toISOString(), name: doc.name };
+      if (draft) {
+        if (draft.status !== "dismissed") return { ...found, title: draft.title, draftId: draft.id, billId: draft.resultId };
+        continue;
+      }
+      const job = (await this.store.listJobs(cafeId, { kinds: [READ], since: doc.createdAt })).find((j) => j.payload.documentId === doc.id);
+      if (job && (job.status === "queued" || job.status === "running")) return { ...found, title: null, draftId: null, billId: null };
+    }
+    return null;
+  }
+
+  /**
+   * What the viewer sent in the last day and what became of each: for the till and
+   * Faturalar, where people who add bills but don't check drafts can see it arrived.
+   */
+  async mine(ctx: StaffContext): Promise<UploadsDTO> {
+    this.require(ctx, "bills.add");
+    const cafeId = ctx.cafe.id;
+    const jobs = (await this.store.listJobs(cafeId, { kinds: [READ], since: new Date(this.now().getTime() - READING_SHOWN_MS) }))
+      .filter((j) => j.payload.by === ctx.member.id)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const uploads: UploadsDTO["uploads"] = [];
+    for (const job of jobs) {
+      const documentId = String(job.payload.documentId);
+      const [doc, draft] = await Promise.all([this.store.getDocumentInfo(cafeId, documentId), this.store.getDraftByDocument(cafeId, documentId)]);
+      const base = this.reading(job, doc?.name ?? "");
+      const state: UploadsDTO["uploads"][number]["state"] = draft
+        ? draft.status === "open"
+          ? "waiting"
+          : draft.status === "confirmed"
+            ? "saved"
+            : "dismissed"
+        : base.state;
+      uploads.push({ jobId: job.id, documentName: base.documentName, at: base.at, state, title: draft?.title ?? null, error: draft ? null : base.error });
+    }
+    return { ai: this.ai.mode, uploads };
   }
 
   /** Runs what's waiting. Routes call it after answering, so the person never waits on it. */
@@ -105,7 +168,7 @@ export class AssistantService {
     const reading: ReadingDTO[] = [];
     for (const job of jobs) {
       if ((job.status === "done" && !job.result?.notBill) || written.has(job.id)) continue;
-      const doc = await this.store.getDocument(cafeId, String(job.payload.documentId));
+      const doc = await this.store.getDocumentInfo(cafeId, String(job.payload.documentId));
       reading.push(this.reading(job, doc?.name ?? ""));
     }
     return {
@@ -121,15 +184,37 @@ export class AssistantService {
     };
   }
 
-  /** "Onayla": the bill as the person checked it, added in their name. Confirming twice adds it once. */
-  async confirm(ctx: StaffContext, draftId: string, input: BillInput): Promise<DraftDTO> {
+  /**
+   * "Onayla": the bill as the person checked it, added in their name, with the scan it came
+   * from. Confirming twice adds it once. A bill that looks already entered needs
+   * `allowDuplicate`. Each read line confirmed as a stock item (or unlinked from one) is
+   * remembered for the next bill (piece 25).
+   */
+  async confirm(ctx: StaffContext, draftId: string, input: BillInput & { allowDuplicate?: boolean }): Promise<DraftDTO> {
     this.require(ctx, "assistant.use");
     this.require(ctx, "bills.add");
     const draft = await this.draft(ctx, draftId);
     if (draft.status === "dismissed") throw new AppError("DRAFT_DECIDED", "This draft was dismissed", 409);
+    if (draft.status === "open" && !input.allowDuplicate) {
+      const total = input.lines.reduce((s, l) => s + l.totalKurus, 0);
+      const earlier = await this.duplicateBill(
+        ctx.cafe.id,
+        { supplierId: input.supplierId, number: input.number ?? null, date: input.date, totalKurus: total },
+        draft.id,
+      );
+      if (earlier) throw new AppError("BILL_DUPLICATE", "This bill looks already entered", 409);
+    }
     // The draft's id is the bill's key: a second confirm finds the same bill.
-    const bill = await this.bills.add(ctx, { ...input, key: draft.id });
+    const { allowDuplicate, ...fields } = input;
+    const bill = await this.bills.add(ctx, {
+      ...fields,
+      lines: fields.lines.map(({ from: _from, ...l }) => l),
+      key: draft.id,
+      documentId: draft.documentId,
+      allowDuplicate: allowDuplicate || draft.status !== "open",
+    });
     if (draft.status === "open") {
+      await this.learn(ctx.cafe.id, draft.proposal, input);
       const changed = changedFields(draft.proposal, input);
       Object.assign(draft, { status: "confirmed", decidedById: ctx.member.id, decidedAt: this.now(), resultId: bill.id, changed });
       await this.store.saveDraft(draft);
@@ -245,10 +330,14 @@ export class AssistantService {
     const doc = await this.store.getDocument(cafeId, documentId);
     if (!doc) return { error: "DOCUMENT_NOT_FOUND", retry: false };
 
+    const items = (await this.stock.listItems(cafeId))
+      .filter((i) => !i.archivedAt)
+      .sort((a, b) => a.name.localeCompare(b.name, "tr"))
+      .slice(0, STOCK_SHOWN);
     const started = Date.now();
     let reading: BillReading;
     try {
-      const r = await model.run(billReadingRequest(doc));
+      const r = await model.run(billReadingRequest(doc, items));
       reading = r.output;
       await this.record({
         cafeId,
@@ -282,8 +371,8 @@ export class AssistantService {
     }
     if (!reading.isBill) return { result: { notBill: true } };
 
-    const read = readBill(reading);
-    const proposal = await this.propose(cafeId, read);
+    const read = readBill(reading, items.length);
+    const { proposal, doubts } = await this.propose(cafeId, read, items);
     const draft: Draft = {
       id: `drf_${randomUUID()}`,
       cafeId,
@@ -291,7 +380,7 @@ export class AssistantService {
       status: "open",
       title: titleOf(proposal, read),
       proposal,
-      doubts: read.doubts,
+      doubts: [...read.doubts, ...doubts],
       documentId,
       jobId: job.id,
       createdAt: this.now(),
@@ -300,26 +389,132 @@ export class AssistantService {
       resultId: null,
       changed: [],
       dismissReason: null,
+      duplicateOf: null,
     };
+    draft.duplicateOf =
+      (await this.duplicateBill(cafeId, { ...proposal, totalKurus: proposal.totalKurus ?? lineSum(proposal) }, draft.id)) ??
+      (await this.duplicateDraft(cafeId, proposal, draft.id));
     await this.store.saveDraft(draft);
     await this.record({ cafeId, kind: "draft.created", memberId: by, purpose: READ, draftId: draft.id, documentId, jobId: job.id, detail: draft.title });
     return { result: { draftId: draft.id } };
   };
 
-  /** What was read, as a bill for this café: a known supplier when the name or tax number matches. */
-  private async propose(cafeId: string, read: ReadBill): Promise<BillProposal> {
+  /**
+   * What was read, as a bill for this café: a known supplier when the name or tax number
+   * matches, and each line as the stock item a person confirmed it to be before, or the
+   * one the model picked (piece 25). Anything that needs a second look becomes a doubt.
+   */
+  private async propose(cafeId: string, read: ReadBill, items: StockItem[]): Promise<{ proposal: BillProposal; doubts: string[] }> {
     const supplier = matchSupplier(await this.billStore.listSuppliers(cafeId), read.supplierName, read.supplierTaxNumber);
+    const learned = learnedMatches(await this.store.listLineMatches(cafeId), supplier?.id ?? null);
+    const live = new Map(items.map((i) => [i.id, i]));
+    const doubts: string[] = [];
+    const used = new Set<string>();
+    const lines: ProposalLine[] = read.lines.map((l) => {
+      const printed = { readName: l.name, readQtyMilli: l.quantityMilli, readUnit: l.unit };
+      const expense: ProposalLine = { itemId: null, name: l.name, category: l.category, qtyMilli: null, totalKurus: l.totalKurus, ...printed, matchedBy: null };
+      const known = learned.get(lineKey(l.name));
+      const picked = l.stockIndex !== null ? items[l.stockIndex] : undefined;
+      const item = known ? live.get(known.itemId) : picked;
+      if (!item) return expense;
+      if (used.has(item.id)) {
+        doubts.push(`"${l.name}" satırını stoğa bağlamadım: ${item.name} başka bir satırda var.`);
+        return expense;
+      }
+      used.add(item.id);
+      let qtyMilli = picked?.id === item.id ? l.stockQtyMilli : null;
+      if (known?.perUnitMilli && l.quantityMilli) qtyMilli = Math.round((l.quantityMilli * known.perUnitMilli) / 1000);
+      if (!qtyMilli || qtyMilli <= 0 || qtyMilli > 1_000_000_000) {
+        qtyMilli = null;
+        doubts.push(`${item.name} için gelen miktarı yaz.`);
+      }
+      return {
+        itemId: item.id,
+        name: item.name,
+        category: item.kind === "supply" ? "supplies" : "ingredients",
+        qtyMilli,
+        totalKurus: l.totalKurus,
+        ...printed,
+        matchedBy: known ? "learned" : "model",
+      };
+    });
     return {
-      supplierId: supplier?.id ?? null,
-      supplierName: read.supplierName,
-      supplierTaxNumber: read.supplierTaxNumber,
-      number: read.number,
-      date: read.date,
-      dueDate: read.dueDate,
-      totalKurus: read.totalKurus,
-      // Matching lines to stock items is piece 25 (A2); until then every line is an expense line.
-      lines: read.lines.map((l) => ({ itemId: null, name: l.name, category: l.category, qtyMilli: null, totalKurus: l.totalKurus })),
+      proposal: {
+        supplierId: supplier?.id ?? null,
+        supplierName: read.supplierName,
+        supplierTaxNumber: read.supplierTaxNumber,
+        number: read.number,
+        date: read.date,
+        dueDate: read.dueDate,
+        totalKurus: read.totalKurus,
+        lines,
+        kdv: read.kdv,
+      },
+      doubts,
     };
+  }
+
+  /** What the person confirmed each read line to be, kept for the supplier's next bill. */
+  private async learn(
+    cafeId: string,
+    proposal: BillProposal,
+    input: { supplierId: string | null; lines: { itemId: string | null; qtyMilli?: number | null; from?: number }[] },
+  ) {
+    for (const l of input.lines) {
+      const read = l.from !== undefined ? proposal.lines[l.from] : undefined;
+      if (!read?.readName) continue;
+      const readKey = lineKey(read.readName);
+      if (!readKey) continue;
+      if (l.itemId) {
+        const perUnitMilli = read.readQtyMilli && l.qtyMilli ? Math.round((l.qtyMilli * 1000) / read.readQtyMilli) : null;
+        await this.store.saveLineMatch({ cafeId, supplierId: input.supplierId, readKey, itemId: l.itemId, perUnitMilli, updatedAt: this.now() });
+      } else if (read.itemId) {
+        // It was matched and the person said it isn't stock: stop matching it.
+        await this.store.deleteLineMatch(cafeId, input.supplierId, readKey);
+      }
+    }
+  }
+
+  /**
+   * A bill already entered that this looks like (piece 25): the same supplier and number,
+   * or, when neither has a number, the same supplier, day and total. `except` is the
+   * draft's own key, so its own bill never counts.
+   */
+  private async duplicateBill(
+    cafeId: string,
+    b: { supplierId: string | null; number: string | null; date: string | null; totalKurus: number },
+    except: string,
+  ): Promise<DuplicateRef | null> {
+    if (!b.supplierId) return null;
+    const bills = (await this.billStore.listBills(cafeId, { supplierId: b.supplierId })).filter((x) => !x.voidedAt && x.createKey !== except);
+    const key = billNumberKey(b.number);
+    const supplier = await this.billStore.getSupplier(cafeId, b.supplierId);
+    const ref = (x: (typeof bills)[number], why: DuplicateRef["why"]): DuplicateRef => ({
+      kind: "bill",
+      id: x.id,
+      title: [supplier?.name, x.number && `#${x.number}`, formatTL(x.totalKurus)].filter(Boolean).join(" · "),
+      why,
+    });
+    const byNumber = key ? bills.find((x) => billNumberKey(x.number) === key) : undefined;
+    if (byNumber) return ref(byNumber, "number");
+    const byDay = b.date ? bills.find((x) => x.date === b.date && (!key || !x.number) && Math.abs(x.totalKurus - b.totalKurus) <= SAME_TOTAL_KURUS) : undefined;
+    return byDay ? ref(byDay, "dayTotal") : null;
+  }
+
+  /** Another open draft of the same bill: two photos of one receipt. */
+  private async duplicateDraft(cafeId: string, p: BillProposal, self: string): Promise<DuplicateRef | null> {
+    if (!p.supplierId && !p.supplierName) return null;
+    const key = billNumberKey(p.number);
+    const total = p.totalKurus ?? lineSum(p);
+    const same = (await this.store.listDrafts(cafeId, { status: "open", limit: 100 })).find((d) => {
+      if (d.id === self) return false;
+      const q = d.proposal;
+      const sameSeller = p.supplierId ? q.supplierId === p.supplierId : !q.supplierId && q.supplierName === p.supplierName;
+      if (!sameSeller) return false;
+      if (key) return billNumberKey(q.number) === key;
+      return !!p.date && q.date === p.date && Math.abs((q.totalKurus ?? lineSum(q)) - total) <= SAME_TOTAL_KURUS;
+    });
+    return same ? { kind: "draft", id: same.id, title: same.title, why: key ? "number" : "dayTotal" } : null;
   }
 
   // ─────────────────────────────────────────────── helpers
@@ -360,6 +555,7 @@ export class AssistantService {
       resultId: d.resultId,
       changed: d.changed,
       dismissReason: d.dismissReason,
+      duplicateOf: d.duplicateOf,
     };
   }
 
@@ -419,6 +615,23 @@ const plain = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+/** Matches learned for this supplier first; one learned for other suppliers only when they all agree. */
+function learnedMatches(all: LineMatch[], supplierId: string | null): Map<string, LineMatch> {
+  const out = new Map<string, LineMatch>();
+  const elsewhere = new Map<string, LineMatch[]>();
+  for (const m of all) {
+    if (m.supplierId === supplierId) out.set(m.readKey, m);
+    else elsewhere.set(m.readKey, [...(elsewhere.get(m.readKey) ?? []), m]);
+  }
+  for (const [key, ms] of elsewhere) {
+    if (!out.has(key) && ms.every((m) => m.itemId === ms[0]!.itemId))
+      out.set(key, { ...ms[0]!, perUnitMilli: ms.every((m) => m.perUnitMilli === ms[0]!.perUnitMilli) ? ms[0]!.perUnitMilli : null });
+  }
+  return out;
+}
+
+const lineSum = (p: Pick<BillProposal, "lines">) => p.lines.reduce((s, l) => s + l.totalKurus, 0);
+
 function titleOf(p: BillProposal, read: ReadBill): string {
   const total = p.totalKurus ?? read.lines.reduce((s, l) => s + l.totalKurus, 0);
   return [p.supplierName ?? "Fatura", total ? formatTL(total) : null].filter(Boolean).join(" · ").slice(0, 120);
@@ -434,6 +647,8 @@ function changedFields(p: BillProposal, input: BillInput): string[] {
   const line = (l: { itemId: string | null; name?: string; category?: string; qtyMilli?: number | null; totalKurus: number }) =>
     [l.itemId ?? "", l.itemId ? "" : (l.name ?? ""), l.itemId ? "" : (l.category ?? ""), l.qtyMilli ?? "", l.totalKurus].join("|");
   if (p.lines.map(line).join("\n") !== input.lines.map(line).join("\n")) out.push("lines");
+  const kdv = (k: { ratePct: number; amountKurus: number }[] = []) => k.map((x) => `${x.ratePct}:${x.amountKurus}`).join(",");
+  if (kdv(p.kdv) !== kdv(input.kdv)) out.push("kdv");
   return out;
 }
 
@@ -446,27 +661,36 @@ function friendlyError(error: string | null): string {
 
 /**
  * The demo's stand-in for OpenAI: it doesn't look at the document, it answers with a
- * made-up packaging bill so Taslaklar can be tried without a key.
+ * made-up packaging bill so Taslaklar can be tried without a key. Like the real model, it
+ * picks the cups out of the stock list it's given.
  */
 export function demoModel(today: () => string): AiModel {
-  return new ScriptedModel(
-    (request) =>
-      request.purpose === READ
-        ? ({
-            isBill: true,
-            supplierName: "Ambalaj Dünyası Tic. Ltd. Şti.",
-            supplierTaxNumber: null,
-            number: "A-20511",
-            date: today(),
-            dueDate: null,
-            total: 1810,
-            lines: [
-              { name: "Karton bardak 8 oz", quantity: 1000, unit: "adet", total: 1450, category: "supplies" },
-              { name: "Peçete", quantity: 20, unit: "adet", total: 360, category: "supplies" },
-            ],
-            doubts: ["Demo: belge gerçekten okunmadı, bu örnek bir okuma."],
-          } satisfies BillReading)
-        : {},
-    "demo",
-  );
+  return new ScriptedModel((request) => {
+    if (request.purpose !== READ) return {};
+    const list = request.parts.find((p) => p.type === "text")?.text ?? "";
+    const cups = /^(\d+)\. Karton bardak/m.exec(list);
+    return {
+      isBill: true,
+      supplierName: "Ambalaj Dünyası Tic. Ltd. Şti.",
+      supplierTaxNumber: null,
+      number: "A-20511",
+      date: today(),
+      dueDate: null,
+      total: 1810,
+      lines: [
+        {
+          name: "Karton bardak 8 oz",
+          quantity: 1000,
+          unit: "adet",
+          total: 1450,
+          category: "supplies",
+          stockItem: cups ? Number(cups[1]) : null,
+          stockQuantity: cups ? 1000 : null,
+        },
+        { name: "Peçete", quantity: 20, unit: "adet", total: 360, category: "supplies", stockItem: null, stockQuantity: null },
+      ],
+      kdv: [{ rate: 20, amount: 301.67 }],
+      doubts: ["Demo: belge gerçekten okunmadı, bu örnek bir okuma."],
+    } satisfies BillReading;
+  }, "demo");
 }
