@@ -7,6 +7,7 @@ import {
   monthDays,
   monthOf,
   nextMonthToClose,
+  owedByMonth,
   plannedMinutes,
   plusDays,
   rateOn,
@@ -260,6 +261,62 @@ export class PayService {
     rows.push(["Toplam", "", hours(view.totals.minutes), tl(view.totals.earnedKurus), tl(view.totals.paidKurus), tl(view.totals.leftKurus)]);
     const csv = "﻿" + rows.map((r) => r.map(cell).join(";")).join("\r\n") + "\r\n";
     return { filename: `puantaj-${ctx.cafe.slug}-${month}.csv`, csv };
+  }
+
+  /**
+   * For Bugün's alerts (piece 22): planned days that passed without hours (this month and
+   * last, unless closed), last month's pay still open after the 3rd, and pay left unpaid
+   * for months that ended.
+   */
+  async attention(cafeId: string): Promise<{
+    missing: { count: number; names: string[]; month: string };
+    closeDue: string | null;
+    left: { month: string; kurus: number; names: string[] }[];
+  }> {
+    const today = await this.today(cafeId);
+    const current = monthOf(today);
+    const previous = addMonths(current, -1);
+    const closes = await this.store.listPayCloses(cafeId);
+    const payClosedThrough = closedThrough(closes);
+    const from = monthDays(previous).from;
+    const [shifts, workDays, rates, payouts] = await Promise.all([
+      this.store.listShifts(cafeId, from, plusDays(today, -1)),
+      this.store.listWorkDays(cafeId, monthDays(addMonths(current, -MONTHS_BACK + 1)).from, today),
+      this.store.listRates(cafeId),
+      this.store.listPayouts(cafeId),
+    ]);
+
+    const worked = new Set(workDays.map((d) => `${d.memberId}|${d.day}`));
+    const missingBy = new Map<string, number>();
+    let missingMonth = current;
+    for (const [key, minutes] of plannedMinutes(shifts)) {
+      const [memberId, day] = key.split("|") as [string, string];
+      if (minutes <= 0 || day >= today || worked.has(key) || (payClosedThrough && day <= payClosedThrough)) continue;
+      missingBy.set(memberId, (missingBy.get(memberId) ?? 0) + 1);
+      if (monthOf(day) < missingMonth) missingMonth = monthOf(day);
+    }
+    const names = await this.names(cafeId, [...missingBy.keys(), ...payouts.map((p) => p.memberId), ...workDays.map((d) => d.memberId)]);
+    const missingNames = [...missingBy].sort((a, b) => b[1] - a[1]).map(([id]) => names.get(id) ?? "");
+
+    const dayOfMonth = Number(today.slice(8, 10));
+    const closeDue = dayOfMonth > 3 && nextMonthToClose(closes, today) === previous && (workDays.some((d) => monthOf(d.day) === previous) || shifts.length > 0) ? previous : null;
+
+    const owed = owedByMonth(workDays, rates, payouts);
+    const leftBy = new Map<string, { kurus: number; people: { name: string; kurus: number }[] }>();
+    for (const [memberId, months] of owed) {
+      for (const [month, kurus] of months) {
+        if (month >= current) continue;
+        const row = leftBy.get(month) ?? { kurus: 0, people: [] };
+        row.kurus += kurus;
+        row.people.push({ name: names.get(memberId) ?? "", kurus });
+        leftBy.set(month, row);
+      }
+    }
+    const left = [...leftBy]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, r]) => ({ month, kurus: r.kurus, names: r.people.sort((a, b) => b.kurus - a.kurus).map((p) => p.name) }));
+
+    return { missing: { count: [...missingBy.values()].reduce((s, n) => s + n, 0), names: missingNames, month: missingMonth }, closeDue, left };
   }
 
   // ─────────────────────────────────────────────── helpers

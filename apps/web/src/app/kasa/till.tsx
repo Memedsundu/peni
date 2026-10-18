@@ -1,12 +1,13 @@
 "use client";
 
-import { PeniApiError, type CashStateDTO, type StaffMeDTO, type TillDTO } from "@peni/api";
+import { PeniApiError, type CashStateDTO, type StaffMeDTO, type TaskDayDTO, type TillDTO } from "@peni/api";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { Cash } from "./cash";
 import { Sales } from "./sales";
 import { Sell } from "./sell";
 import { Setup } from "./setup";
+import { TillTasks } from "./tasks";
 import { SignIn } from "./sign-in";
 import { errorText, text, type Lang, type T } from "./text";
 import { Button } from "./ui";
@@ -29,7 +30,7 @@ export function Till() {
   const [lang, setLang] = useState<Lang>("tr");
   const [dark, setDark] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
-  const [view, setView] = useState<"sell" | "sales" | "cash">("sell");
+  const [view, setView] = useState<"sell" | "sales" | "cash" | "tasks">("sell");
   /** The drawer, for the "closed" note on the till and the Kasa view. */
   const [cash, setCash] = useState<CashStateDTO | null>(null);
   const t = text(lang);
@@ -113,7 +114,16 @@ export function Till() {
     void loadCash();
   }, [loadCash]);
 
-  const title = view === "sales" && stage.kind === "open" ? t("sales") : view === "cash" && stage.kind === "open" ? t("drawer") : t("title");
+  /** How many of today's tasks are left, for the header button. */
+  const canTasks = !!access?.permissions.includes("tasks.view");
+  const [tasksLeft, setTasksLeft] = useState<number | null>(null);
+  const countTasks = useCallback((d: TaskDayDTO) => setTasksLeft(d.lists.reduce((s, l) => s + l.total - l.done, 0)), []);
+  useEffect(() => {
+    if (!slug || !canTasks) return setTasksLeft(null);
+    api.staff.tasks.day(slug).then(countTasks, () => setTasksLeft(null));
+  }, [slug, canTasks, countTasks]);
+
+  const title = stage.kind !== "open" ? t("title") : view === "sales" ? t("sales") : view === "cash" ? t("drawer") : view === "tasks" ? t("tasks") : t("title");
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-paper text-ink">
@@ -144,6 +154,12 @@ export function Till() {
                   {t("sales")}
                 </Button>
               )}
+              {view !== "tasks" && canTasks && (
+                <Button size="sm" onClick={() => setView("tasks")}>
+                  {t("tasks")}
+                  {tasksLeft !== null && tasksLeft > 0 && <span className="rounded-full bg-ink px-2 py-0.5 text-xs text-paper tabular">{tasksLeft}</span>}
+                </Button>
+              )}
               {view !== "cash" && canDrawer && (
                 <Button size="sm" onClick={() => setView("cash")}>
                   {t("drawer")}
@@ -158,8 +174,22 @@ export function Till() {
             {lang === "tr" ? "EN" : "TR"}
           </Button>
           <Button size="sm" kind="bare" onClick={switchTheme} aria-label={dark ? t("darkOff") : t("darkOn")}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              {dark ? <path d="M12 4V2m0 20v-2m8-8h2M2 12h2m13.7-5.7 1.4-1.4M4.9 19.1l1.4-1.4m0-11.4L4.9 4.9m14.2 14.2-1.4-1.4M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" /> : <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />}
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              {dark ? (
+                <path d="M12 4V2m0 20v-2m8-8h2M2 12h2m13.7-5.7 1.4-1.4M4.9 19.1l1.4-1.4m0-11.4L4.9 4.9m14.2 14.2-1.4-1.4M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10z" />
+              ) : (
+                <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+              )}
             </svg>
           </Button>
         </div>
@@ -193,6 +223,7 @@ export function Till() {
           </div>
         )}
         {stage.kind === "open" && view === "sales" && <Sales t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
+        {stage.kind === "open" && view === "tasks" && <TillTasks t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} onChanged={countTasks} />}
         {stage.kind === "open" && view === "cash" && <Cash t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} state={cash} onChanged={setCash} />}
       </main>
     </div>

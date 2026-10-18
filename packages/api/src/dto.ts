@@ -1375,3 +1375,106 @@ export interface PayMonthDTO {
   closedThrough: string | null;
   cashFrom: CashFromDTO | null;
 }
+
+// ─────────────────────────────────────────────── tasks and alerts (plan piece 22)
+
+/** Who a list is for: everyone, a role, or whoever has the day's first or last shift. */
+export type TaskAssignDTO = "all" | "first" | "last" | StaffRole;
+/** Monday 1 … Sunday 7. */
+export type WeekdayDTO = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export interface TaskItemDTO {
+  id: string;
+  title: string;
+  note: string | null;
+  /** Not done yet, done, or skipped (with why, if given). */
+  status: "open" | "done" | "skipped";
+  checkNote: string | null;
+  by: string | null;
+  at: string | null;
+}
+
+export interface TaskDayListDTO {
+  id: string;
+  name: string;
+  assign: TaskAssignDTO;
+  /** The viewer is the one it's for that day. */
+  mine: boolean;
+  /** First names of who it's for, when that comes from the day's shifts. */
+  people: string[];
+  items: TaskItemDTO[];
+  done: number;
+  total: number;
+}
+
+/** `GET /staff/:slug/tasks?day=`: one day's lists, the viewer's first. */
+export interface TaskDayDTO {
+  day: string;
+  today: string;
+  lists: TaskDayListDTO[];
+  /** Ticking on this day is allowed (today; earlier days with "tasks.edit"). */
+  canCheck: boolean;
+  /** "tasks.edit": earlier days, the week's history and changing the lists. */
+  canEdit: boolean;
+  /** The last 7 days before today, oldest first; only with "tasks.edit". */
+  week: { day: string; done: number; total: number }[];
+}
+
+export interface TaskListItemDTO {
+  id: string;
+  title: string;
+  note: string | null;
+  days: WeekdayDTO[];
+}
+
+export interface TaskListDTO {
+  id: string;
+  name: string;
+  assign: TaskAssignDTO;
+  items: TaskListItemDTO[];
+}
+
+/** `GET /staff/:slug/tasks/lists`: the lists as they are set up ("tasks.edit"). */
+export interface TaskListsDTO {
+  lists: TaskListDTO[];
+}
+
+export type AlertTypeDTO =
+  | "stockOut"
+  | "stockLow"
+  | "stockNoCost"
+  | "debtsOverdue"
+  | "debtsSoon"
+  | "cardDue"
+  | "hoursMissing"
+  | "payClose"
+  | "payLeft"
+  | "tasksLate";
+
+/** Something that needs doing, worked out from the café's own numbers. One per kind. */
+export interface AlertDTO {
+  type: AlertTypeDTO;
+  level: "warning" | "critical";
+  count: number;
+  amountKurus: number | null;
+  /** What it's about, most pressing first; at most 5. */
+  names: string[];
+  /** A day it hinges on (the card's due day). */
+  day: string | null;
+  /** The month, for pay. */
+  month: string | null;
+  /** Where to fix it, a panel path. */
+  href: string;
+}
+
+/** `GET /staff/:slug/today`: Bugün. What needs doing, and today's tasks. */
+export interface TodayDTO {
+  cafe: { slug: string; name: string };
+  today: string;
+  me: { name: string };
+  alerts: AlertDTO[];
+  /** Today's lists in short; null without "tasks.view". */
+  tasks: { done: number; total: number; lists: { id: string; name: string; mine: boolean; done: number; total: number }[] } | null;
+  /** The morning email: whether it can go to the viewer (they see alerts) and whether it's on. */
+  email: { eligible: boolean; on: boolean };
+}

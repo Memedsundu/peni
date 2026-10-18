@@ -191,6 +191,11 @@ export const errorMessagesTr: Record<string, string> = {
   PAY_NOT_CLOSABLE: "Bu ay şimdi kapatılamaz. Maaş ayları sırayla ve bittikten sonra kapanır.",
   PAY_MISSING_DAYS: "Önce eksik günlerin saatlerini gir.",
   PAY_ALREADY_CLOSED: "Bu maaş ayı az önce kapatıldı.",
+  TASK_LIST_NOT_FOUND: "Bu liste artık yok.",
+  TASK_NOT_FOUND: "Bu görev artık listede yok.",
+  TASK_NOT_DUE: "Bu görev o gün için değil.",
+  TASK_DAY: "Geçmiş günlerin görevlerini ancak listeleri düzenleyen biri işaretleyebilir.",
+  TASK_FUTURE: "İleriki günlerin görevleri henüz işaretlenemez.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

@@ -1,5 +1,5 @@
-import { addMonths, dayPay, defaultSettings, localDateKey, monthDays, plusDays, rateOn, startOfLocalDay, weekStartOf } from "@peni/core";
-import type { Bill, BillLine, Cafe, MenuItem, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, WorkDay } from "@peni/core";
+import { addMonths, dayPay, defaultSettings, dueOn, localDateKey, monthDays, plusDays, rateOn, shiftEnds, startOfLocalDay, weekStartOf } from "@peni/core";
+import type { Bill, BillLine, Cafe, MenuItem, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, TaskCheck, TaskItem, TaskList, Weekday, WorkDay } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -149,6 +149,12 @@ export async function seed(app: PeniApp): Promise<void> {
   });
   await seedShifts(app, {
     leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
+    murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
+    hakan: staffAt[`${DEMO_STAFF.hakan.email}:moda`]!.id,
+    ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
+    on,
+  });
+  await seedTasks(app, {
     murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
     hakan: staffAt[`${DEMO_STAFF.hakan.email}:moda`]!.id,
     ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
@@ -788,4 +794,98 @@ async function seedDebts(
   await app.debtStore.addRepayment({
     id: "lrp_seed_1", cafeId, lenderKey: `member:${p.murat}`, amountKurus: 20_000, method: "cash", paidOn: p.day(3), account: "reserve", memberId: p.leyla, createdAt: p.on(3, 19),
   });
+}
+
+/**
+ * Görevler (piece 22): opening for the first shift, closing for the last, the weekly
+ * cleaning for baristas and the kitchen's for the chef. The last week mostly done, with
+ * a closing left half done one night and a skipped job, so Bugün has something to say.
+ */
+async function seedTasks(app: PeniApp, p: { murat: string; hakan: string; ece: string; on: (daysAgo: number, hh: number, mm?: number) => Date }): Promise<void> {
+  const cafeId = "cafe_moda";
+  const timeZone = (await app.directory.getSettings(cafeId)).timeZone;
+  const today = localDateKey(p.on(0, 12), timeZone);
+  const since = plusDays(today, -60);
+  const every: Weekday[] = [1, 2, 3, 4, 5, 6, 7];
+  const lists: { id: string; name: string; assign: TaskList["assign"]; items: { title: string; note?: string; days?: Weekday[] }[] }[] = [
+    {
+      id: "tsl_seed_open",
+      name: "Açılış",
+      assign: "first",
+      items: [
+        { title: "Işıkları ve müziği aç" },
+        { title: "Espresso makinesini ısıt, ilk iki shot'u dök", note: "Süreyi kontrol et: 25–30 saniye." },
+        { title: "Vitrini doldur" },
+        { title: "Kasayı aç ve sayımı gir" },
+      ],
+    },
+    {
+      id: "tsl_seed_close",
+      name: "Kapanış",
+      assign: "last",
+      items: [
+        { title: "Makineye back-flush yap" },
+        { title: "Süt sürahilerini ve pitcher'ları yıka" },
+        { title: "Tezgahı ve zemini sil" },
+        { title: "Çöpleri çıkar" },
+        { title: "Kasayı say ve kapat" },
+      ],
+    },
+    {
+      id: "tsl_seed_weekly",
+      name: "Haftalık temizlik",
+      assign: "barista",
+      items: [
+        { title: "Buzdolabının içini sil", days: [1] },
+        { title: "Öğütücüyü fırçala", days: [3] },
+        { title: "Camları sil", days: [5] },
+      ],
+    },
+    {
+      id: "tsl_seed_kitchen",
+      name: "Mutfak",
+      assign: "chef",
+      items: [
+        { title: "Kurabiye hamurunu hazırla", days: [2, 3, 4, 5, 6] },
+        { title: "Son kullanma tarihlerine bak", days: [1, 4] },
+      ],
+    },
+  ];
+  const items: TaskItem[] = [];
+  for (const [n, l] of lists.entries()) {
+    await app.taskStore.saveList({
+      id: l.id, cafeId, name: l.name, assign: l.assign, sortOrder: n, archivedAt: null, createdById: p.murat, createdAt: p.on(60, 10), updatedAt: p.on(60, 10),
+    });
+    l.items.forEach((x, i) =>
+      items.push({ id: `${l.id}_${i}`, cafeId, listId: l.id, title: x.title, note: x.note ?? null, days: x.days ?? every, sortOrder: i, fromDay: since, untilDay: null }),
+    );
+  }
+  await app.taskStore.saveItems(items);
+
+  // Who did them: the first or last shift's people, the barista or the chef on that day.
+  const listOf = new Map(lists.map((l) => [l.id, l]));
+  const shifts = await app.shiftStore.listShifts(cafeId, plusDays(today, -7), today);
+  const checks: TaskCheck[] = [];
+  for (let back = 7; back >= 0; back--) {
+    const day = plusDays(today, -back);
+    const ends = shiftEnds(shifts.filter((s) => s.day === day));
+    for (const item of items.filter((i) => dueOn(i, day))) {
+      const list = listOf.get(item.listId)!;
+      const who = list.assign === "first" ? ends.first[0] : list.assign === "last" ? ends.last[0] : list.assign === "chef" ? p.hakan : p.ece;
+      const n = item.sortOrder;
+      // Today: the morning's opening is done but for the till; nothing else yet.
+      if (back === 0 && (list.id !== "tsl_seed_open" || n === 3)) continue;
+      // Three nights ago the closing was left half done.
+      if (back === 3 && list.id === "tsl_seed_close" && n >= 3) continue;
+      // The kitchen skipped a day.
+      if (back === 2 && list.id === "tsl_seed_kitchen") continue;
+      const skipped = back === 4 && list.id === "tsl_seed_weekly";
+      const hour = list.id === "tsl_seed_close" ? 20 : list.id === "tsl_seed_open" ? 8 : 15;
+      checks.push({
+        cafeId, itemId: item.id, day, status: skipped ? "skipped" : "done", note: skipped ? "Merdiven yoktu, yarın" : null,
+        title: item.title, listName: list.name, byId: who ?? p.murat, at: p.on(back, hour, 10 + n * 4),
+      });
+    }
+  }
+  for (const c of checks) await app.taskStore.saveCheck(c);
 }

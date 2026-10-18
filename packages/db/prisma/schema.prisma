@@ -160,6 +160,11 @@ model Cafe {
   payRates       PayRate[]
   payPayouts     PayPayout[]
   payCloses      PayClose[]
+  taskLists      TaskList[]
+  taskItems      TaskItem[]
+  taskChecks     TaskCheck[]
+  alertDigests   AlertDigest[]
+  alertMutes     AlertMute[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -1327,4 +1332,81 @@ model PayClose {
 
   @@unique([cafeId, standingMonth])
   @@index([cafeId, closedAt])
+}
+
+// ─────────────────────────────────────────────── tasks and alerts (plan piece 22)
+
+/// "Açılış", "Kapanış": things to do on given weekdays.
+model TaskList {
+  id          String    @id
+  cafeId      String
+  name        String
+  /// all, first, last, or a role
+  assign      String
+  sortOrder   Int
+  archivedAt  DateTime?
+  createdById String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, archivedAt])
+}
+
+model TaskItem {
+  id        String  @id
+  cafeId    String
+  listId    String
+  title     String
+  note      String?
+  /// Monday 1 … Sunday 7
+  days      Int[]
+  sortOrder Int
+  fromDay   String
+  untilDay  String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, listId])
+}
+
+/// Done or skipped on a day; the title and list name as they were then.
+model TaskCheck {
+  cafeId   String
+  itemId   String
+  day      String
+  status   String
+  note     String?
+  title    String
+  listName String
+  byId     String
+  at       DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, itemId, day])
+  @@index([cafeId, day])
+}
+
+/// The morning alert email, once per café and day.
+model AlertDigest {
+  cafeId     String
+  day        String
+  sentAt     DateTime
+  recipients Int
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, day])
+}
+
+/// Staff who turned the morning email off.
+model AlertMute {
+  cafeId   String
+  memberId String
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, memberId])
 }

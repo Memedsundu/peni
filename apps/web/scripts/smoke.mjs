@@ -560,6 +560,44 @@ assert.deepEqual([ecePay.own, ecePay.people.map((p) => p.name)], [true, ["Ece Ta
 assert.equal((await call("POST", `/staff/moda/pay/hours?month=${ecePay.month}`, { headers: ecePos3, body: { days: missing.slice(0, 1) } })).json.error.code, "FORBIDDEN");
 step("Leyla copies and publishes a week Ece then sees (a clash is refused); the missing days go in as planned; Hakan's last ₺5.000 goes out once by bank; the pay month closes (its hours kept), reopens and exports; Ece sees only her own pay");
 
+// 5q. Bugün and Görevler (piece 22): Leyla's Bugün shows what needs doing (the hours Leyla
+//     just filled in no longer among it) and today's lists. Ece, at the till, ticks a task
+//     (once despite a retry) but not yesterday's. Leyla makes a list (once despite a retry),
+//     changes and removes it, and turns her morning email off and on. The morning email's
+//     cron route refuses a call without its secret.
+let bugun = (await call("GET", "/staff/moda/today", { headers: STAFF })).json;
+const alertTypes = bugun.alerts.map((a) => a.type);
+assert.ok(alertTypes.includes("tasksLate") && !alertTypes.includes("hoursMissing"), `Bugün's alerts: ${alertTypes}`);
+assert.ok(bugun.tasks.total > 0 && bugun.email.eligible && bugun.email.on);
+let tasks = (await call("GET", "/staff/moda/tasks", { headers: ecePos3 })).json;
+assert.deepEqual([tasks.canCheck, tasks.canEdit, tasks.week], [true, false, []]);
+const openTask = tasks.lists.flatMap((l) => l.items).find((i) => i.status === "open");
+const tick = { itemId: openTask.id, day: tasks.day, status: "done" };
+await call("POST", "/staff/moda/tasks/check", { headers: ecePos3, body: tick });
+tasks = (await call("POST", "/staff/moda/tasks/check", { headers: ecePos3, body: tick })).json;
+assert.deepEqual(
+  tasks.lists.flatMap((l) => l.items).filter((i) => i.id === openTask.id).map((i) => [i.status, i.by]),
+  [["done", "Ece Tan"]],
+);
+const yesterday = await call("POST", "/staff/moda/tasks/check", { headers: ecePos3, body: { ...tick, day: addDays(tasks.day, -1) } });
+assert.deepEqual([yesterday.status, yesterday.json.error.code], [403, "TASK_DAY"]);
+const terrace = { key: key(), name: "Teras", assign: "all", items: [{ id: "new:smoke1", title: "Masaları sil", days: [1, 2, 3, 4, 5, 6, 7] }] };
+const list = (await call("POST", "/staff/moda/tasks/lists", { headers: STAFF, body: terrace })).json;
+await call("POST", "/staff/moda/tasks/lists", { headers: STAFF, body: terrace });
+assert.equal((await call("GET", "/staff/moda/tasks/lists", { headers: STAFF })).json.lists.filter((l) => l.name === "Teras").length, 1);
+const changed = (await call("POST", `/staff/moda/tasks/lists/${list.id}`, { headers: STAFF, body: { name: "Teras", assign: "barista", items: [...list.items, { id: "new:smoke2", title: "Saksıları sula", days: [2, 5] }] } })).json;
+assert.deepEqual([changed.assign, changed.items.map((i) => i.title)], ["barista", ["Masaları sil", "Saksıları sula"]]);
+assert.equal((await call("POST", "/staff/moda/tasks/lists", { headers: ecePos3, body: { ...terrace, key: key() } })).json.error.code, "FORBIDDEN");
+const lists = (await call("POST", `/staff/moda/tasks/lists/${list.id}/remove`, { headers: STAFF })).json;
+assert.ok(!lists.lists.some((l) => l.name === "Teras"));
+bugun = (await call("POST", "/staff/moda/today/email", { headers: STAFF, body: { on: false } })).json;
+assert.equal(bugun.email.on, false);
+bugun = (await call("POST", "/staff/moda/today/email", { headers: STAFF, body: { on: true } })).json;
+assert.equal(bugun.email.on, true);
+assert.equal((await call("GET", "/cron/daily")).status, 401);
+assert.equal((await call("GET", "/cron/daily", { headers: { authorization: "Bearer wrong" } })).status, 401);
+step("Bugün lists what needs doing and today's tasks; Ece ticks a task at the till (once), not yesterday's; Leyla makes, changes and removes a list (once) and turns her morning email off and on; the cron route needs its secret");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

@@ -34,10 +34,12 @@ import {
   InMemoryDebtStore,
   InMemoryBooksStore,
   InMemoryShiftStore,
+  InMemoryTaskStore,
   type BillStore,
   type BooksStore,
   type Shift,
   type ShiftStore,
+  type TaskStore,
   type DebtStore,
   type ImageStore,
   type ReportStore,
@@ -91,6 +93,8 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifier } from "./customer-auth";
 import { giftEmail } from "./gift-email";
 import { PayService } from "./pay";
+import { TaskService } from "./tasks";
+import { AlertService } from "./alerts";
 import { shiftEmail } from "./shift-email";
 import { ShiftService } from "./shifts";
 import { AppError } from "./errors";
@@ -138,6 +142,7 @@ export interface PeniStores {
   debts: DebtStore;
   books: BooksStore;
   shifts: ShiftStore;
+  tasks: TaskStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -160,6 +165,7 @@ export function inMemoryStores(): PeniStores {
     debts: new InMemoryDebtStore(),
     books: new InMemoryBooksStore(),
     shifts: new InMemoryShiftStore(),
+    tasks: new InMemoryTaskStore(),
   };
 }
 
@@ -219,6 +225,11 @@ export class PeniApp {
   readonly shifts: ShiftService;
   /** Puantaj ve maaş (plan piece 21). */
   readonly pay: PayService;
+  /** Görevler (piece 22). */
+  readonly tasks: TaskService;
+  /** Bugün's alerts and the morning email (piece 22). */
+  readonly alerts: AlertService;
+  readonly taskStore: TaskStore;
   /** Shifts, hours, rates and pay as stored; for the demo seed and the data move from Shelby. */
   readonly shiftStore: ShiftStore;
   /** Staff sign-in, the team and roles. */
@@ -282,6 +293,21 @@ export class PeniApp {
     this.staffStore = stores.staff;
     this.shifts = new ShiftService(stores.shifts, stores.staff, this.money, this.directory, (ctx, week, shifts, people) => this.tellShifts(ctx, week, shifts, people), () => this.now());
     this.pay = new PayService(stores.shifts, stores.staff, this.money, this.directory, atomically, () => this.now());
+    this.taskStore = stores.tasks;
+    this.tasks = new TaskService(stores.tasks, stores.shifts, stores.staff, this.directory, () => this.now());
+    this.alerts = new AlertService({
+      stock: this.stock,
+      debts: this.debts,
+      pay: this.pay,
+      tasks: this.tasks,
+      store: stores.tasks,
+      staff: stores.staff,
+      directory: this.directory,
+      cafes: () => this.identity.listCafes(),
+      email: () => this.options.auth?.email ?? null,
+      publicUrl: () => this.options.publicUrl ?? null,
+      now: () => this.now(),
+    });
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 

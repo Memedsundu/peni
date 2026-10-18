@@ -644,4 +644,39 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.shifts.getPayClose(cafeId, close.id)).toMatchObject({ summary, reopenReason: "Eksik gün" });
     expect(await stores.shifts.listPayCloses(cafeId)).toHaveLength(2);
   });
+
+  it("keeps task lists, items with their days, checks per day, the morning email and who muted it", async () => {
+    const at = new Date("2026-10-16T09:00:00Z");
+    const list = { id: `tsl_${run}`, cafeId, name: "Açılış", assign: "first" as const, sortOrder: 0, archivedAt: null, createdById: "stf_x", createdAt: at, updatedAt: at };
+    await stores.tasks.saveList(list);
+    await stores.tasks.saveList({ ...list, id: `tsl2_${run}`, name: "Eski", archivedAt: at });
+    expect((await stores.tasks.listLists(cafeId)).map((l) => l.name)).toEqual(["Açılış"]);
+    expect(await stores.tasks.listLists(cafeId, { includeArchived: true })).toHaveLength(2);
+    expect(await stores.tasks.getList(cafeId, list.id)).toEqual(list);
+
+    const item = { id: `tsi_${run}`, cafeId, listId: list.id, title: "Makineyi aç", note: null, days: [1, 2, 3] as (1 | 2 | 3)[], sortOrder: 1, fromDay: "2026-10-12", untilDay: null };
+    await stores.tasks.saveItems([item, { ...item, id: `tsi0_${run}`, title: "Kapıyı aç", sortOrder: 0 }]);
+    await stores.tasks.saveItems([{ ...item, untilDay: "2026-10-20" }]);
+    expect((await stores.tasks.listItems(cafeId)).map((i) => [i.title, i.untilDay])).toEqual([
+      ["Kapıyı aç", null],
+      ["Makineyi aç", "2026-10-20"],
+    ]);
+
+    const check = { cafeId, itemId: item.id, day: "2026-10-14", status: "done" as const, note: null, title: "Makineyi aç", listName: "Açılış", byId: "stf_a", at };
+    await stores.tasks.saveCheck(check);
+    await stores.tasks.saveCheck({ ...check, status: "skipped", note: "Arızalı" });
+    expect(await stores.tasks.listChecks(cafeId, "2026-10-14", "2026-10-14")).toEqual([{ ...check, status: "skipped", note: "Arızalı" }]);
+    await stores.tasks.removeCheck(cafeId, item.id, "2026-10-14");
+    expect(await stores.tasks.listChecks(cafeId, "2026-10-01", "2026-10-31")).toEqual([]);
+
+    const digest = { cafeId, day: "2026-10-16", sentAt: at, recipients: 3 };
+    expect(await stores.tasks.addDigest(digest)).toBe(true);
+    expect(await stores.tasks.addDigest({ ...digest, recipients: 1 })).toBe(false);
+    expect(await stores.tasks.getDigest(cafeId, "2026-10-16")).toEqual(digest);
+    await stores.tasks.setMuted(cafeId, "stf_a", true);
+    await stores.tasks.setMuted(cafeId, "stf_a", true);
+    expect(await stores.tasks.listMuted(cafeId)).toEqual(["stf_a"]);
+    await stores.tasks.setMuted(cafeId, "stf_a", false);
+    expect(await stores.tasks.listMuted(cafeId)).toEqual([]);
+  });
 });

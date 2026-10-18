@@ -613,3 +613,42 @@ export type CreateEventInput = z.input<typeof createEventSchema>;
 export type UpdateEventInput = z.input<typeof updateEventSchema>;
 export type ReportInput = z.input<typeof reportSchema>;
 export type ResolveReportInput = z.input<typeof resolveReportSchema>;
+
+// ─────────────────────────────────────────────── tasks and alerts (plan piece 22)
+
+const taskAssign = z.enum(["all", "first", "last", "owner", "manager", "chef", "barista"]);
+const weekdays = z
+  .array(z.number().int().min(1).max(7))
+  .min(1, "En az bir gün seç")
+  .max(7)
+  .transform((d) => [...new Set(d)].sort() as (1 | 2 | 3 | 4 | 5 | 6 | 7)[]);
+const taskItem = z.object({
+  /** Missing for a new item. */
+  id: z.string().max(100).optional(),
+  title: z.string().trim().min(1, "Görevi yaz").max(120, "Görev çok uzun"),
+  note: z.string().trim().max(300, "Not çok uzun").nullable().optional(),
+  days: weekdays,
+});
+const taskListFields = {
+  name: z.string().trim().min(1, "Listeye bir ad ver").max(60, "Ad çok uzun"),
+  assign: taskAssign,
+  items: z.array(taskItem).max(60, "Bir listede en çok 60 görev olur"),
+};
+/** `POST /staff/:slug/tasks/lists`. The same `key` twice makes one list. */
+export const addTaskListSchema = z.object({ key: actionKey, ...taskListFields });
+/** `POST /staff/:slug/tasks/lists/:id`: the whole list; items left out come off it. */
+export const saveTaskListSchema = z.object(taskListFields);
+/** `POST /staff/:slug/tasks/check`: done, skipped (with why), or back to not done. */
+export const checkTaskSchema = z.object({
+  itemId: z.string().min(1).max(100),
+  day: weekDay,
+  status: z.enum(["done", "skipped", "open"]),
+  note: z.string().trim().max(300, "Not çok uzun").nullable().optional(),
+});
+/** `POST /staff/:slug/today/email`: the morning email on or off, for the viewer. */
+export const alertEmailSchema = z.object({ on: z.boolean() });
+
+export type AddTaskListInput = z.input<typeof addTaskListSchema>;
+export type SaveTaskListInput = z.input<typeof saveTaskListSchema>;
+export type CheckTaskInput = z.input<typeof checkTaskSchema>;
+export type AlertEmailInput = z.input<typeof alertEmailSchema>;
