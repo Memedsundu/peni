@@ -38,11 +38,17 @@ describe("Borçlar (plan piece 19)", () => {
       // Rent was paid with a check dated the 28th: owed until the bank pays it out.
       ["check", "Ali Rıza Bey (mal sahibi)", 4_500_000, "2026-10-28", false],
       ["bill", "Kuzey Kahve Kavurma", 700_000, "2026-10-31", false],
+      // Pay for the hours entered this month, and the ₺5.000 of Hakan's September still owed (piece 21).
+      ["wages", "Hakan Usta", 1_820_000, null, false],
+      ["wages", "Murat Aksu", 1_760_000, null, false],
+      ["wages", "Ece Tan", 1_221_000, null, false],
       // Murat paid for last week's milk himself and has had ₺200 of ₺540 back.
       ["loan", "Murat Aksu", 34_000, null, false],
       ["bill", "Fırıncı Hasan", 30_000, null, false],
     ]);
-    expect(view.totals).toEqual({ totalKurus: 5_819_000, overdueKurus: 555_000, weekKurus: 0 });
+    expect(view.totals).toEqual({ totalKurus: 10_620_000, overdueKurus: 555_000, weekKurus: 0 });
+    expect(view.rows.find((r) => r.kind === "wages" && r.name === "Hakan Usta")!.detail).toBe("Eylül, Ekim");
+    expect((await app.debts.get(await at("hakan"))).rows.some((r) => r.kind === "wages")).toBe(true);
     expect(view.card).toMatchObject({
       statementDay: 26,
       dueDay: 6,

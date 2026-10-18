@@ -38,6 +38,8 @@ import type {
   DebtsDTO,
   MoneyDTO,
   MonthsDTO,
+  PayMonthDTO,
+  ShiftWeekDTO,
 } from "./dto";
 import { errorMessageTr } from "./messages";
 import type {
@@ -98,6 +100,14 @@ import type {
   CloseMonthInput,
   ReopenMonthInput,
   RepayLenderInput,
+  AddShiftInput,
+  ClosePayInput,
+  CopyWeekInput,
+  PayoutInput,
+  PublishWeekInput,
+  SetHoursInput,
+  SetRateInput,
+  UpdateShiftInput,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -363,6 +373,37 @@ export function createPeniClient(options: PeniClientOptions) {
         closeMonth: (cafeSlug: string, input: CloseMonthInput) => call<MonthsDTO>("POST", `/staff/${slug(cafeSlug)}/money/months`, input, true),
         reopenMonth: (cafeSlug: string, closeId: string, input: ReopenMonthInput) =>
           call<MonthsDTO>("POST", `/staff/${slug(cafeSlug)}/money/months/${slug(closeId)}/reopen`, input, true),
+      },
+      /** Vardiyalar (piece 21). Viewing needs "shifts.view"; planning "shifts.edit". Each answers with the week. */
+      shifts: {
+        week: (cafeSlug: string, week?: string) =>
+          call<ShiftWeekDTO>("GET", `/staff/${slug(cafeSlug)}/shifts${week ? `?week=${encodeURIComponent(week)}` : ""}`, undefined, true),
+        add: (cafeSlug: string, input: AddShiftInput) => call<ShiftWeekDTO>("POST", `/staff/${slug(cafeSlug)}/shifts`, input, true),
+        update: (cafeSlug: string, shiftId: string, input: UpdateShiftInput) => call<ShiftWeekDTO>("POST", `/staff/${slug(cafeSlug)}/shifts/${slug(shiftId)}`, input, true),
+        remove: (cafeSlug: string, shiftId: string) => call<ShiftWeekDTO>("POST", `/staff/${slug(cafeSlug)}/shifts/${slug(shiftId)}/remove`, {}, true),
+        copy: (cafeSlug: string, input: CopyWeekInput) => call<ShiftWeekDTO>("POST", `/staff/${slug(cafeSlug)}/shifts/copy`, input, true),
+        publish: (cafeSlug: string, input: PublishWeekInput) => call<ShiftWeekDTO>("POST", `/staff/${slug(cafeSlug)}/shifts/publish`, input, true),
+      },
+      /**
+       * Puantaj ve maaş (piece 21). Everyone sees their own; "pay.hours" sees and corrects
+       * everyone's hours and rates, "pay.payouts" records pay, "pay.close" closes the month.
+       */
+      pay: {
+        month: (cafeSlug: string, month?: string) =>
+          call<PayMonthDTO>("GET", `/staff/${slug(cafeSlug)}/pay${month ? `?month=${encodeURIComponent(month)}` : ""}`, undefined, true),
+        setHours: (cafeSlug: string, month: string, input: SetHoursInput) =>
+          call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/hours?month=${encodeURIComponent(month)}`, input, true),
+        setRate: (cafeSlug: string, month: string, input: SetRateInput) =>
+          call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/rates?month=${encodeURIComponent(month)}`, input, true),
+        removeRate: (cafeSlug: string, month: string, rateId: string) =>
+          call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/rates/${slug(rateId)}/remove?month=${encodeURIComponent(month)}`, {}, true),
+        payout: (cafeSlug: string, input: PayoutInput) => call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/payouts`, input, true),
+        removePayout: (cafeSlug: string, payoutId: string) => call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/payouts/${slug(payoutId)}/remove`, {}, true),
+        close: (cafeSlug: string, input: ClosePayInput) => call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/closes`, input, true),
+        reopen: (cafeSlug: string, closeId: string, input: ReopenMonthInput) =>
+          call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/closes/${slug(closeId)}/reopen`, input, true),
+        /** The month's hours and pay as a CSV file for Excel; a link the browser opens. */
+        exportUrl: (cafeSlug: string, month: string) => `${base}/staff/${slug(cafeSlug)}/pay/export?month=${encodeURIComponent(month)}`,
       },
       /** Tedarikçiler (piece 18). Viewing needs "suppliers.view"; changes "suppliers.edit". */
       suppliers: {

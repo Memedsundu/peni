@@ -922,12 +922,12 @@ export interface StaffDashboardDTO {
 
 // ─────────────────────────────────────────────── debts (plan piece 19)
 
-export type DebtKindDTO = "bill" | "check" | "loan" | "card";
+export type DebtKindDTO = "bill" | "check" | "loan" | "card" | "wages";
 
 /** One line of "what we owe": an open bill, a check not cashed yet, a lender, or the card. */
 export interface DebtRowDTO {
   kind: DebtKindDTO;
-  /** The bill's or check's id, the lender's key, or "card". */
+  /** The bill's or check's id, the lender's key, "card", or the staff member's id for wages. */
   id: string;
   /** Supplier, payee, lender or card name. */
   name: string;
@@ -1055,6 +1055,8 @@ export type MoneyLineKindDTO =
   | "check"
   | "repayment"
   | "card"
+  /** Pay to a staff member (Puantaj ve maaş); the label is their name. */
+  | "wages"
   | "sales"
   /** Cash put in or taken out at Kasa, with its reason as the label. */
   | "drawer"
@@ -1111,8 +1113,10 @@ export interface MonthSummaryDTO {
   to: string;
   sales: { cashKurus: number; cardKurus: number; totalKurus: number };
   bills: { count: number; totalKurus: number; paidKurus: Record<string, number> };
+  /** Pay earned for hours in the month, and paid out in it. */
+  wages: { earnedKurus: number; paidKurus: number };
   money: { drawerKurus: number | null; reserveKurus: number | null; bankKurus: number | null };
-  owed: { billsKurus: number; checksKurus: number; loansKurus: number; cardKurus: number; totalKurus: number };
+  owed: { billsKurus: number; checksKurus: number; loansKurus: number; cardKurus: number; wagesKurus: number; totalKurus: number };
 }
 
 export interface MonthCloseDTO {
@@ -1227,4 +1231,147 @@ export interface RolesDTO {
 
 export interface ApiErrorBody {
   error: { code: string; message: string };
+}
+
+// ─────────────────────────────────────────────── Vardiyalar (piece 21)
+
+export interface ShiftPersonDTO {
+  memberId: string;
+  name: string;
+  role: StaffRole;
+}
+
+export interface ShiftDTO {
+  id: string;
+  day: string;
+  /** Minutes after midnight. */
+  start: number;
+  end: number;
+  people: ShiftPersonDTO[];
+  note: string | null;
+  /** The viewer is on it. */
+  mine: boolean;
+}
+
+export interface ShiftWeekDTO {
+  /** The Monday. */
+  weekStart: string;
+  /** Monday to Sunday. */
+  days: string[];
+  today: string;
+  published: boolean;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  /** False for someone who doesn't plan, while the week is a draft: then `shifts` is empty. */
+  visible: boolean;
+  shifts: ShiftDTO[];
+  /** Planned minutes per person this week, most first. */
+  totals: (ShiftPersonDTO & { minutes: number })[];
+  /** Who can be put on a shift; empty for those who can't plan. */
+  team: ShiftPersonDTO[];
+  /** The viewer's own staff member id. */
+  me: string;
+  canEdit: boolean;
+  /** This week has no shifts and the one before has: "Geçen haftayı kopyala". */
+  canCopy: boolean;
+  /** Days on or before this are in a closed month. */
+  closedThrough: string | null;
+}
+
+// ─────────────────────────────────────────────── Puantaj ve maaş (piece 21)
+
+export type PayMethodDTO = "cash" | "bank";
+
+export interface PayoutDTO {
+  id: string;
+  amountKurus: number;
+  method: PayMethodDTO;
+  account: MoneyAccountDTO | null;
+  paidOn: string;
+  note: string | null;
+  by: string | null;
+  /** Not in a closed month, and the viewer may record pay. */
+  canRemove: boolean;
+}
+
+export interface PayRateDTO {
+  id: string;
+  fromDay: string;
+  kurusPerHour: number;
+  /** Starts after the last closed pay month, and the viewer may change hours. */
+  canRemove: boolean;
+}
+
+export interface PayPersonDTO {
+  memberId: string;
+  name: string;
+  role: StaffRole;
+  /** Off the team now; shown for the month they worked or were paid in. */
+  removed: boolean;
+  /** Minutes worked each day of the month, null when not entered yet. */
+  worked: (number | null)[];
+  /** Minutes planned each day of the month. */
+  planned: number[];
+  minutes: number;
+  plannedMinutes: number;
+  /** Days up to today with a shift planned but no hours entered. */
+  missingDays: number;
+  /** The rate on the month's last day (or today, in the current month); null when none is set. */
+  rateKurus: number | null;
+  /** Every rate, oldest first: only for those who see pay, and for the person's own. */
+  rates: PayRateDTO[];
+  earnedKurus: number;
+  paidKurus: number;
+  leftKurus: number;
+  payouts: PayoutDTO[];
+}
+
+export interface PaySummaryDTO {
+  month: string;
+  minutes: number;
+  earnedKurus: number;
+  paidKurus: number;
+  people: { memberId: string; name: string; role: StaffRole; minutes: number; earnedKurus: number; paidKurus: number }[];
+}
+
+export interface PayCloseDTO {
+  id: string;
+  month: string;
+  closedAt: string;
+  by: string | null;
+  note: string | null;
+  summary: PaySummaryDTO;
+  reopenedAt: string | null;
+  reopenedBy: string | null;
+  reopenReason: string | null;
+  canReopen: boolean;
+}
+
+/** Why the month can't be closed now. */
+export type PayCloseBlockDTO = "NOT_OVER" | "EARLIER_OPEN" | "MISSING_DAYS" | "ALREADY_CLOSED" | "NO_PERMISSION";
+
+export interface PayMonthDTO {
+  month: string;
+  /** Every day of the month. */
+  days: string[];
+  today: string;
+  /** The months that can be looked at, newest first. */
+  months: string[];
+  /** Only the viewer's own row: they don't see others' pay. */
+  own: boolean;
+  people: PayPersonDTO[];
+  totals: { minutes: number; earnedKurus: number; paidKurus: number; leftKurus: number; missingDays: number };
+  /** The close standing for this month, if any. */
+  close: PayCloseDTO | null;
+  /** Earlier closes of this month that were reopened, newest first. */
+  history: PayCloseDTO[];
+  canClose: boolean;
+  closeBlock: PayCloseBlockDTO | null;
+  canEditHours: boolean;
+  canPay: boolean;
+  /** The last day whose hours are kept by a closed pay month. */
+  payClosedThrough: string | null;
+  /** The last day of a closed month in Ay kapanışı: nothing dated then can change. */
+  closedThrough: string | null;
+  cashFrom: CashFromDTO | null;
 }

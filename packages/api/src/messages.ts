@@ -174,6 +174,23 @@ export const errorMessagesTr: Record<string, string> = {
   MONTH_CLOSED: "Bu ay az önce kapatıldı.",
   MONTH_NOT_FOUND: "Bu kapanış bulunamadı.",
   REOPEN_LATEST_ONLY: "Yalnızca son kapanan ay yeniden açılabilir.",
+  SHIFT_TIMES: "Saatleri kontrol et: bitiş başlangıçtan sonra olmalı, çeyrek saatlerle.",
+  SHIFT_OVERLAP: "Bu kişi o saatlerde başka bir vardiyada.",
+  SHIFT_NOT_FOUND: "Bu vardiya bulunamadı.",
+  NOT_ON_TEAM: "Bu kişi ekipte değil.",
+  WEEK_INVALID: "Hafta pazartesi başlamalı.",
+  WEEK_NOT_EMPTY: "Bu haftada zaten vardiya var. Kopyalamak için hafta boş olmalı.",
+  NOTHING_TO_COPY: "Geçen haftada vardiya yok.",
+  HOURS_INVALID: "Saatleri kontrol et: bir gün en fazla 24 saat.",
+  HOURS_FUTURE: "Henüz gelmemiş bir güne saat girilemez.",
+  PAY_CLOSED: "Bu maaş ayı kapatıldı. Saatleri ve ücretleri değiştirmek için önce ayı yeniden aç.",
+  RATE_NOT_FOUND: "Bu ücret bulunamadı.",
+  PAY_OVERPAY: "Bu, o ay için kalan tutardan fazla.",
+  PAY_MONTH_INVALID: "Bu ay için ödeme yapılamaz.",
+  PAYOUT_NOT_FOUND: "Bu ödeme bulunamadı.",
+  PAY_NOT_CLOSABLE: "Bu ay şimdi kapatılamaz. Maaş ayları sırayla ve bittikten sonra kapanır.",
+  PAY_MISSING_DAYS: "Önce eksik günlerin saatlerini gir.",
+  PAY_ALREADY_CLOSED: "Bu maaş ayı az önce kapatıldı.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

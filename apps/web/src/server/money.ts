@@ -8,6 +8,9 @@ import {
   loansLeft,
   monthDays,
   nextMonthToClose,
+  owedByMonth,
+  dayPay,
+  rateOn,
   standingCloses,
   startOfLocalDay,
   validMonth,
@@ -27,6 +30,7 @@ import {
   type PaymentStore,
   type PeniDirectory,
   type Permission,
+  type ShiftStore,
   type StaffStore,
 } from "@peni/core";
 import { randomUUID } from "node:crypto";
@@ -51,7 +55,7 @@ const DRAWER_REASON: Record<string, string> = {
 
 /** A payment elsewhere that moves money: what it was, where from, and when. */
 export interface Posting {
-  /** "bill_payment:<id>", "check:<id>", "repayment:<id>", "card_payment:<id>". */
+  /** "bill_payment:<id>", "check:<id>", "repayment:<id>", "card_payment:<id>", "pay:<id>". */
   source: string;
   account: MoneyAccount | null;
   /** In is positive, out negative. */
@@ -85,6 +89,7 @@ export class MoneyService {
     private readonly payments: PaymentStore,
     private readonly bills: BillStore,
     private readonly debts: DebtStore,
+    private readonly shifts: ShiftStore,
     private readonly directory: PeniDirectory,
     private readonly staff: StaffStore,
     private readonly atomically: <T>(fn: () => Promise<T>) => Promise<T>,
@@ -328,7 +333,8 @@ export class MoneyService {
           closedAt: c.closedAt.toISOString(),
           by: names.get(c.closedById) ?? null,
           note: c.note,
-          summary: c.summary,
+          // Closes kept before wages were part of a month read as none.
+          summary: { ...c.summary, wages: c.summary.wages ?? { earnedKurus: 0, paidKurus: 0 }, owed: { ...c.summary.owed, wagesKurus: c.summary.owed.wagesKurus ?? 0 } },
           reopenedAt: c.reopenedAt?.toISOString() ?? null,
           reopenedBy: c.reopenedById ? (names.get(c.reopenedById) ?? null) : null,
           reopenReason: c.reopenReason,
@@ -391,7 +397,7 @@ export class MoneyService {
     const tz = await this.timeZone(cafeId);
     const fromAt = this.dayStart(from, tz);
     const toAt = this.dayStart(monthDays(addMonths(month, 1)).from, tz);
-    const [settled, bills, billPayments, checks, loans, repayments, cardPayments, start, sessions] = await Promise.all([
+    const [settled, bills, billPayments, checks, loans, repayments, cardPayments, start, sessions, workDays, rates, payouts] = await Promise.all([
       this.payments.listSettled(cafeId, fromAt, toAt),
       this.bills.listBills(cafeId, { to }),
       this.bills.listPayments(cafeId),
@@ -401,6 +407,9 @@ export class MoneyService {
       this.debts.listCardPayments(cafeId),
       this.store.getStart(cafeId),
       this.cash.listSessions(cafeId, SESSIONS),
+      this.shifts.listWorkDays(cafeId, "0000-01-01", to),
+      this.shifts.listRates(cafeId),
+      this.shifts.listPayouts(cafeId, { paidThrough: to }),
     ]);
     const net = (method: Payment["method"]) =>
       settled.filter((p) => p.method === method).reduce((s, p) => s + (p.kind === "sale" ? p.amountKurus : -p.amountKurus), 0);
@@ -435,14 +444,21 @@ export class MoneyService {
     const charged = billPayments.filter((p) => p.method === "credit" && p.paidOn <= to).reduce((s, p) => s + p.amountKurus, 0);
     const cardPaid = cardPayments.filter((p) => p.paidOn <= to).reduce((s, p) => s + p.amountKurus, 0);
     const cardKurus = Math.max(0, charged - cardPaid);
+    const wages = {
+      earnedKurus: workDays.filter((d) => d.day >= from).reduce((s, d) => s + dayPay(d.minutes, rateOn(rates, d.memberId, d.day)), 0),
+      paidKurus: payouts.filter((p) => p.paidOn >= from).reduce((s, p) => s + p.amountKurus, 0),
+    };
+    let wagesKurus = 0;
+    for (const months of owedByMonth(workDays, rates, payouts).values()) for (const k of months.values()) wagesKurus += k;
     return {
       month,
       from,
       to,
       sales,
       bills: { count: inMonth.length, totalKurus: inMonth.reduce((s, b) => s + b.totalKurus, 0), paidKurus },
+      wages,
       money: { drawerKurus, reserveKurus, bankKurus },
-      owed: { billsKurus, checksKurus, loansKurus, cardKurus, totalKurus: billsKurus + checksKurus + loansKurus + cardKurus },
+      owed: { billsKurus, checksKurus, loansKurus, cardKurus, wagesKurus, totalKurus: billsKurus + checksKurus + loansKurus + cardKurus + wagesKurus },
     };
   }
 
@@ -452,7 +468,7 @@ export class MoneyService {
   private async lines(cafeId: string, since: string, through: string | null): Promise<MoneyLineDTO[]> {
     const tz = await this.timeZone(cafeId);
     const sinceAt = this.dayStart(since, tz);
-    const [movements, settled, sessions, billPayments, bills, checks, loans, repayments, card] = await Promise.all([
+    const [movements, settled, sessions, billPayments, bills, checks, loans, repayments, card, payouts] = await Promise.all([
       this.store.listMovements(cafeId, { since }),
       this.payments.listSettled(cafeId, sinceAt, this.justAfterNow()),
       this.cash.listSessions(cafeId, SESSIONS),
@@ -462,7 +478,10 @@ export class MoneyService {
       this.debts.listLoans(cafeId),
       this.debts.listRepayments(cafeId),
       this.debts.getCard(cafeId),
+      this.shifts.listPayouts(cafeId),
     ]);
+    const payee = new Map(payouts.map((p) => [p.id, p.memberId]));
+    const payeeNames = await this.names(payouts.map((p) => p.memberId));
     const suppliers = new Map((await this.bills.listSuppliers(cafeId, { includeArchived: true })).map((s) => [s.id, s.name]));
     const billOf = new Map(bills.map((b) => [b.id, b]));
     const paymentBill = new Map(billPayments.map((p) => [p.id, p.billId]));
@@ -481,6 +500,7 @@ export class MoneyService {
       if (type === "check") return { kind: "check", label: checkNumber.get(id) ?? null, billId: null };
       if (type === "repayment") return { kind: "repayment", label: lenderName.get(repaymentLender.get(id) ?? "") ?? null, billId: null };
       if (type === "card_payment") return { kind: "card", label: card?.name ?? null, billId: null };
+      if (type === "pay") return { kind: "wages", label: payeeNames.get(payee.get(id) ?? "") ?? null, billId: null };
       return { kind: "transfer", label: null, billId: null };
     };
 

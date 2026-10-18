@@ -35,11 +35,12 @@ export type MovementKind =
   | "withdraw"
   /** Set to what the bank statement or a count says, with why. */
   | "correction"
-  /** Paid out for a bill, a cashed check, a loan paid back, or the credit card. */
+  /** Paid out for a bill, a cashed check, a loan paid back, the credit card, or wages. */
   | "bill"
   | "check"
   | "repayment"
-  | "card";
+  | "card"
+  | "wages";
 
 export const MONEY_NOTE_MAX = 200;
 /** The most one movement can be: ₺10.000.000. */
@@ -80,10 +81,12 @@ export interface MonthSummary {
   sales: { cashKurus: Kurus; cardKurus: Kurus; totalKurus: Kurus };
   /** Bills dated in the month, and what was paid on bills in it, by how. */
   bills: { count: number; totalKurus: Kurus; paidKurus: Record<string, Kurus> };
+  /** Pay earned for hours worked in the month (Puantaj ve maaş), and what was paid out in it. */
+  wages: { earnedKurus: Kurus; paidKurus: Kurus };
   /** What each account held at the end of the month; null when it wasn't tracked yet. */
   money: { drawerKurus: Kurus | null; reserveKurus: Kurus | null; bankKurus: Kurus | null };
   /** What was owed at the end of the month. */
-  owed: { billsKurus: Kurus; checksKurus: Kurus; loansKurus: Kurus; cardKurus: Kurus; totalKurus: Kurus };
+  owed: { billsKurus: Kurus; checksKurus: Kurus; loansKurus: Kurus; cardKurus: Kurus; wagesKurus: Kurus; totalKurus: Kurus };
 }
 
 export interface MonthClose {
@@ -151,13 +154,19 @@ export function validMonth(s: string): boolean {
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
 }
 
+/** A month's close, here or for pay: closed, and maybe opened again. */
+export interface AnyClose {
+  month: string;
+  reopenedAt: Date | null;
+}
+
 /** The closes still standing (not reopened), newest first. */
-export function standingCloses(closes: MonthClose[]): MonthClose[] {
+export function standingCloses<C extends AnyClose>(closes: C[]): C[] {
   return closes.filter((c) => !c.reopenedAt).sort((a, b) => b.month.localeCompare(a.month));
 }
 
 /** The last day nothing can be written on any more: the end of the latest standing close. */
-export function closedThrough(closes: MonthClose[]): string | null {
+export function closedThrough(closes: AnyClose[]): string | null {
   const latest = standingCloses(closes)[0];
   return latest ? monthDays(latest.month).to : null;
 }
@@ -166,7 +175,7 @@ export function closedThrough(closes: MonthClose[]): string | null {
  * The month that can be closed next: the one after the latest standing close, or last
  * month when none stands. Only a month that is over; null when that one isn't yet.
  */
-export function nextMonthToClose(closes: MonthClose[], today: string): string | null {
+export function nextMonthToClose(closes: AnyClose[], today: string): string | null {
   const latest = standingCloses(closes)[0];
   const next = latest ? addMonths(latest.month, 1) : addMonths(monthOf(today), -1);
   return next < monthOf(today) ? next : null;

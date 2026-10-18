@@ -154,6 +154,12 @@ model Cafe {
   moneyStart     MoneyStart?
   moneyMoves     MoneyMovement[]
   monthCloses    MonthClose[]
+  shifts         Shift[]
+  shiftWeeks     ShiftWeek[]
+  workDays       WorkDay[]
+  payRates       PayRate[]
+  payPayouts     PayPayout[]
+  payCloses      PayClose[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -1158,6 +1164,7 @@ enum MovementKind {
   check
   repayment
   card
+  wages
 }
 
 /// The day the café started keeping its money in Peni, with the reserve's and the bank's opening amounts as movements.
@@ -1199,6 +1206,114 @@ model MonthClose {
   /// YYYY-MM.
   month         String
   /// The month while the close stands, cleared when it is reopened: one standing close per month.
+  standingMonth String?
+  closedAt      DateTime
+  closedById    String
+  note          String?
+  summary       Json
+  reopenedAt    DateTime?
+  reopenedById  String?
+  reopenReason  String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, standingMonth])
+  @@index([cafeId, closedAt])
+}
+
+// ─────────────────────────────────────────────── Vardiyalar and Puantaj ve maaş (piece 21)
+
+/// One planned shift: a day, a start and an end, and the people on it.
+model Shift {
+  id           String   @id
+  cafeId       String
+  /// YYYY-MM-DD in the café's time zone.
+  day          String
+  /// Minutes after midnight; the end is after the start, at most 1440.
+  startMinutes Int
+  endMinutes   Int
+  /// StaffMember ids.
+  memberIds    String[]
+  note         String?
+  createdById  String
+  createdAt    DateTime
+  updatedAt    DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, day])
+}
+
+/// A week (from its Monday) is a draft until it is published.
+model ShiftWeek {
+  cafeId        String
+  weekStart     String
+  publishedAt   DateTime?
+  publishedById String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, weekStart])
+}
+
+/// What one person worked on one day, in minutes.
+model WorkDay {
+  cafeId    String
+  memberId  String
+  day       String
+  minutes   Int
+  note      String?
+  byId      String
+  updatedAt DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, memberId, day])
+  @@index([cafeId, day])
+}
+
+/// An hourly rate from a day on, until the person's next one.
+model PayRate {
+  id           String   @id
+  cafeId       String
+  memberId     String
+  fromDay      String
+  kurusPerHour Int
+  byId         String
+  createdAt    DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, memberId, fromDay])
+}
+
+/// Money paid to one person against one month's pay.
+model PayPayout {
+  id          String        @id
+  cafeId      String
+  memberId    String
+  /// YYYY-MM: the pay month it counts against.
+  month       String
+  amountKurus Int
+  method      String
+  account     MoneyAccount?
+  paidOn      String
+  note        String?
+  byId        String
+  createdAt   DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, month])
+  @@index([cafeId, paidOn])
+}
+
+/// A pay month closed with its hours and pay as they were.
+model PayClose {
+  id            String    @id
+  cafeId        String
+  month         String
+  /// The month while the close stands, cleared when it is reopened.
   standingMonth String?
   closedAt      DateTime
   closedById    String

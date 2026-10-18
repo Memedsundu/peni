@@ -536,10 +536,55 @@ export type AddLoanInput = z.input<typeof addLoanSchema>;
 export type RepayLenderInput = z.input<typeof repayLenderSchema>;
 export type CardSettingsInput = z.input<typeof cardSettingsSchema>;
 export type PayCardInput = z.input<typeof payCardSchema>;
+
+// ─────────────────────────────────────────────── Vardiyalar and Puantaj ve maaş (piece 21)
+
+const weekDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tarihi kontrol et");
+const minutesOfDay = z.number().int().min(0).max(1440);
+const shiftNote = z.string().trim().max(200, "Not çok uzun");
+const shiftPeople = z.array(z.string().min(1).max(100)).min(1, "Vardiyaya en az bir kişi seç").max(20);
+
+/** A new shift. The same `key` adds one. */
+export const addShiftSchema = z.object({ key: actionKey, day: weekDay, start: minutesOfDay, end: minutesOfDay, memberIds: shiftPeople, note: shiftNote.nullish() });
+/** Only what changes. */
+export const updateShiftSchema = z.object({ day: weekDay.optional(), start: minutesOfDay.optional(), end: minutesOfDay.optional(), memberIds: shiftPeople.optional(), note: shiftNote.nullish() });
+/** "Geçen haftayı kopyala" into `week` (a Monday). */
+export const copyWeekSchema = z.object({ week: weekDay });
+/** "Yayınla" or back to a draft. */
+export const publishWeekSchema = z.object({ week: weekDay, published: z.boolean() });
+
+/** Hours for several people and days at once; null clears a day. */
+export const setHoursSchema = z.object({
+  days: z
+    .array(z.object({ memberId: z.string().min(1).max(100), day: weekDay, minutes: minutesOfDay.nullable() }))
+    .min(1)
+    .max(400),
+});
+export const setRateSchema = z.object({ memberId: z.string().min(1).max(100), kurusPerHour: z.number().int().min(1).max(1_000_000), fromDay: weekDay });
+export const payoutSchema = z.object({
+  key: actionKey,
+  memberId: z.string().min(1).max(100),
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  amountKurus: z.number().int().min(1).max(100_000_000),
+  method: z.enum(["cash", "bank"]),
+  from: z.enum(["drawer", "reserve"]).optional(),
+  paidOn: weekDay.optional(),
+  note: moneyNote.optional(),
+});
+export const closePaySchema = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/), note: moneyNote.optional() });
+
 export type StartMoneyInput = z.input<typeof startMoneySchema>;
 export type MoneyMoveInput = z.input<typeof moneyMoveSchema>;
 export type CloseMonthInput = z.input<typeof closeMonthSchema>;
 export type ReopenMonthInput = z.input<typeof reopenMonthSchema>;
+export type AddShiftInput = z.input<typeof addShiftSchema>;
+export type UpdateShiftInput = z.input<typeof updateShiftSchema>;
+export type CopyWeekInput = z.input<typeof copyWeekSchema>;
+export type PublishWeekInput = z.input<typeof publishWeekSchema>;
+export type SetHoursInput = z.input<typeof setHoursSchema>;
+export type SetRateInput = z.input<typeof setRateSchema>;
+export type PayoutInput = z.input<typeof payoutSchema>;
+export type ClosePayInput = z.input<typeof closePaySchema>;
 export type CountStockInput = z.input<typeof countStockSchema>;
 export type WasteStockInput = z.input<typeof wasteStockSchema>;
 export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;

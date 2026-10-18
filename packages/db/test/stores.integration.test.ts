@@ -582,8 +582,9 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
 
     const summary = {
       month: "2026-09", from: "2026-09-01", to: "2026-09-30", sales: { cashKurus: 0, cardKurus: 0, totalKurus: 0 },
-      bills: { count: 0, totalKurus: 0, paidKurus: {} }, money: { drawerKurus: null, reserveKurus: 1_200_000, bankKurus: 8_500_000 },
-      owed: { billsKurus: 0, checksKurus: 0, loansKurus: 0, cardKurus: 0, totalKurus: 0 },
+      bills: { count: 0, totalKurus: 0, paidKurus: {} }, wages: { earnedKurus: 0, paidKurus: 0 },
+      money: { drawerKurus: null, reserveKurus: 1_200_000, bankKurus: 8_500_000 },
+      owed: { billsKurus: 0, checksKurus: 0, loansKurus: 0, cardKurus: 0, wagesKurus: 0, totalKurus: 0 },
     };
     const close = { id: `mcl_${run}`, cafeId, month: "2026-09", closedAt: at, closedById: "stf_x", note: null, summary, reopenedAt: null, reopenedById: null, reopenReason: null };
     expect(await stores.books.saveClose(close)).toBe(true);
@@ -595,5 +596,52 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       expect.arrayContaining([[`mcl_${run}`, "Eksik fatura"], [`mcl2_${run}`, null]]),
     );
     expect(await stores.books.getClose(cafeId, `mcl_${run}`)).toMatchObject({ summary, reopenReason: "Eksik fatura" });
+  });
+  it("keeps shifts, published weeks, hours per day, rates, payouts and pay closes", async () => {
+    const shift = { id: `shf_${run}`, cafeId, day: "2026-10-13", startMinutes: 480, endMinutes: 960, memberIds: ["stf_a", "stf_b"], note: null, createdById: "stf_x", createdAt: at, updatedAt: at };
+    await stores.shifts.saveShift(shift);
+    await stores.shifts.addShifts([{ ...shift, id: `shf2_${run}`, day: "2026-10-12", memberIds: ["stf_a"] }, { ...shift, memberIds: [] }]);
+    expect((await stores.shifts.listShifts(cafeId, "2026-10-12", "2026-10-18")).map((s) => [s.id, s.memberIds])).toEqual([
+      [`shf2_${run}`, ["stf_a"]],
+      [`shf_${run}`, ["stf_a", "stf_b"]],
+    ]);
+    await stores.shifts.saveShift({ ...shift, endMinutes: 1440, note: "Kapanış" });
+    expect(await stores.shifts.getShift(cafeId, shift.id)).toMatchObject({ endMinutes: 1440, note: "Kapanış" });
+    await stores.shifts.removeShift(cafeId, `shf2_${run}`);
+    expect(await stores.shifts.listShifts(cafeId, "2026-10-12", "2026-10-12")).toEqual([]);
+
+    await stores.shifts.saveWeek({ cafeId, weekStart: "2026-10-12", publishedAt: at, publishedById: "stf_x" });
+    await stores.shifts.saveWeek({ cafeId, weekStart: "2026-10-12", publishedAt: null, publishedById: null });
+    expect(await stores.shifts.getWeek(cafeId, "2026-10-12")).toMatchObject({ publishedAt: null });
+
+    const day = { cafeId, memberId: "stf_a", day: "2026-10-13", minutes: 480, note: null, byId: "stf_x", updatedAt: at };
+    await stores.shifts.setWorkDays(cafeId, [day, { ...day, day: "2026-10-14", minutes: 300 }], []);
+    await stores.shifts.setWorkDays(cafeId, [{ ...day, minutes: 450 }], [{ memberId: "stf_a", day: "2026-10-14" }]);
+    expect((await stores.shifts.listWorkDays(cafeId, "2026-10-01", "2026-10-31")).map((d) => [d.day, d.minutes])).toEqual([["2026-10-13", 450]]);
+
+    const rate = { id: `prt_${run}`, cafeId, memberId: "stf_a", fromDay: "2026-10-01", kurusPerHour: 15_000, byId: "stf_x", createdAt: at };
+    await stores.shifts.saveRate(rate);
+    // Same person, same day: the new rate replaces the old.
+    await stores.shifts.saveRate({ ...rate, id: `prt2_${run}`, kurusPerHour: 16_000 });
+    expect((await stores.shifts.listRates(cafeId)).map((r) => [r.id, r.kurusPerHour])).toEqual([[`prt2_${run}`, 16_000]]);
+    await stores.shifts.removeRate(cafeId, `prt2_${run}`);
+    expect(await stores.shifts.listRates(cafeId)).toEqual([]);
+
+    const payout = { id: `ppo_${run}`, cafeId, memberId: "stf_a", month: "2026-09", amountKurus: 300_000, method: "bank" as const, account: "bank" as const, paidOn: "2026-10-05", note: null, byId: "stf_x", createdAt: at };
+    await stores.shifts.addPayout(payout);
+    await stores.shifts.addPayout({ ...payout, amountKurus: 1 });
+    expect(await stores.shifts.listPayouts(cafeId, { month: "2026-09" })).toEqual([payout]);
+    expect(await stores.shifts.listPayouts(cafeId, { paidThrough: "2026-10-04" })).toEqual([]);
+    await stores.shifts.removePayout(cafeId, payout.id);
+    expect(await stores.shifts.getPayout(cafeId, payout.id)).toBeNull();
+
+    const summary = { month: "2026-09", minutes: 600, earnedKurus: 150_000, paidKurus: 0, people: [{ memberId: "stf_a", name: "Ece", role: "barista" as const, minutes: 600, earnedKurus: 150_000, paidKurus: 0 }] };
+    const close = { id: `pcl_${run}`, cafeId, month: "2026-09", closedAt: at, closedById: "stf_x", note: null, summary, reopenedAt: null, reopenedById: null, reopenReason: null };
+    expect(await stores.shifts.savePayClose(close)).toBe(true);
+    expect(await stores.ledger.atomically(() => stores.shifts.savePayClose({ ...close, id: `pcl2_${run}` }))).toBe(false);
+    expect(await stores.shifts.savePayClose({ ...close, reopenedAt: at, reopenedById: "stf_x", reopenReason: "Eksik gün" })).toBe(true);
+    expect(await stores.shifts.savePayClose({ ...close, id: `pcl2_${run}` })).toBe(true);
+    expect(await stores.shifts.getPayClose(cafeId, close.id)).toMatchObject({ summary, reopenReason: "Eksik gün" });
+    expect(await stores.shifts.listPayCloses(cafeId)).toHaveLength(2);
   });
 });
