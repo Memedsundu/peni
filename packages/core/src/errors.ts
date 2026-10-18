@@ -13,7 +13,10 @@ export type PeniErrorCode =
   | "ASKIDA_EMPTY"
   | "ASKIDA_LIMIT"
   | "ASKIDA_TOO_NEW"
-  | "PRODUCT_NOT_ELIGIBLE";
+  | "PRODUCT_NOT_ELIGIBLE"
+  | "CLAIM_TAKEN"
+  | "CLAIM_EXPIRED"
+  | "CLAIM_CANCELLED";
 
 /** Domain error. `code` is stable and safe to show to clients; UI maps it to localized text. */
 export class PeniError extends Error {

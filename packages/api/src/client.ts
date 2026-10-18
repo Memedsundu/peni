@@ -1,5 +1,6 @@
 import type {
   AuthProvidersDTO,
+  ClaimDTO,
   CafeDetailDTO,
   CafeMembersDTO,
   CafeSummaryDTO,
@@ -49,6 +50,7 @@ import type {
   StaffSignInInput,
   UpdateStaffInput,
   SendGiftInput,
+  TakeClaimInput,
   TillDonationInput,
   UpdateProfileInput,
 } from "./schemas";
@@ -160,6 +162,12 @@ export function createPeniClient(options: PeniClientOptions) {
     },
     wallet: {
       get: () => call<FullWalletDTO>("GET", "/me/wallet"),
+    },
+    claims: {
+      /** Public; says whether it's the viewer's when signed in. */
+      get: (token: string) => call<ClaimDTO>("GET", `/claims/${slug(token)}`),
+      /** "Peni'yi al": by the QR's token or the typed code. Taking it twice is harmless. */
+      take: (input: TakeClaimInput) => call<ClaimDTO>("POST", "/claims", input),
     },
     gifts: {
       send: (input: SendGiftInput) => call<GiftDTO>("POST", "/gifts", input),

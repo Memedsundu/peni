@@ -207,6 +207,12 @@ export const saveRolesSchema = z.object({
 /** `POST /auth/email/start`: sends a 6-digit code. */
 export const emailStartSchema = z.object({ email: emailSchema });
 
+/** `POST /claims`: the QR's token, or the 4-digit code typed at a café. */
+export const takeClaimSchema = z.union([
+  z.object({ token: z.string().trim().min(10).max(100) }),
+  z.object({ cafeSlug: z.string().min(1).max(100), code: z.string().trim().regex(/^\d{4}$/, "Kod 4 rakam olmalı") }),
+]);
+
 /** `POST /auth/email/verify` */
 export const emailVerifySchema = z.object({
   email: emailSchema,
@@ -253,3 +259,4 @@ export type EmailStartInput = z.input<typeof emailStartSchema>;
 export type EmailVerifyInput = z.input<typeof emailVerifySchema>;
 export type GoogleSignInInput = z.input<typeof googleSignInSchema>;
 export type AppleSignInInput = z.input<typeof appleSignInSchema>;
+export type TakeClaimInput = z.input<typeof takeClaimSchema>;

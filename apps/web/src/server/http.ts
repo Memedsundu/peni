@@ -19,6 +19,9 @@ const STATUS: Record<string, number> = {
   MEMBERSHIP_BLOCKED: 403,
   IDEMPOTENCY_CONFLICT: 409,
   GIFT_NOT_PENDING: 409,
+  CLAIM_TAKEN: 409,
+  CLAIM_EXPIRED: 410,
+  CLAIM_CANCELLED: 410,
 };
 
 export function errorResponse(error: unknown): NextResponse {

@@ -35,6 +35,7 @@ model Customer {
   rsvps          EventRsvp[]
   staffAccount   StaffAccount?
   lookups        GiftLookup[]
+  claimMisses    ClaimCodeMiss[]
   customerLogins CustomerLogin[]
 }
 
@@ -742,4 +743,15 @@ model PeniClaim {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@unique([cafeId, businessDay, code])
+}
+
+/// A wrong peni code typed by a customer; a few an hour are allowed, to stop guessing.
+model ClaimCodeMiss {
+  id         String   @id @default(cuid())
+  customerId String
+  at         DateTime
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, at])
 }

@@ -192,8 +192,8 @@ const TEXT = {
   paidByCard: { tr: "Kartla ödendi", en: "Paid by card" },
   takePeni: { tr: "Peni'ni al", en: "Take your peni" },
   scanHelp: {
-    tr: "Peni uygulamasında Tara'ya dokun ve kodu okut. Ya da bu kodu yaz:",
-    en: "In the Peni app, tap Scan and point it at the code. Or type this code:",
+    tr: "Telefonunun kamerasıyla QR'ı okut. Ya da bu kodu şu adreste yaz:",
+    en: "Scan the QR with your phone's camera. Or type this code at:",
   },
   peniQr: { tr: "Peni almak için QR kod", en: "QR code to take your peni" },
   welcome: { tr: "Hoş geldin", en: "Welcome" },

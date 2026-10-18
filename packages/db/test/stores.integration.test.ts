@@ -257,6 +257,24 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect([...(await stores.claims.codesUsed(cafeId, day))]).toEqual(["0427"]);
     expect(await stores.claims.saveClaim({ ...claim, cancelledAt: at })).toBe(true);
     expect(await stores.claims.getClaimByOrder(cafeId, orderId)).toEqual({ ...claim, cancelledAt: at });
+
+    // Piece 10: found by its QR token or its code, and taken once inside the ledger's transaction.
+    const open = { ...claim, id: `clm3_${run}`, orderId: `${orderId}_2`, code: "1234", token: `tok3_${run}`, peni: 9 };
+    expect(await stores.claims.saveClaim(open)).toBe(true);
+    expect((await stores.claims.getClaimByToken(`tok3_${run}`))!.id).toBe(open.id);
+    expect((await stores.claims.getClaimByCode(cafeId, day, "1234"))!.id).toBe(open.id);
+    expect(await stores.claims.getClaimByCode(cafeId, day, "9999")).toBeNull();
+    const service = new PeniService(new Ledger(stores.ledger), stores.directory, () => at, stores.claims);
+    const before = await service.walletBalance(`m_ayse_${run}`);
+    await service.takeClaim(open.id, `m_ayse_${run}`);
+    await expect(service.takeClaim(open.id, `m_mehmet_${run}`)).rejects.toMatchObject({ code: "CLAIM_TAKEN" });
+    expect(await service.walletBalance(`m_ayse_${run}`)).toBe(before + 9);
+    expect(await stores.claims.getClaim(open.id)).toMatchObject({ claimedAt: at, claimedByMembershipId: `m_ayse_${run}` });
+
+    await stores.claims.recordMiss(ayse, at);
+    await stores.claims.recordMiss(ayse, at);
+    expect(await stores.claims.countMisses(ayse, at)).toBe(2);
+    expect(await stores.claims.countMisses(mehmet, at)).toBe(0);
   });
 
   it("keeps payments with one per key at a café, oldest first per order", async () => {

@@ -1,6 +1,7 @@
 import type {
   AskidaDTO,
   CafeDetailDTO,
+  ClaimDTO,
   CafeHue,
   CafeMembersDTO,
   CafeSummaryDTO,
@@ -18,6 +19,7 @@ import type {
   SessionDTO,
   StaffDashboardDTO,
   StaffReportFieldsDTO,
+  TakeClaimInput,
   WalletDTO,
 } from "@peni/api";
 import {
@@ -27,6 +29,9 @@ import {
   InMemoryLedgerStore,
   InMemoryMenuStore,
   InMemoryClaimStore,
+  CLAIM_MISSES_PER_HOUR,
+  claimState,
+  localDateKey,
   InMemoryPaymentStore,
   InMemoryCashStore,
   manualTerminals,
@@ -51,6 +56,7 @@ import {
   type MenuItem,
   type MenuStore,
   type ClaimStore,
+  type PeniClaim,
   type PaymentStore,
   type CashStore,
   type PaymentTerminals,
@@ -125,6 +131,7 @@ export interface PeniAppOptions {
 }
 
 const HOUR_MS = 3_600_000;
+const CLOSED_CLAIM = { claimed: "CLAIM_TAKEN", expired: "CLAIM_EXPIRED", cancelled: "CLAIM_CANCELLED" } as const;
 const DAY_MS = 24 * HOUR_MS;
 /** Customer sessions last this long. */
 const SESSION_MS = 90 * DAY_MS;
@@ -152,6 +159,8 @@ export class PeniApp {
   readonly staff: StaffService;
   /** Customer sign-in with Google, Apple or an email code. */
   readonly auth: CustomerAuth;
+  /** Paid orders' peni codes (plan pieces 7 and 10). */
+  private readonly claims: ClaimStore;
   private clockOverride: Date | null = null;
 
   constructor(
@@ -163,7 +172,8 @@ export class PeniApp {
     this.identity = stores.identity;
     this.community = stores.community;
     this.menu = stores.menu;
-    this.peni = new PeniService(this.ledger, this.directory, () => this.now());
+    this.claims = stores.claims;
+    this.peni = new PeniService(this.ledger, this.directory, () => this.now(), stores.claims);
     this.auth = new CustomerAuth(this.identity, {
       now: () => this.now(),
       verifier: options.auth?.verifier ?? new JoseIdTokenVerifier({ google: { audiences: [] }, apple: { audiences: [] } }),
@@ -173,7 +183,7 @@ export class PeniApp {
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
     this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
     this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
-    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, this.cash, () => this.now());
+    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, this.cash, this.peni, () => this.now());
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
@@ -497,6 +507,69 @@ export class PeniApp {
             : viewerMembership
               ? "member"
               : "guest",
+    };
+  }
+
+  // ─────────────────────────────────────────────── earning peni (plan piece 10)
+
+  /** What the customer screen's QR opens: public, and personal once signed in. */
+  async claimPreview(token: string, viewer: CustomerRecord | null): Promise<ClaimDTO> {
+    const claim = await this.claims.getClaimByToken(token);
+    if (!claim) throw new AppError("CLAIM_NOT_FOUND", "No such peni code", 404);
+    return this.claimDTO(claim, viewer, false);
+  }
+
+  /**
+   * "Peni'yi al": by the QR's token, or the 4-digit code typed for a café. The customer
+   * joins the café if they weren't a member yet. Wrong codes are counted, a few an hour
+   * allowed, so nobody can try codes until they hit someone else's peni.
+   */
+  async takeClaim(customer: CustomerRecord, input: TakeClaimInput): Promise<ClaimDTO> {
+    let claim: PeniClaim | null;
+    if ("token" in input) {
+      claim = await this.claims.getClaimByToken(input.token);
+      if (!claim) throw new AppError("CLAIM_NOT_FOUND", "No such peni code", 404);
+    } else {
+      const cafe = await this.requireCafe(input.cafeSlug);
+      const now = this.now();
+      if ((await this.claims.countMisses(customer.id, new Date(now.getTime() - HOUR_MS))) >= CLAIM_MISSES_PER_HOUR) {
+        throw new AppError("CLAIM_CODE_LIMITED", "Too many wrong codes; try again later", 429);
+      }
+      const day = localDateKey(now, (await this.directory.getSettings(cafe.id)).timeZone);
+      claim = await this.claims.getClaimByCode(cafe.id, day, input.code.trim());
+      const own = claim?.claimedByMembershipId && claim.claimedByMembershipId === (await this.directory.findMembership(customer.id, cafe.id))?.id;
+      // Someone else's taken code counts as a miss too: it's what a guess would hit.
+      if (!claim || (claim.claimedAt && !own)) {
+        await this.claims.recordMiss(customer.id, now);
+        if (!claim) throw new AppError("CLAIM_CODE_WRONG", "No open peni code like that here", 404);
+      }
+    }
+    const before = await this.directory.findMembership(customer.id, claim.cafeId);
+    // Only peni that can still be taken make someone a member.
+    const state = claimState(claim, this.now());
+    if (!before && state !== "open") throw new PeniError(CLOSED_CLAIM[state], "This peni code is closed");
+    const membershipId = before?.id ?? (await this.ensureMembership(customer.id, claim.cafeId));
+    const { claim: taken } = await this.peni.takeClaim(claim.id, membershipId);
+    return this.claimDTO(taken, customer, !before);
+  }
+
+  private async claimDTO(claim: PeniClaim, viewer: CustomerRecord | null, joined: boolean): Promise<ClaimDTO> {
+    const cafe = await this.cafeById(claim.cafeId);
+    const settings = await this.directory.getSettings(cafe.id);
+    const refItems = refItemsFor(cafe, settings, await this.menu.listMenu(cafe.id));
+    const membership = viewer ? await this.directory.findMembership(viewer.id, cafe.id) : null;
+    const state = claimState(claim, this.now());
+    const yours = state === "claimed" && !!membership && claim.claimedByMembershipId === membership.id;
+    return {
+      cafeSlug: cafe.slug,
+      cafeName: cafe.name,
+      hue: cafe.hue as CafeHue | null,
+      peni: claim.peni,
+      goods: goods(claim.peni, refItems),
+      state: yours ? "yours" : state === "claimed" ? "taken" : state,
+      expiresAt: claim.expiresAt.toISOString(),
+      balancePeni: yours ? await this.peni.walletBalance(membership.id) : null,
+      joined,
     };
   }
 
