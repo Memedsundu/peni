@@ -142,6 +142,7 @@ model Cafe {
   cashMoves      CashMove[]
   memberships    Membership[]
   posts          CafePost[]
+  images         CafeImage[]
 }
 
 /// Mirrors CafePeniSettings in @peni/core.
@@ -674,6 +675,21 @@ model CafePost {
   rsvps     EventRsvp[]
 
   @@index([cafeId, publishedAt])
+}
+
+/// A photo the café uploaded (plan piece 14), already shrunk by the browser.
+model CafeImage {
+  id          String   @id
+  cafeId      String
+  contentType String   @db.VarChar(20)
+  bytes       Bytes
+  /// The staff member who uploaded it.
+  uploadedBy  String
+  createdAt   DateTime @default(now())
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, createdAt])
 }
 
 model PostComment {

@@ -23,6 +23,7 @@ import type {
   StaffMeDTO,
   StaffSessionDTO,
   StaffMenuDTO,
+  StaffFeedDTO,
   TeamDTO,
   TillDTO,
   TillDeviceDTO,
@@ -57,6 +58,8 @@ import type {
   CheckPeniInput,
   UsePeniInput,
   GiveAskidaInput,
+  CreatePostInput,
+  UpdatePostInput,
   TillDonationInput,
   UpdateProfileInput,
 } from "./schemas";
@@ -95,7 +98,10 @@ export function createPeniClient(options: PeniClientOptions) {
 
   async function call<T>(method: "GET" | "POST", path: string, body?: unknown, staff = false): Promise<T> {
     const headers: Record<string, string> = { accept: "application/json" };
-    if (body !== undefined) headers["content-type"] = "application/json";
+    // A photo goes as it is, with its own type; everything else is JSON.
+    const raw = typeof Blob !== "undefined" && body instanceof Blob;
+    if (raw) headers["content-type"] = body.type || "application/octet-stream";
+    else if (body !== undefined) headers["content-type"] = "application/json";
     const token = await options.getToken?.();
     if (token) headers.authorization = `Bearer ${token}`;
     if (staff) {
@@ -109,7 +115,7 @@ export function createPeniClient(options: PeniClientOptions) {
       res = await doFetch(`${base}/api/v1${path}`, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: raw ? (body as Blob) : body === undefined ? undefined : JSON.stringify(body),
       });
     } catch (error) {
       // Offline, DNS, CORS, aborted: one code the UI can show as "Bağlantı kurulamadı."
@@ -153,6 +159,9 @@ export function createPeniClient(options: PeniClientOptions) {
         call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/rsvp`, {}),
       comment: (cafeSlug: string, postId: string, body: string) =>
         call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/comments`, { body }),
+      /** Takes back the viewer's own comment, for good. */
+      deleteComment: (cafeSlug: string, postId: string, commentId: string) =>
+        call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/comments/${slug(commentId)}/delete`, {}),
       /**
        * Gift recipient check by phone or Peni kodu: "Mehmet K." or 404 (RECIPIENT_NOT_MEMBER).
        * Rate-limited per customer (LOOKUP_LIMITED). [G6, D28]
@@ -299,6 +308,20 @@ export function createPeniClient(options: PeniClientOptions) {
         close: (cafeSlug: string, input: CloseCashInput) => call<CashStateDTO>("POST", `/staff/${slug(cafeSlug)}/cash/close`, input, true),
         /** Cash put in or taken out by hand, with a reason. */
         move: (cafeSlug: string, input: CashMoveInput) => call<CashStateDTO>("POST", `/staff/${slug(cafeSlug)}/cash/moves`, input, true),
+      },
+      /** Topluluk (plan piece 14): every change answers with the whole feed. */
+      feed: {
+        get: (cafeSlug: string) => call<StaffFeedDTO>("GET", `/staff/${slug(cafeSlug)}/feed`, undefined, true),
+        create: (cafeSlug: string, input: CreatePostInput) => call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed`, input, true),
+        update: (cafeSlug: string, postId: string, input: UpdatePostInput) =>
+          call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}`, input, true),
+        /** Takes the post down; it stays on record. */
+        remove: (cafeSlug: string, postId: string) => call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}/remove`, {}, true),
+        /** Needs "posts.moderate"; `hidden: false` brings it back. */
+        hideComment: (cafeSlug: string, postId: string, commentId: string, hidden: boolean) =>
+          call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}/comments/${slug(commentId)}`, { hidden }, true),
+        /** A JPEG, PNG or WebP of at most 2 MB, shrunk on the device first. Answers with its URL for `imageUrls`. */
+        uploadImage: (cafeSlug: string, photo: Blob) => call<{ url: string }>("POST", `/staff/${slug(cafeSlug)}/images`, photo, true),
       },
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>

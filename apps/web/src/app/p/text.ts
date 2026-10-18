@@ -164,6 +164,38 @@ const TEXT = {
   wallMatch: { tr: "Kafe {n} peni ekledi", en: "The café added {n} peni" },
   wallEmpty: { tr: "Henüz kimse bırakmadı. İlk sen ol.", en: "Nobody has left any yet. Be the first." },
 
+  // The café's page and its feed (piece 14)
+  yourPeni: { tr: "Bu kafedeki penin", en: "Your peni here" },
+  payWithPeni: { tr: "Ödeme kodum", en: "My payment code" },
+  treatSomeoneHere: { tr: "Ismarla", en: "Treat someone" },
+  joinCafe: { tr: "Kafeye katıl", en: "Join the café" },
+  joinHelp: {
+    tr: "Üyelik ücretsiz. Katılınca beğenip yorum yazabilir, alışverişlerinden peni biriktirirsin.",
+    en: "It's free. Members like and comment, and collect peni with every purchase.",
+  },
+  signInToJoin: { tr: "Beğenmek ve yorum yazmak için giriş yap.", en: "Sign in to like and comment." },
+  askidaLink: { tr: "Askıda {goods} var", en: "{goods} on the askı" },
+  askidaLinkEmpty: { tr: "Askıda kahve", en: "Askıda kahve" },
+  fromCafe: { tr: "Kafeden", en: "From the café" },
+  noFeed: { tr: "Kafe henüz bir şey paylaşmadı.", en: "The café hasn't posted anything yet." },
+  pinnedPost: { tr: "Sabit", en: "Pinned" },
+  questionOfDay: { tr: "Günün sorusu", en: "Question of the day" },
+  eventLabel: { tr: "Etkinlik", en: "Event" },
+  like: { tr: "Beğen", en: "Like" },
+  unlike: { tr: "Beğenmekten vazgeç", en: "Unlike" },
+  likes: { tr: "{n} beğeni", en: "{n} likes" },
+  commentsN: { tr: "{n} yorum", en: "{n} comments" },
+  writeComment: { tr: "Yorum yaz", en: "Write a comment" },
+  writeAnswer: { tr: "Cevabını yaz", en: "Write your answer" },
+  answeredToday: { tr: "Bugünkü cevabın masada.", en: "Your answer for today is in." },
+  sendComment: { tr: "Gönder", en: "Send" },
+  deleteComment: { tr: "Sil", en: "Delete" },
+  join: { tr: "Katıl", en: "Join" },
+  goingYes: { tr: "Katılıyorsun", en: "You're going" },
+  goingN: { tr: "{n} kişi katılıyor", en: "{n} going" },
+  photoN: { tr: "Fotoğraf {n}", en: "Photo {n}" },
+  close: { tr: "Kapat", en: "Close" },
+
   // Typing the code
   codeTitle: { tr: "Ekrandaki kodu yaz", en: "Type the code on the screen" },
   codeBody: {

@@ -357,14 +357,42 @@ export interface PostDTO {
   rsvpCount: number;
   reactedByMe: boolean;
   rsvpedByMe: boolean;
-  /** "Bir üye" for hidden profiles, otherwise "Ayşe Y.". */
-  comments: { id: string; authorName: string; body: string; createdAt: string }[];
+  /** Photos, in order (plan piece 14). */
+  imageUrls: string[];
+  /** "Bir üye" for hidden profiles, otherwise "Ayşe Y.". `mine` when the viewer wrote it and can delete it. */
+  comments: { id: string; authorName: string; body: string; createdAt: string; mine: boolean }[];
   /** Event topic. Null for posts and questions. [G4] */
   title: string | null;
   /** RSVPs in arrival order. Declines are never listed. [G4] */
   attendees: AttendeeDTO[];
   /** Questions only: the viewer already answered today ("Bugünkü cevabın masada."). [G13] */
   answeredTodayByMe: boolean;
+}
+
+/** `GET /staff/:slug/feed`: the café's own feed, as its Topluluk page shows it (plan piece 14). */
+export interface StaffFeedDTO {
+  /** "posts.write": post, edit, pin and take down. */
+  canWrite: boolean;
+  /** "posts.moderate": hide comments and bring them back. */
+  canModerate: boolean;
+  posts: StaffPostDTO[];
+}
+
+export interface StaffPostDTO {
+  id: string;
+  kind: "post" | "question" | "event";
+  title: string | null;
+  body: string;
+  imageUrls: string[];
+  pinned: boolean;
+  publishedAt: string;
+  eventStartsAt: string | null;
+  /** The staff member who posted it; null for older posts. */
+  authorName: string | null;
+  reactionCount: number;
+  rsvpCount: number;
+  /** Every comment, hidden ones too, oldest first. Names as customers see them. */
+  comments: { id: string; authorName: string; body: string; createdAt: string; hidden: boolean }[];
 }
 
 export interface CafeDetailDTO extends CafeSummaryDTO {

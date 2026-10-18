@@ -15,4 +15,5 @@ export * from "./cash";
 export * from "./spend";
 export * from "./identity";
 export * from "./community";
+export * from "./images";
 export * from "./staff";
