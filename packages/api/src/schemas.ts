@@ -349,6 +349,12 @@ export const confirmDraftSchema = z.object({ ...billFields, allowDuplicate: z.bo
 
 export const dismissDraftSchema = z.object({ reason: optionalText(200) });
 
+/** "Kontrol edildi" on a statement or Z report (piece 27): a note, and whether to set the bank balance to the statement's. */
+export const checkDraftSchema = z.object({ note: optionalText(300), fixBalance: z.boolean().optional() });
+
+/** Demo only: a sample bank statement, card statement or Z report made from the demo café's own numbers. */
+export const checkSampleSchema = z.object({ kind: z.enum(["bank", "card", "zreport"]) });
+
 /** The café's bill address (piece 26): on or off, or a new address that retires the old one. */
 export const inboxSettingsSchema = z.object({ enabled: z.boolean().optional(), newAddress: z.literal(true).optional() });
 
@@ -674,4 +680,6 @@ export type CheckTaskInput = z.input<typeof checkTaskSchema>;
 export type AlertEmailInput = z.input<typeof alertEmailSchema>;
 export type ConfirmDraftInput = z.input<typeof confirmDraftSchema>;
 export type DismissDraftInput = z.input<typeof dismissDraftSchema>;
+export type CheckDraftInput = z.input<typeof checkDraftSchema>;
+export type CheckSampleInput = z.input<typeof checkSampleSchema>;
 export type InboxSettingsInput = z.input<typeof inboxSettingsSchema>;

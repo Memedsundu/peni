@@ -12,15 +12,16 @@ import { errorText, fill, type Lang, type T, type TextKey } from "./text";
 /** A bill photo keeps more than a feed photo, so its small print stays readable. */
 const BILL_PHOTO_SIDE = 2400;
 const MAX_BYTES = 10 * 1024 * 1024;
-export const SCAN_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp,image/heic,image/*";
+export const SCAN_ACCEPT =
+  "application/pdf,image/jpeg,image/png,image/webp,image/heic,image/*,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 /** A file that was sent before (piece 25), kept so "Yine de oku" can send it again. */
 export type Repeat = { body: Blob; name: string; duplicate: NonNullable<UploadDTO["duplicate"]> };
 
 /**
  * Sending bills and receipts to the assistant, from Taslaklar, Faturalar and the till: a
- * photo is shrunk first, a PDF goes as it is, several go one after another. A file sent
- * before isn't read again unless asked.
+ * photo is shrunk first, a PDF or a statement's Excel or CSV goes as it is, several go one
+ * after another. A file sent before isn't read again unless asked.
  */
 export function useScan(slug: string, lang: Lang, t: T, onSent: (n: number) => void) {
   const [busy, setBusy] = useState(false);
@@ -53,10 +54,12 @@ export function useScan(slug: string, lang: Lang, t: T, onSent: (n: number) => v
     const jobs: { body: Blob; name: string; again: boolean }[] = [];
     setError(null);
     for (const file of list) {
-      const pdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const name = file.name.toLowerCase();
+      const pdf = file.type === "application/pdf" || name.endsWith(".pdf");
+      const sheet = /\.(csv|xlsx)$/.test(name) || file.type === "text/csv" || file.type.includes("spreadsheetml");
       try {
-        if (!pdf && !file.type.startsWith("image/")) throw new PeniApiError("DOCUMENT_TYPE", 415, "Not a photo or PDF");
-        const body = pdf ? file : await shrinkPhoto(file, BILL_PHOTO_SIDE);
+        if (!pdf && !sheet && !file.type.startsWith("image/")) throw new PeniApiError("DOCUMENT_TYPE", 415, "Not a photo, PDF or spreadsheet");
+        const body = pdf || sheet ? file : await shrinkPhoto(file, BILL_PHOTO_SIDE);
         if (body.size > MAX_BYTES) throw new PeniApiError("DOCUMENT_TOO_LARGE", 413, "Too large");
         jobs.push({ body, name: file.name, again: false });
       } catch (e) {

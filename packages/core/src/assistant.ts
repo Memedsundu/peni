@@ -1,4 +1,5 @@
 import type { BillCategory, BillKdv } from "./bills";
+import type { CheckOutcome, StatementProposal, ZReportProposal } from "./checks";
 import { sniffImageType, type ImageType } from "./images";
 
 /**
@@ -13,8 +14,12 @@ import { sniffImageType, type ImageType } from "./images";
 
 // ─────────────────────────────────────────────── documents
 
-/** A receipt, invoice or statement as uploaded: a photo or a PDF. */
-export type DocumentType = ImageType | "application/pdf";
+/** A receipt, invoice or statement as uploaded: a photo or a PDF, or a statement as a spreadsheet (piece 27). */
+export type DocumentType = ImageType | "application/pdf" | SheetType;
+
+export const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+export type SheetType = typeof XLSX_TYPE | "text/csv";
+export const isSheet = (t: string): t is SheetType => t === XLSX_TYPE || t === "text/csv";
 
 /** The most one document may weigh. Phones' photos are shrunk before they're sent. */
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
@@ -42,16 +47,45 @@ export interface StoredDocument {
   createdAt: Date;
 }
 
-/** What the bytes really are; null for anything that isn't a photo or a PDF. */
+/** What the bytes really are; null for anything that isn't a photo, a PDF, an Excel file or a CSV. */
 export function sniffDocumentType(bytes: Uint8Array): DocumentType | null {
   if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d) return "application/pdf";
-  return sniffImageType(bytes);
+  const image = sniffImageType(bytes);
+  if (image) return image;
+  // An .xlsx is a zip whose parts sit under "xl/".
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) return hasAscii(bytes, "xl/") ? XLSX_TYPE : null;
+  return looksLikeCsv(bytes) ? "text/csv" : null;
+}
+
+function hasAscii(bytes: Uint8Array, text: string): boolean {
+  const codes = [...text].map((c) => c.charCodeAt(0));
+  outer: for (let i = 0; i + codes.length <= bytes.length; i++) {
+    for (let k = 0; k < codes.length; k++) if (bytes[i + k] !== codes[k]) continue outer;
+    return true;
+  }
+  return false;
+}
+
+/** Text with no control bytes, at least two lines, and a separator on the first. */
+function looksLikeCsv(bytes: Uint8Array): boolean {
+  const head = bytes.subarray(0, 4096);
+  let lines = 0;
+  for (const b of head) {
+    if (b === 0x0a) lines++;
+    else if (b < 0x20 && b !== 0x09 && b !== 0x0d) return false;
+  }
+  if (lines < 1) return false;
+  const first = new TextDecoder("latin1").decode(head.subarray(0, head.indexOf(0x0a)));
+  return /[;,\t|]/.test(first);
 }
 
 // ─────────────────────────────────────────────── drafts
 
-/** What a draft becomes when confirmed. Bills first; quick entries and statements follow (pieces 27, 28). */
-export type DraftKind = "bill";
+/**
+ * What a draft is: a bill to add, or a statement or Z report to check against Peni's own
+ * records (piece 27). Quick entries follow (piece 28).
+ */
+export type DraftKind = "bill" | "statement" | "zreport";
 export type DraftStatus = "open" | "confirmed" | "dismissed";
 
 /** A bill as the assistant proposes it. Unlike a bill, anything it couldn't read is null. */
@@ -97,15 +131,18 @@ export interface DuplicateRef {
   why: "file" | "number" | "dayTotal";
 }
 
-export interface Draft {
+/** A draft of each kind; its proposal is as the assistant wrote it, never changed afterwards. */
+export type Draft = BillDraft | StatementDraft | ZReportDraft;
+export type BillDraft = DraftBase & { kind: "bill"; proposal: BillProposal };
+export type StatementDraft = DraftBase & { kind: "statement"; proposal: StatementProposal };
+export type ZReportDraft = DraftBase & { kind: "zreport"; proposal: ZReportProposal };
+
+interface DraftBase {
   id: string;
   cafeId: string;
-  kind: DraftKind;
   status: DraftStatus;
   /** One line for lists: "Moda Süt · ₺1.234,50". */
   title: string;
-  /** As the assistant wrote it; never changed afterwards. */
-  proposal: BillProposal;
   /** What the assistant wasn't sure of, in words for the owner. */
   doubts: string[];
   /** The document it was read from. */
@@ -121,6 +158,8 @@ export interface Draft {
   dismissReason: string | null;
   /** What it may repeat; confirming it anyway needs a second word. */
   duplicateOf: DuplicateRef | null;
+  /** For a statement or Z report: what the person saw when they said it was checked. */
+  outcome: CheckOutcome | null;
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   type Permission,
   type ShiftStore,
   type StaffStore,
+  type StatementRecord,
 } from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { keyHash } from "./bills";
@@ -312,6 +313,47 @@ export class MoneyService {
     return this.get(ctx);
   }
 
+  // ─────────────────────────────────────────────── statements (piece 27)
+
+  /**
+   * The bank's side of Nakit ve banka between two days, as a statement shows it: each
+   * payment and movement, and each day's card sales. Null before the café started keeping
+   * its money here.
+   */
+  async bankRecords(cafeId: string, from: string, to: string): Promise<StatementRecord[] | null> {
+    const start = await this.store.getStart(cafeId);
+    if (!start || to < start.startedOn) return null;
+    const lines = await this.lines(cafeId, [start.startedOn, from].sort().at(-1)!, await this.closedThrough(cafeId));
+    return lines
+      .filter((l) => l.account === "bank" && l.kind !== "opening" && l.kind !== "correction" && l.day <= to && l.amountKurus !== 0)
+      .map((l) => ({ id: l.id, day: l.day, amountKurus: l.amountKurus, kind: l.kind, label: l.label ?? l.note, billId: l.billId }));
+  }
+
+  /** What Peni says the bank held at the end of a day; null when that day isn't followed. */
+  async bankBalanceThrough(cafeId: string, day: string): Promise<number | null> {
+    const start = await this.store.getStart(cafeId);
+    if (!start || day < start.startedOn) return null;
+    const tz = await this.timeZone(cafeId);
+    const end = this.dayStart(this.daysBefore(day, -1), tz);
+    const until = end < this.justAfterNow() ? end : this.justAfterNow();
+    return (await this.store.totals(cafeId, day)).bank + (await this.cardNet(cafeId, start.startedOn, until));
+  }
+
+  /**
+   * Moves Peni's bank balance by `deltaKurus` to agree with a statement, dated today. The
+   * same `source` twice moves once. Needs "cash.manage".
+   */
+  async correctBank(ctx: StaffContext, source: string, deltaKurus: number, note: string): Promise<void> {
+    this.require(ctx, "cash.manage");
+    const cafeId = ctx.cafe.id;
+    if (!Number.isInteger(deltaKurus) || deltaKurus === 0 || Math.abs(deltaKurus) > MONEY_MAX_KURUS) throw new AppError("AMOUNT_INVALID", "Check the amount", 400);
+    if (!(await this.store.getStart(cafeId))) throw new AppError("MONEY_NOT_STARTED", "Enter the opening amounts first", 409);
+    const today = await this.today(cafeId);
+    await this.assertOpen(cafeId, today);
+    if ((await this.store.listBySource(cafeId, source)).length) return;
+    await this.store.addMovements([this.movement(ctx, "bank", deltaKurus, "correction", source, today, note.slice(0, NOTE_MAX), null)]);
+  }
+
   // ─────────────────────────────────────────────── Ay kapanışı
 
   async months(ctx: StaffContext): Promise<MonthsDTO> {
@@ -501,6 +543,7 @@ export class MoneyService {
       if (type === "repayment") return { kind: "repayment", label: lenderName.get(repaymentLender.get(id) ?? "") ?? null, billId: null };
       if (type === "card_payment") return { kind: "card", label: card?.name ?? null, billId: null };
       if (type === "pay") return { kind: "wages", label: payeeNames.get(payee.get(id) ?? "") ?? null, billId: null };
+      if (type === "statement") return { kind: "correction", label: null, billId: null };
       return { kind: "transfer", label: null, billId: null };
     };
 
@@ -509,7 +552,7 @@ export class MoneyService {
     const manualOpen = (day: string) => !through || day > through;
     for (const m of movements) {
       const manual = m.source.startsWith("manual:");
-      const what = m.kind === "opening" || manual ? { kind: m.kind, label: null, billId: null } : describe(m.source);
+      const what = m.kind === "opening" || m.kind === "correction" || manual ? { kind: m.kind, label: null, billId: null } : describe(m.source);
       lines.push({
         id: m.id,
         day: m.day,

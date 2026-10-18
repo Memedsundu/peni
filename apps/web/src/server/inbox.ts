@@ -240,7 +240,12 @@ async function fetchFiles(files: MailFile[]): Promise<Fetched[]> {
     const name = (file.name || `ek-${i + 1}`).slice(0, 120);
     if (i >= FILES_PER_EMAIL) out.push({ name, why: "limit" });
     else if (file.size > MAX_DOCUMENT_BYTES) out.push({ name, why: "large" });
-    else if (!/^(application\/pdf|image\/|application\/octet-stream)/i.test(file.contentType) && !/\.(pdf|jpe?g|png|webp|heic)$/i.test(name)) {
+    else if (
+      !/^(application\/pdf|image\/|application\/octet-stream|text\/csv|application\/vnd\.openxmlformats-officedocument\.spreadsheetml)/i.test(
+        file.contentType,
+      ) &&
+      !/\.(pdf|jpe?g|png|webp|heic|csv|xlsx)$/i.test(name)
+    ) {
       out.push({ name, why: "type" });
     } else out.push({ name, bytes: await file.read() });
   }

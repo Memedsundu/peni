@@ -681,7 +681,7 @@ assert.equal(aiLog.events[0].kind, "draft.confirmed");
 assert.equal((await call("GET", "/staff/moda/drafts", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
 const notDoc = await uploadDoc(new TextEncoder().encode("<html></html>"), "text/html", MURAT);
 assert.deepEqual([notDoc.status, notDoc.json.error.code], [415, "DOCUMENT_TYPE"]);
-step("Taslaklar: an uploaded receipt is read in the background into a draft, checked beside its document and confirmed once in Leyla's name; not for the till, and only photos and PDFs");
+step("Taslaklar: an uploaded receipt is read in the background into a draft, checked beside its document and confirmed once in Leyla's name; not for the till, and not a web page");
 step("Scanning: lines linked to stock, KDV read and kept, the same file and the same bill number caught, and Murat sees his upload saved");
 
 // 5t. The forward-to-Peni inbox (piece 26): Moda has its own address; the demo emails it a
@@ -703,6 +703,43 @@ assert.equal((await call("GET", "/staff/moda/inbox", { headers: ecePos3 })).json
 const hook = await fetch(`${BASE}/api/v1/inbox/resend`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 assert.equal(hook.status, 503);
 step("Inbox: Moda's own address takes a sample supplier email, reads its PDF into a draft from that supplier and leaves the XML; the webhook waits for the server's email setup");
+
+// 5u. Statements and Z reports (piece 27): the demo's sample bank statement is read into a
+//     draft and matched against Nakit ve banka: card sales less commission, the SGK payment
+//     Peni doesn't have. Leyla sets the bank balance to the statement's, once. The sample Z
+//     report is ₺50 short in cash, so checking it needs a note. Not for the till.
+const waitDraft = async (sent) => {
+  for (let i = 0; i < 20; i++) {
+    const list = (await call("GET", "/staff/moda/drafts", { headers: STAFF })).json;
+    const d = list.open.find((x) => x.document?.name === sent.reading.documentName);
+    if (d) return d;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error("the sample wasn't read");
+};
+const bankSent = (await call("POST", "/staff/moda/documents/sample", { headers: MURAT, body: { kind: "bank" } })).json;
+assert.match(bankSent.reading.documentName, /^banka-ekstresi-.*\.csv$/);
+const bankDraft = await waitDraft(bankSent);
+const st = bankDraft.statement;
+assert.deepEqual([bankDraft.kind, st.account, st.followed, st.canFix], ["statement", "bank", true, true]);
+assert.ok(st.lines.filter((l) => l.match?.kind === "sales").length >= 5, "card sales are found, less commission");
+assert.ok(st.feesKurus > 0);
+assert.equal(st.lines.find((l) => l.description === "SGK PRİM ÖDEMESİ").match, null);
+assert.ok(st.differenceKurus < 0);
+const bank0 = (await call("GET", "/staff/moda/money", { headers: STAFF })).json.bankKurus;
+const checkedBank = (await call("POST", `/staff/moda/drafts/${bankDraft.id}/check`, { headers: STAFF, body: { fixBalance: true, note: "SGK" } })).json;
+assert.deepEqual([checkedBank.status, checkedBank.outcome.correctionKurus], ["confirmed", st.differenceKurus]);
+assert.equal((await call("POST", `/staff/moda/drafts/${bankDraft.id}/check`, { headers: STAFF, body: { fixBalance: true } })).json.outcome.correctionKurus, st.differenceKurus);
+assert.equal((await call("GET", "/staff/moda/money", { headers: STAFF })).json.bankKurus, bank0 + st.differenceKurus);
+const zSent = (await call("POST", "/staff/moda/documents/sample", { headers: MURAT, body: { kind: "zreport" } })).json;
+const zDraft = await waitDraft(zSent);
+assert.deepEqual([zDraft.kind, zDraft.zreport.differs, zDraft.zreport.rows.find((r) => r.key === "cash").differenceKurus], ["zreport", true, -5_000]);
+assert.equal((await call("POST", `/staff/moda/drafts/${zDraft.id}/check`, { headers: STAFF, body: {} })).json.error.code, "CHECK_NOTE_REQUIRED");
+assert.equal((await call("POST", `/staff/moda/drafts/${zDraft.id}/confirm`, { headers: STAFF, body: confirmBody })).json.error.code, "DRAFT_KIND");
+const zChecked = (await call("POST", `/staff/moda/drafts/${zDraft.id}/check`, { headers: STAFF, body: { note: "Bir iade girilmedi" } })).json;
+assert.deepEqual([zChecked.outcome.unmatched, zChecked.outcome.note], [2, "Bir iade girilmedi"]);
+assert.equal((await call("POST", `/staff/moda/drafts/${zDraft.id}/check`, { headers: ecePos3, body: { note: "x" } })).json.error.code, "FORBIDDEN");
+step("Statements: the sample bank statement matches card sales less commission, finds the SGK payment Peni lacks, and sets the bank balance once; the Z report's ₺50 cash gap needs a note; not for the till");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;

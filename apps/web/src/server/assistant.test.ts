@@ -1,4 +1,5 @@
 import { AiError, ScriptedModel, type AiRequest, type BillReading } from "@peni/ai";
+import type { BillDraftDTO, DraftsDTO } from "@peni/api";
 import { beforeEach, describe, expect, it } from "vitest";
 import { inMemoryStores, PeniApp, type PeniStores } from "./app";
 import { DEMO_STAFF, DEMO_STAFF_PASSWORD, seed } from "./seed";
@@ -26,7 +27,7 @@ const PDF = new TextEncoder().encode("%PDF-1.4\n% a bill\n");
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
 
 const milk: BillReading = {
-  isBill: true,
+  kind: "bill",
   supplierName: "MODA SÜT ÜRÜNLERİ GIDA TİC. LTD. ŞTİ.",
   supplierTaxNumber: null,
   number: "MS-0412",
@@ -72,7 +73,7 @@ describe("The assistant's ground (plan piece 24)", () => {
 
     const drafts = await app.assistant.list(leyla);
     expect(drafts).toMatchObject({ ai: "on", canUpload: true, canConfirm: true, reading: [], recent: [] });
-    const [draft] = drafts.open;
+    const [draft] = billDrafts(drafts);
     expect(draft).toMatchObject({
       kind: "bill",
       status: "open",
@@ -128,7 +129,7 @@ describe("The assistant's ground (plan piece 24)", () => {
 
   it("adds the bill as the person checked it, in their name, once; the draft remembers what was changed", async () => {
     await read(murat);
-    const [draft] = (await app.assistant.list(leyla)).open;
+    const [draft] = billDrafts(await app.assistant.list(leyla));
     const before = (await app.bills.list(leyla, { month: "2026-10" })).bills.length;
     const input = {
       supplierId: draft!.proposal.supplierId,
@@ -155,7 +156,7 @@ describe("The assistant's ground (plan piece 24)", () => {
 
   it("keeps a dismissed draft with its reason and adds nothing", async () => {
     await read(murat);
-    const [draft] = (await app.assistant.list(murat)).open;
+    const [draft] = billDrafts(await app.assistant.list(murat));
     expect(await app.assistant.dismiss(murat, draft!.id, { reason: "Zaten girilmişti" })).toMatchObject({
       status: "dismissed",
       dismissReason: "Zaten girilmişti",
@@ -174,7 +175,7 @@ describe("The assistant's ground (plan piece 24)", () => {
   });
 
   it("says when a document isn't a bill, and makes no draft", async () => {
-    answer = () => ({ ...milk, isBill: false, lines: [], doubts: [] });
+    answer = () => ({ ...milk, kind: "other", lines: [], doubts: [] });
     await read(murat, PNG, "");
     const list = await app.assistant.list(leyla);
     expect([list.open.length, list.reading.map((r) => r.state)]).toEqual([0, ["notBill"]]);
@@ -223,7 +224,7 @@ describe("The assistant's ground (plan piece 24)", () => {
     const { reading } = await read(ece, PNG, "");
     expect(reading!.state).toBe("reading");
     expect(await code(app.assistant.list(ece))).toBe("FORBIDDEN");
-    const [draft] = (await app.assistant.list(leyla)).open;
+    const [draft] = billDrafts(await app.assistant.list(leyla));
     expect(
       await code(
         app.assistant.confirm(ece, draft!.id, { supplierId: null, date: "2026-10-15", lines: [{ itemId: null, name: "x", category: "other", totalKurus: 1 }] }),
@@ -282,7 +283,7 @@ describe("Scanning bills (plan piece 25)", () => {
     });
     await read(murat);
     expect(model.calls[0]!.parts.find((p) => p.type === "text")!.text).toContain("Stock items:\n");
-    const [first] = (await app.assistant.list(leyla)).open;
+    const [first] = billDrafts(await app.assistant.list(leyla));
     expect(first!.proposal.lines[0]).toMatchObject({
       itemId: "stk_sut",
       name: "Süt",
@@ -304,7 +305,7 @@ describe("Scanning bills (plan piece 25)", () => {
     // The next milk bill: the model didn't link it, but Leyla did last time; 12 bottles is 12 litres.
     answer = () => ({ ...milk, number: "MS-0450", lines: [{ ...milk.lines[0]!, quantity: 12, total: 480 }], total: 480 });
     await read(murat, bytes(2), "sut2.pdf");
-    const [second] = (await app.assistant.list(leyla)).open;
+    const [second] = billDrafts(await app.assistant.list(leyla));
     expect(second!.proposal.lines[0]).toMatchObject({ itemId: "stk_sut", qtyMilli: 12_000, matchedBy: "learned" });
     expect(second!.doubts).toEqual(milk.doubts);
 
@@ -312,7 +313,7 @@ describe("Scanning bills (plan piece 25)", () => {
     await app.assistant.confirm(murat, second!.id, { ...asInput(second!), lines: [{ ...asInput(second!).lines[0]!, itemId: null, qtyMilli: null }] });
     answer = () => ({ ...milk, number: "MS-0470", lines: [milk.lines[0]!] });
     await read(murat, bytes(3), "sut3.pdf");
-    expect((await app.assistant.list(leyla)).open[0]!.proposal.lines[0]).toMatchObject({ itemId: null, matchedBy: null });
+    expect(billDrafts(await app.assistant.list(leyla))[0]!.proposal.lines[0]).toMatchObject({ itemId: null, matchedBy: null });
   });
 
   it("links one stock item once, and asks for the amount when the model didn't give one", async () => {
@@ -327,7 +328,7 @@ describe("Scanning bills (plan piece 25)", () => {
       doubts: [],
     });
     await read(murat);
-    const [draft] = (await app.assistant.list(leyla)).open;
+    const [draft] = billDrafts(await app.assistant.list(leyla));
     expect(draft!.proposal.lines.map((l) => [l.itemId, l.qtyMilli])).toEqual([
       ["stk_sut", null],
       [null, null],
@@ -340,7 +341,7 @@ describe("Scanning bills (plan piece 25)", () => {
     const first = await read(murat);
     expect(first.duplicate).toBeNull();
     const again = await app.assistant.upload(ece, PDF, "IMG_2231.pdf");
-    const [draft] = (await app.assistant.list(leyla)).open;
+    const [draft] = billDrafts(await app.assistant.list(leyla));
     expect(again).toEqual({ reading: null, duplicate: { at: now.toISOString(), name: "sut.pdf", title: draft!.title, draftId: draft!.id, billId: null } });
     expect(model.calls).toHaveLength(1);
 
@@ -352,13 +353,13 @@ describe("Scanning bills (plan piece 25)", () => {
     // "Yine de oku" reads it again, and the two drafts point at each other's bill.
     const forced = await read(murat, PDF, "sut.pdf", true);
     expect(forced.reading!.state).toBe("reading");
-    const open = (await app.assistant.list(leyla)).open;
+    const open = billDrafts(await app.assistant.list(leyla));
     expect(open.find((d) => d.id !== draft!.id && d.duplicateOf?.id === draft!.id)?.duplicateOf).toMatchObject({ kind: "draft", why: "number" });
 
     // Once confirmed, the same file points at the bill; once dismissed, it can be read anew.
     const done = await app.assistant.confirm(leyla, draft!.id, asInput(draft!));
     expect((await app.assistant.upload(murat, PDF, "x.pdf")).duplicate).toMatchObject({ billId: done.resultId });
-    for (const d of (await app.assistant.list(leyla)).open) await app.assistant.dismiss(leyla, d.id, {});
+    for (const d of billDrafts(await app.assistant.list(leyla))) await app.assistant.dismiss(leyla, d.id, {});
     const png = await app.assistant.upload(murat, PNG, "c.png");
     expect(png.reading?.state).toBe("reading");
   });
@@ -373,7 +374,7 @@ describe("Scanning bills (plan piece 25)", () => {
       total: 960,
     });
     await read(murat);
-    const [draft] = (await app.assistant.list(leyla)).open;
+    const [draft] = billDrafts(await app.assistant.list(leyla));
     expect(draft!.duplicateOf).toEqual({ kind: "bill", id: "bil_seed_ambalaj", title: "Ambalaj Dünyası · #A-20418 · ₺3.700", why: "number" });
     expect(await code(app.assistant.confirm(leyla, draft!.id, asInput(draft!)))).toBe("BILL_DUPLICATE");
     expect((await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), allowDuplicate: true })).status).toBe("confirmed");
@@ -382,7 +383,7 @@ describe("Scanning bills (plan piece 25)", () => {
     const sut1 = await app.bills.get(leyla, "bil_seed_sut1");
     answer = () => ({ ...milk, number: null, date: sut1.date, lines: [{ ...milk.lines[0]!, total: 860.5 }], total: 860.5 });
     await read(murat, bytes(2));
-    expect((await app.assistant.list(leyla)).open[0]!.duplicateOf).toMatchObject({ kind: "bill", id: "bil_seed_sut1", why: "dayTotal" });
+    expect(billDrafts(await app.assistant.list(leyla))[0]!.duplicateOf).toMatchObject({ kind: "bill", id: "bil_seed_sut1", why: "dayTotal" });
   });
 
   it("stops a hand-entered bill with a number the supplier already has, and checks the KDV", async () => {
@@ -400,7 +401,7 @@ describe("Scanning bills (plan piece 25)", () => {
 
   it("shows each person what they sent and what became of it, for the till", async () => {
     await read(ece, PNG, "");
-    answer = () => ({ ...milk, isBill: false, lines: [], doubts: [] });
+    answer = () => ({ ...milk, kind: "other", lines: [], doubts: [] });
     now = new Date(now.getTime() + 60_000);
     await read(ece, bytes(2), "menu.pdf");
     now = new Date(now.getTime() + 60_000);
@@ -410,9 +411,14 @@ describe("Scanning bills (plan piece 25)", () => {
       ["menu.pdf", "notBill", null],
       ["", "waiting", "MODA SÜT ÜRÜNLERİ GIDA TİC. LTD. ŞTİ. · ₺1.260"],
     ]);
-    const [draft] = (await app.assistant.list(leyla)).open;
+    const [draft] = billDrafts(await app.assistant.list(leyla));
     await app.assistant.confirm(leyla, draft!.id, asInput(draft!));
     expect((await app.assistant.mine(ece)).uploads[2]!.state).toBe("saved");
     expect((await app.assistant.mine(murat)).uploads).toEqual([]);
   });
 });
+
+/** The bill drafts waiting (piece 27 adds statements and Z reports). */
+function billDrafts(list: DraftsDTO): BillDraftDTO[] {
+  return list.open.filter((d): d is BillDraftDTO => d.kind === "bill");
+}
