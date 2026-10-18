@@ -16,7 +16,10 @@ export type PeniErrorCode =
   | "PRODUCT_NOT_ELIGIBLE"
   | "CLAIM_TAKEN"
   | "CLAIM_EXPIRED"
-  | "CLAIM_CANCELLED";
+  | "CLAIM_CANCELLED"
+  | "SPEND_CODE_WRONG"
+  | "SPEND_CODE_EXPIRED"
+  | "NOTHING_TO_SPEND";
 
 /** Domain error. `code` is stable and safe to show to clients; UI maps it to localized text. */
 export class PeniError extends Error {

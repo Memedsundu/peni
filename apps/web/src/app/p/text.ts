@@ -16,9 +16,26 @@ const TEXT = {
   balance: { tr: "Bu kafedeki bakiyen", en: "Your balance at this café" },
   joined: { tr: "Kafeye de katıldın. Üyelik ücretsiz.", en: "You've joined the café too. It's free." },
   spendHint: {
-    tr: "Bir sonraki siparişte kasada Peni kodunu göster, istediğin kadarını harca.",
-    en: "Show your Peni code at the till next time and spend as much as you like.",
+    tr: "Bir sonraki siparişte kasada ödeme kodunu göster, istediğin kadarını harca.",
+    en: "Show your payment code at the till next time and spend as much as you like.",
   },
+  mySpendCode: { tr: "Ödeme kodum", en: "My payment code" },
+
+  // Ödeme kodum (piece 11)
+  spendTitle: { tr: "Ödeme kodun", en: "Your payment code" },
+  spendHelp: {
+    tr: "Kasada bu QR'ı okut ya da kodu söyle. Ne kadar peni harcayacağını kasada söylersin.",
+    en: "Let the till scan this QR, or read out the code. Say at the till how many peni to spend.",
+  },
+  spendValid: { tr: "Kalan süre", en: "Valid for" },
+  spendRenew: { tr: "Yeni kod al", en: "Get a new code" },
+  spendWhichCafe: { tr: "Hangi kafede ödüyorsun?", en: "Where are you paying?" },
+  spendNoCafe: {
+    tr: "Henüz bir kafeye üye değilsin. Bir alışverişin penisini aldığında kafeye katılırsın.",
+    en: "You're not a member of any café yet. Taking the peni from a purchase makes you one.",
+  },
+  otherCafe: { tr: "Başka bir kafe", en: "Another café" },
+  signInToSpend: { tr: "Peni harcamak için giriş yap.", en: "Sign in to spend peni." },
   taken: { tr: "Bu peni başka bir hesaba geçmiş.", en: "These peni went to another account." },
   takenBody: { tr: "Sen almadıysan kasaya sorabilirsin.", en: "If it wasn't you, ask at the till." },
   expired: { tr: "Bu kodun süresi doldu.", en: "This code has closed." },

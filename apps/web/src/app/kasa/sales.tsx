@@ -94,6 +94,7 @@ export function Sales({ t, slug, onError, lang }: TillProps) {
           <Stat label={t("sumSales")} value={formatTL(s.salesKurus)} note={`${s.paidCount} ${s.paidCount === 1 ? t("sumOrder1") : t("sumOrders")}`} />
           <Stat label={t("cash")} value={formatTL(s.cashKurus)} />
           <Stat label={t("card")} value={formatTL(s.cardKurus)} />
+          {s.peniKurus > 0 && <Stat label={t("peni")} value={formatTL(s.peniKurus)} />}
           <Stat
             label={`${t("sumRefunds")} · ${t("sumVoided")}`}
             value={formatTL(s.refundedKurus)}
@@ -119,7 +120,7 @@ export function Sales({ t, slug, onError, lang }: TillProps) {
                 <span className={`justify-self-start rounded-full px-3 py-1 text-sm ${STATUS_STYLE[o.status]}`}>{t(`status_${o.status}`)}</span>
                 <span className="truncate text-muted">
                   {o.itemCount} {o.itemCount === 1 ? t("item1") : t("items")}
-                  {o.paymentMethod && ` · ${o.paymentMethod === "cash" ? t("cash") : t("card")}`}
+                  {o.paymentMethod && ` · ${t(o.paymentMethod)}`}
                   {` · ${o.takenBy}`}
                 </span>
                 <span className={`tabular text-right text-lg ${o.status === "voided" || o.status === "refunded" ? "text-muted line-through" : ""}`}>
@@ -221,9 +222,17 @@ function OrderSheet({
           </div>
         )}
         <div className="flex items-baseline justify-between">
-          <span className="font-semibold">{order.paymentMethod ? (order.paymentMethod === "cash" ? t("cash") : t("card")) : t("due")}</span>
+          <span className="font-semibold">{order.paymentMethod ? t(order.paymentMethod) : t("due")}</span>
           <span className="tabular font-serif text-3xl">{formatTL(order.totalKurus)}</span>
         </div>
+        {order.peni && (
+          <div className="flex justify-between text-muted">
+            <span>
+              {t("peni")} · {order.peni.name}
+            </span>
+            <span className="tabular">{order.peni.peni} peni</span>
+          </div>
+        )}
         {order.tenderedKurus !== null && (
           <div className="flex justify-between text-muted">
             <span>
@@ -310,7 +319,7 @@ function Payments({ t, payments }: Pick<TillProps, "t"> & { payments: PaymentDTO
             <li key={p.id} className={`flex items-baseline justify-between gap-4 border-b border-line-soft py-2 text-[15px] ${over ? "text-muted" : ""}`}>
               <span>
                 {p.kind === "refund" ? `${t("refundLine")} · ` : ""}
-                {p.method === "cash" ? t("cash") : t("card")} · {t(`pay_${p.status}`)}
+                {t(p.method)} · {t(`pay_${p.status}`)}
                 <span className="text-muted">
                   {" "}
                   · {formatTime(p.settledAt ?? p.startedAt)} · {p.settledBy ?? p.startedBy}

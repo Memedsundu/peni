@@ -126,6 +126,17 @@ export const payOrderSchema = z.object({
   tenderedKurus: z.number().int().min(0).max(100_000_000).optional(),
 });
 
+const spendCode = z.string().trim().regex(/^\d{3}\s?\d{3}$/, "Kod 6 rakam olmalı");
+
+/** "Peni": whose wallet the customer's ödeme kodu opens. */
+export const checkPeniSchema = z.object({ code: spendCode });
+
+/** Takes `peni` from that wallet for the order; the same `payKey` again takes them once. */
+export const usePeniSchema = z.object({ code: spendCode, peni: z.number().int().min(1).max(1_000_000), payKey: actionKey });
+
+/** `POST /me/spend-code` */
+export const spendCodeSchema = z.object({ cafeSlug: z.string().min(1).max(100) });
+
 /** Backing out of a payment still waiting; `declined` when the terminal said no. */
 export const cancelPaymentSchema = z.object({ declined: z.boolean().optional() });
 
@@ -260,3 +271,5 @@ export type EmailVerifyInput = z.input<typeof emailVerifySchema>;
 export type GoogleSignInInput = z.input<typeof googleSignInSchema>;
 export type AppleSignInInput = z.input<typeof appleSignInSchema>;
 export type TakeClaimInput = z.input<typeof takeClaimSchema>;
+export type CheckPeniInput = z.input<typeof checkPeniSchema>;
+export type UsePeniInput = z.input<typeof usePeniSchema>;

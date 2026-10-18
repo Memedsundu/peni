@@ -15,7 +15,7 @@ const HUES: Record<CafeHue | "peni", { light: string; dark: string }> = {
   patlican: { light: "#4a2740", dark: "#d2a6c5" },
 };
 
-function useLang(): [Lang, () => void] {
+export function useLang(): [Lang, () => void] {
   const [lang, setLang] = useState<Lang>("tr");
   useEffect(() => {
     try {
@@ -34,7 +34,7 @@ function useLang(): [Lang, () => void] {
 }
 
 /** Whether a customer session cookie is there: `/me` answers only when signed in. */
-function useSignedIn(): [boolean | null, () => void] {
+export function useSignedIn(): [boolean | null, () => void] {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   useEffect(() => {
     api.me.get().then(
@@ -45,7 +45,7 @@ function useSignedIn(): [boolean | null, () => void] {
   return [signedIn, () => setSignedIn(true)];
 }
 
-function Shell({ lang, onLang, hue, children }: { lang: Lang; onLang: () => void; hue: CafeHue | null; children: ReactNode }) {
+export function Shell({ lang, onLang, hue, children }: { lang: Lang; onLang: () => void; hue: CafeHue | null; children: ReactNode }) {
   const colour = HUES[hue ?? "peni"];
   return (
     <main
@@ -65,7 +65,7 @@ function Shell({ lang, onLang, hue, children }: { lang: Lang; onLang: () => void
   );
 }
 
-function CafeLine({ name }: { name: string }) {
+export function CafeLine({ name }: { name: string }) {
   return (
     <p className="flex items-center gap-2 text-sm text-muted">
       <span aria-hidden="true" className="size-2.5 rounded-full bg-[var(--cafe)]" />
@@ -99,7 +99,12 @@ function Taken({ claim, t }: { claim: ClaimDTO; t: T }) {
         <span className="text-2xl font-semibold tabular">{claim.balancePeni} peni</span>
       </div>
       {claim.joined ? <p>{t("joined")}</p> : null}
-      <p className="text-muted">{t("spendHint")}</p>
+      <p className="text-muted">
+        {t("spendHint")}{" "}
+        <a href={`/harca?kafe=${encodeURIComponent(claim.cafeSlug)}`} className="font-medium text-ink underline underline-offset-4">
+          {t("mySpendCode")}
+        </a>
+      </p>
     </section>
   );
 }
@@ -120,7 +125,7 @@ function Closed({ claim, t }: { claim: ClaimDTO; t: T }) {
  * Email sign-in in two steps. `action` names the last button ("Giriş yap ve al"), and
  * `onSignedIn` runs right after, so taking the peni needs no extra tap.
  */
-function EmailSignIn({ t, lang, action, onSignedIn }: { t: T; lang: Lang; action: string; onSignedIn: () => Promise<void> }) {
+export function EmailSignIn({ t, lang, action, onSignedIn, prompt }: { t: T; lang: Lang; action: string; onSignedIn: () => Promise<void>; prompt?: string }) {
   const [email, setEmail] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -161,7 +166,7 @@ function EmailSignIn({ t, lang, action, onSignedIn }: { t: T; lang: Lang; action
   const field = "min-h-14 w-full rounded-2xl border border-line bg-paper px-4 text-lg outline-none focus:border-ink";
   return (
     <section className="flex flex-col gap-4">
-      <p className="text-lg">{t("signInFirst")}</p>
+      <p className="text-lg">{prompt ?? t("signInFirst")}</p>
       {!sentTo ? (
         <form className="flex flex-col gap-3" onSubmit={(e) => (e.preventDefault(), send())}>
           <label className="flex flex-col gap-2 text-sm text-muted">

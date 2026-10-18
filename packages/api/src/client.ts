@@ -1,6 +1,8 @@
 import type {
   AuthProvidersDTO,
   ClaimDTO,
+  PeniCheckDTO,
+  SpendCodeDTO,
   CafeDetailDTO,
   CafeMembersDTO,
   CafeSummaryDTO,
@@ -51,6 +53,8 @@ import type {
   UpdateStaffInput,
   SendGiftInput,
   TakeClaimInput,
+  CheckPeniInput,
+  UsePeniInput,
   TillDonationInput,
   UpdateProfileInput,
 } from "./schemas";
@@ -162,6 +166,8 @@ export function createPeniClient(options: PeniClientOptions) {
     },
     wallet: {
       get: () => call<FullWalletDTO>("GET", "/me/wallet"),
+      /** A fresh ödeme kodu for spending peni at the café's till; replaces the last one. */
+      spendCode: (cafeSlug: string) => call<SpendCodeDTO>("POST", "/me/spend-code", { cafeSlug }),
     },
     claims: {
       /** Public; says whether it's the viewer's when signed in. */
@@ -260,6 +266,15 @@ export function createPeniClient(options: PeniClientOptions) {
         /** Backs out of a waiting payment; `declined` records that the terminal said no. */
         cancelPayment: (cafeSlug: string, orderId: string, paymentId: string, input: CancelPaymentInput = {}) =>
           call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/payments/${slug(paymentId)}/cancel`, input, true),
+        /** "Peni": whose wallet the customer's ödeme kodu opens, and how much can go on the order. */
+        checkPeni: (cafeSlug: string, orderId: string, input: CheckPeniInput) =>
+          call<PeniCheckDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/peni/check`, input, true),
+        /** Takes peni from that wallet as a payment, approved at once. The order is paid when nothing's left. */
+        usePeni: (cafeSlug: string, orderId: string, input: UsePeniInput) =>
+          call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/peni`, input, true),
+        /** "Peni'yi geri ver": the peni on an unpaid order go back to the wallet. */
+        returnPeni: (cafeSlug: string, orderId: string) =>
+          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/peni/return`, {}, true),
         void: (cafeSlug: string, orderId: string, reason: string) =>
           call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/void`, { reason }, true),
         refund: (cafeSlug: string, orderId: string, reason: string) =>

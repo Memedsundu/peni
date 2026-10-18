@@ -1,4 +1,4 @@
-import type { Payment, PaymentConfirmation, PaymentKind, PaymentMethod, PaymentStore, PaymentTerminals, TerminalOutcome } from "@peni/core";
+import { peniTerminal, type Payment, type PaymentConfirmation, type PaymentKind, type PaymentMethod, type PaymentStore, type PaymentTerminal, type PaymentTerminals, type TerminalOutcome } from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors";
 
@@ -20,6 +20,8 @@ export interface PaymentRequest {
   reason: string | null;
   /** The open drawer session, when there is one. */
   cashSessionId: string | null;
+  /** Peni: the wallet's membership. */
+  reference?: string | null;
 }
 
 /**
@@ -45,7 +47,7 @@ export class PaymentService {
   async start(by: PaymentActor, request: PaymentRequest): Promise<Payment> {
     const existing = await this.store.findPaymentByKey(by.cafeId, request.key);
     if (existing) return existing;
-    const terminal = await this.terminals.terminalFor(by.cafeId, by.deviceId);
+    const terminal = await this.terminal(by.cafeId, by.deviceId, request.method);
     const now = this.now();
     const payment: Payment = {
       id: `pay_${randomUUID()}`,
@@ -58,7 +60,7 @@ export class PaymentService {
       startedByMemberId: by.memberId,
       settledAt: null,
       settledByMemberId: null,
-      reference: null,
+      reference: request.reference ?? null,
       receiptNo: null,
       failure: null,
     };
@@ -95,7 +97,7 @@ export class PaymentService {
     if (payment.status === "declined" || payment.status === "cancelled") return payment;
     if (payment.status === "approved") throw new AppError("PAYMENT_APPROVED", "This payment went through; refund the order instead", 409);
     if ((await this.confirmation(payment)) === "terminal") {
-      await (await this.terminals.terminalFor(payment.cafeId, payment.deviceId)).cancel(payment);
+      await (await this.terminal(payment.cafeId, payment.deviceId, payment.method)).cancel(payment);
     }
     return this.finish(payment, { status: input.declined ? "declined" : "cancelled", settledByMemberId: by.memberId });
   }
@@ -127,7 +129,7 @@ export class PaymentService {
 
   /** How a pending payment gets settled, from the terminal of the computer it was taken on. */
   async confirmation(payment: Payment): Promise<PaymentConfirmation> {
-    return (await this.terminals.terminalFor(payment.cafeId, payment.deviceId)).confirmation(payment);
+    return (await this.terminal(payment.cafeId, payment.deviceId, payment.method)).confirmation(payment);
   }
 
   async get(cafeId: string, paymentId: string): Promise<Payment> {
@@ -143,6 +145,11 @@ export class PaymentService {
   /** Oldest first. */
   list(cafeId: string, orderIds: string[]): Promise<Payment[]> {
     return orderIds.length ? this.store.listPayments(cafeId, orderIds) : Promise.resolve([]);
+  }
+
+  /** Peni never go near the card terminal: the wallet is their terminal. */
+  private terminal(cafeId: string, deviceId: string | null, method: PaymentMethod): Promise<PaymentTerminal> {
+    return method === "peni" ? Promise.resolve(peniTerminal) : this.terminals.terminalFor(cafeId, deviceId);
   }
 
   private async finish(payment: Payment, change: Partial<Payment>): Promise<Payment> {

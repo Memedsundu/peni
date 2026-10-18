@@ -1,6 +1,7 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
 import { PrismaClaimStore } from "./prisma-claim-store";
+import { PrismaSpendCodeStore } from "./prisma-spend-code-store";
 import { PrismaCommunityStore } from "./prisma-community-store";
 import { PrismaDirectory } from "./prisma-directory";
 import { PrismaIdentityStore } from "./prisma-identity-store";
@@ -20,6 +21,7 @@ export { PrismaCommunityStore } from "./prisma-community-store";
 export { PrismaMenuStore } from "./prisma-menu-store";
 export { PrismaOrderStore } from "./prisma-order-store";
 export { PrismaClaimStore } from "./prisma-claim-store";
+export { PrismaSpendCodeStore } from "./prisma-spend-code-store";
 export { PrismaPaymentStore } from "./prisma-payment-store";
 export { PrismaCashStore } from "./prisma-cash-store";
 export { PrismaStaffStore } from "./prisma-staff-store";
@@ -45,6 +47,7 @@ export function createPrismaStores(prisma: PrismaClient) {
     menu: new PrismaMenuStore(db),
     orders: new PrismaOrderStore(db),
     claims: new PrismaClaimStore(db),
+    spendCodes: new PrismaSpendCodeStore(db),
     payments: new PrismaPaymentStore(db),
     cash: new PrismaCashStore(db),
     staff: new PrismaStaffStore(db),

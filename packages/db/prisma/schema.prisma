@@ -335,6 +335,7 @@ enum OrderStatus {
 enum PaymentMethod {
   cash
   card
+  peni
 }
 
 /// What the till sold. Amounts in kuruş.
@@ -526,11 +527,25 @@ model Membership {
   /// Peni kodu shown at the till, e.g. "M7K-42Q".
   memberCode String?  @unique
 
-  cafe     Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cafe      Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  customer  Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  spendCode SpendCode?
 
   @@unique([customerId, cafeId])
   @@index([cafeId])
+}
+
+/// A member's ödeme kodu for spending peni at the till: one at a time, valid a few minutes.
+model SpendCode {
+  membershipId String   @id
+  cafeId       String
+  code         String
+  createdAt    DateTime
+  expiresAt    DateTime
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, code])
 }
 
 enum LedgerKind {

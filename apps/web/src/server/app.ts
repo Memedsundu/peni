@@ -17,6 +17,7 @@ import type {
   RecentRecipientDTO,
   RefItemDTO,
   SessionDTO,
+  SpendCodeDTO,
   StaffDashboardDTO,
   StaffReportFieldsDTO,
   TakeClaimInput,
@@ -29,6 +30,7 @@ import {
   InMemoryLedgerStore,
   InMemoryMenuStore,
   InMemoryClaimStore,
+  InMemorySpendCodeStore,
   CLAIM_MISSES_PER_HOUR,
   claimState,
   localDateKey,
@@ -56,6 +58,7 @@ import {
   type MenuItem,
   type MenuStore,
   type ClaimStore,
+  type SpendCodeStore,
   type PeniClaim,
   type PaymentStore,
   type CashStore,
@@ -67,7 +70,7 @@ import {
   type StaffStore,
 } from "@peni/core";
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomInt } from "node:crypto";
 import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifier } from "./customer-auth";
 import { AppError } from "./errors";
 import { buildIcs } from "./ics";
@@ -98,6 +101,7 @@ export interface PeniStores {
   menu: MenuStore;
   orders: OrderStore;
   claims: ClaimStore;
+  spendCodes: SpendCodeStore;
   payments: PaymentStore;
   cash: CashStore;
   staff: StaffStore;
@@ -112,6 +116,7 @@ export function inMemoryStores(): PeniStores {
     menu: new InMemoryMenuStore(),
     orders: new InMemoryOrderStore(),
     claims: new InMemoryClaimStore(),
+    spendCodes: new InMemorySpendCodeStore(),
     payments: new InMemoryPaymentStore(),
     cash: new InMemoryCashStore(),
     staff: new InMemoryStaffStore(),
@@ -173,7 +178,7 @@ export class PeniApp {
     this.community = stores.community;
     this.menu = stores.menu;
     this.claims = stores.claims;
-    this.peni = new PeniService(this.ledger, this.directory, () => this.now(), stores.claims);
+    this.peni = new PeniService(this.ledger, this.directory, () => this.now(), stores.claims, stores.spendCodes);
     this.auth = new CustomerAuth(this.identity, {
       now: () => this.now(),
       verifier: options.auth?.verifier ?? new JoseIdTokenVerifier({ google: { audiences: [] }, apple: { audiences: [] } }),
@@ -184,6 +189,8 @@ export class PeniApp {
     this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
     this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
     this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, this.cash, this.peni, () => this.now());
+    // A newcomer may have no name yet; the barista then checks the balance instead.
+    this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
@@ -551,6 +558,21 @@ export class PeniApp {
     const membershipId = before?.id ?? (await this.ensureMembership(customer.id, claim.cafeId));
     const { claim: taken } = await this.peni.takeClaim(claim.id, membershipId);
     return this.claimDTO(taken, customer, !before);
+  }
+
+  /** "Ödeme kodum" (plan piece 11): a fresh code to spend peni at the café's till. */
+  async spendCode(customer: CustomerRecord, cafeSlug: string): Promise<SpendCodeDTO> {
+    const cafe = await this.requireCafe(cafeSlug);
+    const membershipId = await this.requireMembershipId(customer.id, cafe.id);
+    const code = await this.peni.issueSpendCode(membershipId, () => randomInt(1_000_000) / 1_000_000);
+    return {
+      cafeSlug: cafe.slug,
+      cafeName: cafe.name,
+      hue: cafe.hue as CafeHue | null,
+      code: code.code,
+      expiresAt: code.expiresAt.toISOString(),
+      balancePeni: await this.peni.walletBalance(membershipId),
+    };
   }
 
   private async claimDTO(claim: PeniClaim, viewer: CustomerRecord | null, joined: boolean): Promise<ClaimDTO> {

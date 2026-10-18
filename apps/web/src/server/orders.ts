@@ -1,4 +1,4 @@
-import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDTO, TillMenuDTO } from "@peni/api";
+import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDTO, PeniCheckDTO, TillMenuDTO } from "@peni/api";
 import {
   amountPaid,
   calculateEarn,
@@ -21,6 +21,7 @@ import {
   type PeniDirectory,
   type PeniService,
   type Permission,
+  tillSpendCap,
   type StaffStore,
 } from "@peni/core";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
@@ -54,6 +55,9 @@ export class OrderService {
     // However a payment gets approved, by the barista or later by the terminal, its order moves on.
     payments.onApproved = (payment) => this.applyPayment(payment);
   }
+
+  /** "Ayşe Y." for a wallet's membership, shown to the barista. Set by the app. */
+  peniMemberName: (membershipId: string) => Promise<string> = async () => "Üye";
 
   /** The till's tabs and tiles: categories in order, with what can be sold right now. */
   async tillMenu(ctx: StaffContext): Promise<TillMenuDTO> {
@@ -126,6 +130,10 @@ export class OrderService {
     this.require(ctx, "till.use");
     const order = await this.find(ctx, id);
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    // The peni were worked out for these lines: they go back first.
+    if (peniKurusOf(await this.payments.list(ctx.cafe.id, [order.id])) > 0) {
+      throw new AppError("PENI_ON_ORDER", "Give the peni back before changing the order", 409);
+    }
     const lines = await this.priced(ctx, input.lines);
     const discountPercent = input.discountPercent ?? order.discountPercent;
     this.check(lines, discountPercent);
@@ -196,6 +204,104 @@ export class OrderService {
     return this.answer(ctx, await this.payments.cancel(actor(ctx), payment.id, input));
   }
 
+  /** "Peni" (plan piece 11): whose wallet the customer's ödeme kodu opens, and how much can go on the order. */
+  async checkPeni(ctx: StaffContext, orderId: string, input: { code: string }): Promise<PeniCheckDTO> {
+    this.require(ctx, "till.use");
+    const order = await this.find(ctx, orderId);
+    if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    const member = await this.peni.spenderForCode(ctx.cafe.id, input.code);
+    const payments = await this.payments.list(ctx.cafe.id, [order.id]);
+    this.sameWallet(payments, member.id);
+    const balancePeni = await this.peni.walletBalance(member.id);
+    return { name: await this.peniMemberName(member.id), balancePeni, maxPeni: Math.min(balancePeni, await this.spendCap(order, payments)) };
+  }
+
+  /**
+   * Takes peni from the wallet the ödeme kodu opens, as a payment approved at once. Peni
+   * can pay any part of the order (D11); the rest goes on cash or card, and the order is
+   * paid when nothing's left. The same `payKey` again takes them once.
+   */
+  async usePeni(ctx: StaffContext, orderId: string, input: { code: string; peni: number; payKey: string }): Promise<PaymentAnswerDTO> {
+    this.require(ctx, "till.use");
+    const order = await this.find(ctx, orderId);
+    const again = await this.payments.findByKey(ctx.cafe.id, input.payKey);
+    if (again) {
+      if (again.orderId !== order.id) throw new AppError("PAY_KEY_REUSED", "This payment belongs to another order", 409);
+      return this.answer(ctx, again);
+    }
+    if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    const member = await this.peni.spenderForCode(ctx.cafe.id, input.code);
+    // A card still waiting was for the whole amount.
+    await this.payments.clearPending(actor(ctx), order.id);
+    const payments = await this.payments.list(ctx.cafe.id, [order.id]);
+    this.sameWallet(payments, member.id);
+    const peni = await this.peni.spendAtTill({
+      membershipId: member.id,
+      orderId: order.id,
+      key: input.payKey,
+      requestedPeni: input.peni,
+      capPeni: await this.spendCap(order, payments),
+    });
+    const payment = await this.payments.start(actor(ctx), {
+      orderId: order.id,
+      kind: "sale",
+      method: "peni",
+      amountKurus: peni * 100,
+      tenderedKurus: null,
+      changeKurus: null,
+      key: input.payKey,
+      reason: null,
+      cashSessionId: (await this.cash.current(ctx.cafe.id))?.id ?? null,
+      reference: member.id,
+    });
+    return this.answer(ctx, payment);
+  }
+
+  /** "Peni'yi geri ver": the peni on an unpaid order go back to the wallet, say to change the order. */
+  async returnPeni(ctx: StaffContext, orderId: string): Promise<OrderDTO> {
+    this.require(ctx, "till.use");
+    const order = await this.find(ctx, orderId);
+    if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    await this.givePeniBack(ctx, order, null);
+    return this.dto(ctx, order);
+  }
+
+  /** Peni back to the wallet on an order nobody will pay: recorded as a peni refund, reversed in the ledger. */
+  private async givePeniBack(ctx: StaffContext, order: Order, why: string | null): Promise<void> {
+    const payments = await this.payments.list(ctx.cafe.id, [order.id]);
+    const peniKurus = peniKurusOf(payments);
+    if (peniKurus <= 0) return;
+    await this.peni.releaseOrder(order.cafeId, order.id, "returned");
+    await this.payments.start(actor(ctx), {
+      orderId: order.id,
+      kind: "refund",
+      method: "peni",
+      amountKurus: peniKurus,
+      tenderedKurus: null,
+      changeKurus: null,
+      key: `peni-back:${randomUUID()}`,
+      reason: why,
+      cashSessionId: null,
+      reference: walletOf(payments),
+    });
+  }
+
+  /** One wallet per order, so it's always clear whose peni to give back. */
+  private sameWallet(payments: Payment[], membershipId: string): void {
+    const wallet = peniKurusOf(payments) > 0 ? walletOf(payments) : null;
+    if (wallet && wallet !== membershipId) throw new AppError("PENI_OTHER_WALLET", "Someone else's peni are on this order", 409);
+  }
+
+  private async spendCap(order: Order, payments: Payment[]): Promise<number> {
+    return tillSpendCap({
+      lines: order.lines.map((l) => ({ productId: l.productId, totalKurus: lineTotal(l) })),
+      orderTotalKurus: order.totalKurus,
+      dueKurus: order.totalKurus - amountPaid(payments),
+      peniOnOrder: peniKurusOf(payments) / 100,
+      settings: await this.directory.getSettings(order.cafeId),
+    });
+  }
+
   /**
    * Moves an order on once one of its payments is approved, whoever approved it: paid
    * when the sales cover the total, refunded when the refund goes through.
@@ -218,16 +324,19 @@ export class OrderService {
       return;
     }
     if (order.status !== "paid") return;
+    // Paid two ways (peni and cash, say), it's refunded once both have gone back.
+    const payments = await this.payments.list(order.cafeId, [order.id]);
+    if (amountPaid(payments) > 0) return;
     await this.orders.saveOrder({
       ...order,
       status: "refunded",
       refundedAt: payment.settledAt,
       refundedByMemberId: payment.startedByMemberId,
       refundReason: payment.reason,
-      refundKurus: payment.amountKurus,
+      refundKurus: payments.filter((p) => p.kind === "refund" && p.status === "approved").reduce((s, p) => s + p.amountKurus, 0),
     });
-    // Peni go with the money: a code nobody used closes, peni already taken come back out
-    // of the wallet (as much as is left in it).
+    // Peni go with the money: peni spent on it go back to the wallet, a code nobody used
+    // closes, and peni already taken come back out of the wallet (as much as is left).
     await this.peni.refundOrder(order.cafeId, order.id);
   }
 
@@ -272,7 +381,9 @@ export class OrderService {
     const existing = await this.claims.getClaimByOrder(order.cafeId, order.id);
     if (existing) return existing;
     const settings = await this.directory.getSettings(order.cafeId);
-    const peni = calculateEarn(order.totalKurus, settings);
+    // Peni earn nothing: only what was paid in money does.
+    const peniKurus = peniKurusOf(await this.payments.list(order.cafeId, [order.id]));
+    const peni = calculateEarn(order.totalKurus - peniKurus, settings);
     if (peni === 0) return null;
     const now = this.now();
     const businessDay = localDateKey(now, settings.timeZone);
@@ -312,8 +423,10 @@ export class OrderService {
     this.require(ctx, "till.correct");
     const order = await this.find(ctx, id);
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "Only an unpaid order can be voided; refund a paid one", 409);
+    const why = reason(input.reason);
     await this.payments.clearPending(actor(ctx), order.id);
-    const next: Order = { ...order, status: "voided", voidedAt: this.now(), voidedByMemberId: ctx.member.id, voidReason: reason(input.reason) };
+    await this.givePeniBack(ctx, order, why);
+    const next: Order = { ...order, status: "voided", voidedAt: this.now(), voidedByMemberId: ctx.member.id, voidReason: why };
     await this.orders.saveOrder(next);
     return this.dto(ctx, next);
   }
@@ -328,20 +441,27 @@ export class OrderService {
     const order = await this.find(ctx, id);
     if (order.status !== "paid") throw new AppError("ORDER_NOT_PAID", "Only a paid order can be refunded", 409);
     const why = reason(input.reason);
-    const method = order.paymentMethod ?? "cash";
-    const cashSessionId = await this.drawer(ctx, method);
     await this.payments.clearPending(actor(ctx), order.id);
-    await this.payments.start(actor(ctx), {
-      orderId: order.id,
-      kind: "refund",
-      method,
-      amountKurus: order.totalKurus,
-      tenderedKurus: null,
-      changeKurus: null,
-      key: `refund:${randomUUID()}`,
-      reason: why,
-      cashSessionId,
-    });
+    const payments = await this.payments.list(ctx.cafe.id, [order.id]);
+    // Each way it was paid goes back the same way: peni to the wallet first, then the money.
+    const owed = (["peni", "cash", "card"] as const)
+      .map((method) => ({ method, amountKurus: amountPaid(payments.filter((p) => p.method === method)) }))
+      .filter((x) => x.amountKurus > 0);
+    const drawers = await Promise.all(owed.map((x) => (x.method === "peni" ? null : this.drawer(ctx, x.method))));
+    for (const [i, x] of owed.entries()) {
+      await this.payments.start(actor(ctx), {
+        orderId: order.id,
+        kind: "refund",
+        method: x.method,
+        amountKurus: x.amountKurus,
+        tenderedKurus: null,
+        changeKurus: null,
+        key: `refund:${randomUUID()}`,
+        reason: why,
+        cashSessionId: drawers[i]!,
+        reference: x.method === "peni" ? walletOf(payments) : null,
+      });
+    }
     return this.dto(ctx, await this.find(ctx, id));
   }
 
@@ -367,14 +487,19 @@ export class OrderService {
     const all = await this.orders.listOrders(ctx.cafe.id, { businessDay, limit: 1000 });
     const paid = all.filter((o) => o.status === "paid" || o.status === "refunded");
     const sum = (os: Order[]) => os.reduce((s, o) => s + o.totalKurus, 0);
+    // An order can be paid two ways, so the ways are summed from its payments.
+    const stillPaid = all.filter((o) => o.status === "paid");
+    const salePayments = (await this.payments.list(ctx.cafe.id, stillPaid.map((o) => o.id))).filter((p) => p.kind === "sale" && p.status === "approved");
+    const byMethod = (m: PaymentMethod) => salePayments.filter((p) => p.method === m).reduce((s, p) => s + p.amountKurus, 0);
     return {
       businessDay,
       orders: await this.dtos(ctx, all.filter((o) => !filter.status || o.status === filter.status)),
       summary: {
         paidCount: all.filter((o) => o.status === "paid").length,
         salesKurus: sum(all.filter((o) => o.status === "paid")),
-        cashKurus: sum(all.filter((o) => o.status === "paid" && o.paymentMethod === "cash")),
-        cardKurus: sum(all.filter((o) => o.status === "paid" && o.paymentMethod === "card")),
+        cashKurus: byMethod("cash"),
+        cardKurus: byMethod("card"),
+        peniKurus: byMethod("peni"),
         refundedCount: paid.filter((o) => o.status === "refunded").length,
         refundedKurus: paid.reduce((s, o) => s + (o.refundKurus ?? 0), 0),
         voidedCount: all.filter((o) => o.status === "voided").length,
@@ -422,10 +547,23 @@ export class OrderService {
       const how = await this.payments.confirmation(p);
       confirmBy.set(p.id, how === "terminal" ? "terminal" : "staff");
     }
-    return orders.map((o) => this.toDTO(ctx, o, payments.filter((p) => p.orderId === o.id), names, confirmBy));
+    const wallets = new Map<string, string>();
+    for (const id of new Set(payments.filter((p) => p.method === "peni" && p.reference).map((p) => p.reference!))) {
+      wallets.set(id, await this.peniMemberName(id));
+    }
+    return orders.map((o) => this.toDTO(ctx, o, payments.filter((p) => p.orderId === o.id), names, confirmBy, wallets));
   }
 
-  private toDTO(ctx: StaffContext, o: Order, payments: Payment[], names: Map<string, string>, confirmBy: Map<string, PaymentDTO["confirmBy"]>): OrderDTO {
+  private toDTO(
+    ctx: StaffContext,
+    o: Order,
+    payments: Payment[],
+    names: Map<string, string>,
+    confirmBy: Map<string, PaymentDTO["confirmBy"]>,
+    wallets: Map<string, string>,
+  ): OrderDTO {
+    const peniKurus = peniKurusOf(payments);
+    const wallet = walletOf(payments);
     const name = (id: string | null) => (id ? (names.get(id) ?? "Eski ekip üyesi") : null);
     const refundWaiting = payments.some((p) => p.kind === "refund" && p.status === "pending");
     return {
@@ -449,6 +587,8 @@ export class OrderService {
       refunded: o.refundedAt
         ? { at: o.refundedAt.toISOString(), by: name(o.refundedByMemberId)!, reason: o.refundReason ?? "", amountKurus: o.refundKurus ?? 0 }
         : null,
+      dueKurus: o.status === "open" ? o.totalKurus - amountPaid(payments) : 0,
+      peni: peniKurus > 0 && o.status !== "refunded" && o.status !== "voided" ? { peni: peniKurus / 100, name: (wallet && wallets.get(wallet)) || "Üye" } : null,
       canVoid: o.status === "open" && ctx.permissions.has("till.correct"),
       canRefund: o.status === "paid" && !refundWaiting && ctx.permissions.has("till.correct"),
       canDelete: ctx.permissions.has("till.delete"),
@@ -502,6 +642,16 @@ export class OrderService {
     if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
     throw new AppError("FORBIDDEN", "Your role can't do this", 403);
   }
+}
+
+/** Peni on an order: approved peni payments less peni given back, in kuruş. */
+function peniKurusOf(payments: Payment[]): number {
+  return amountPaid(payments.filter((p) => p.method === "peni"));
+}
+
+/** The wallet an order's peni came from. */
+function walletOf(payments: Payment[]): string | null {
+  return payments.find((p) => p.method === "peni" && p.kind === "sale" && p.status === "approved")?.reference ?? null;
 }
 
 function actor(ctx: StaffContext): PaymentActor {

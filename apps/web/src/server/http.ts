@@ -22,6 +22,9 @@ const STATUS: Record<string, number> = {
   CLAIM_TAKEN: 409,
   CLAIM_EXPIRED: 410,
   CLAIM_CANCELLED: 410,
+  SPEND_CODE_WRONG: 404,
+  SPEND_CODE_EXPIRED: 410,
+  NOTHING_TO_SPEND: 409,
 };
 
 export function errorResponse(error: unknown): NextResponse {
