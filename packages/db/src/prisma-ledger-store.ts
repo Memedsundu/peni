@@ -22,7 +22,8 @@ export class PrismaLedgerStore implements LedgerStore {
 
   constructor(private readonly prisma: PrismaClient) {}
 
-  private get db(): Tx | PrismaClient {
+  /** The open transaction inside `atomically`, else the client. Other Prisma stores read and write through it too. */
+  get db(): Tx | PrismaClient {
     return this.current.getStore() ?? this.prisma;
   }
 

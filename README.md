@@ -19,7 +19,7 @@ The code is being rebuilt piece by piece. Today it holds:
 |---|---|
 | Peni rules: earn, spend, gifts, askı, matching, refunds, reports | **Done, tested** (`packages/core`) |
 | Ledger on Postgres: append-only, balanced and non-negative, enforced by the database | **Done, tested on Postgres 16** (`packages/db`) |
-| `/api/v1` for wallets, gifts, askı, the café feed and the staff report | **Done, end-to-end tested.** Records are in memory for now |
+| `/api/v1` for wallets, gifts, askı, the café feed and the staff report | **Done, end-to-end tested** on Postgres and in memory |
 | Web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
@@ -45,6 +45,8 @@ pnpm install
 pnpm dev:web            # http://localhost:3000, demo data in memory, nothing to configure
 ```
 
+To keep data in Postgres, set `DATABASE_URL` in `apps/web/.env` and apply the migrations once with `DATABASE_URL=… pnpm --filter @peni/db migrate:deploy`. An empty database gets the demo cafés on first start.
+
 The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. The staff key for `/api/v1/staff/moda` is `demo-staff`.
 
 ## Checks
@@ -54,7 +56,7 @@ pnpm test
 pnpm typecheck
 pnpm --filter @peni/web build
 
-# Ledger against real Postgres (applies migrations, never wipes data):
+# Postgres stores against a real database (applies migrations, never wipes data):
 TEST_DATABASE_URL=postgresql://… pnpm --filter @peni/db test
 
 # End-to-end over HTTP against a running server:

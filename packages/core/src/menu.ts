@@ -11,15 +11,18 @@ export interface MenuItem {
   imageUrl?: string | null;
 }
 
-/** Where a café's menu lives. The Menü module (plan piece 5) will own it; for now it's in memory. */
+/** Where a café's menu lives. The Menü module (plan piece 5) will add editing. */
 export interface MenuStore {
+  /** In the café's order. */
   listMenu(cafeId: string): Promise<MenuItem[]>;
+  /** Replaces the café's whole menu. */
+  setMenu(cafeId: string, items: MenuItem[]): Promise<void>;
 }
 
 export class InMemoryMenuStore implements MenuStore {
   private readonly menus = new Map<string, MenuItem[]>();
 
-  setMenu(cafeId: string, items: MenuItem[]): void {
+  async setMenu(cafeId: string, items: MenuItem[]) {
     this.menus.set(cafeId, items.map((i) => ({ ...i })));
   }
 

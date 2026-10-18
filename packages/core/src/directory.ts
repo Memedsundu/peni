@@ -26,6 +26,13 @@ export interface Gift {
   expiresAt: Date;
   resolvedAt: Date | null;
   sendTransactionId: string;
+  /** When the recipient said thanks. Only accepted gifts can be thanked. */
+  thankedAt?: Date | null;
+}
+
+export interface MembershipFilter {
+  cafeId?: string;
+  customerId?: string;
 }
 
 export interface GiftFilter {
@@ -38,8 +45,14 @@ export interface GiftFilter {
 /** Non-ledger records the peni service reads and writes. */
 export interface PeniDirectory {
   getMembership(id: string): Promise<Membership | null>;
+  /** The customer's membership at that café, if they joined it. */
+  findMembership(customerId: string, cafeId: string): Promise<Membership | null>;
+  /** Oldest first. */
+  listMemberships(filter: MembershipFilter): Promise<Membership[]>;
+  /** Creates the membership or updates it. */
   saveMembership(membership: Membership): Promise<void>;
   getSettings(cafeId: string): Promise<CafePeniSettings>;
+  saveSettings(settings: CafePeniSettings): Promise<void>;
   getGift(id: string): Promise<Gift | null>;
   saveGift(gift: Gift): Promise<void>;
   listGifts(filter: GiftFilter): Promise<Gift[]>;
@@ -55,12 +68,28 @@ export class InMemoryDirectory implements PeniDirectory {
     return m ? { ...m } : null;
   }
 
+  async findMembership(customerId: string, cafeId: string) {
+    const m = [...this.memberships.values()].find((x) => x.customerId === customerId && x.cafeId === cafeId);
+    return m ? { ...m } : null;
+  }
+
+  async listMemberships(filter: MembershipFilter) {
+    return [...this.memberships.values()]
+      .filter((m) => (!filter.cafeId || m.cafeId === filter.cafeId) && (!filter.customerId || m.customerId === filter.customerId))
+      .sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime())
+      .map((m) => ({ ...m }));
+  }
+
   async saveMembership(membership: Membership) {
     this.memberships.set(membership.id, { ...membership });
   }
 
   async getSettings(cafeId: string) {
     return { ...(this.settings.get(cafeId) ?? defaultSettings(cafeId)) };
+  }
+
+  async saveSettings(settings: CafePeniSettings) {
+    this.settings.set(settings.cafeId, { ...settings });
   }
 
   async getGift(id: string) {

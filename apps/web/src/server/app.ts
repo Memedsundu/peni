@@ -21,9 +21,11 @@ import type {
   WalletDTO,
 } from "@peni/api";
 import {
+  InMemoryCommunityStore,
   InMemoryDirectory,
-  InMemoryMenuStore,
+  InMemoryIdentityStore,
   InMemoryLedgerStore,
+  InMemoryMenuStore,
   Ledger,
   PeniError,
   PeniService,
@@ -31,10 +33,19 @@ import {
   normalizeMemberCode,
   startOfLocalDay,
   type AskidaWallEvent,
+  type Cafe,
   type CafePeniReport,
   type CafePeniSettings,
+  type CommunityStore,
+  type Customer,
   type Gift,
+  type IdentityStore,
+  type LedgerStore,
   type MenuItem,
+  type MenuStore,
+  type PeniDirectory,
+  type Post,
+  type PostWithActivity,
 } from "@peni/core";
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
 import { createHash, randomBytes } from "node:crypto";
@@ -44,10 +55,9 @@ import { buildIcs } from "./ics";
  * The Peni application layer: everything the HTTP routes call.
  *
  * Peni rules (wallets, gifts, askı) live in @peni/core's PeniService; this class
- * adds customers, cafés, menus and the community feed. For now it runs on
- * in-memory records seeded with demo data (see seed.ts). Postgres-backed ledger
- * and directory implementations already exist in @peni/db; moving the remaining
- * records there is the next piece of the plan (docs/plan.md, piece 1).
+ * adds customers, cafés, menus and the community feed. Every record sits behind a
+ * store: in memory for tests and the demo, Postgres (@peni/db) when DATABASE_URL
+ * is set (see runtime.ts).
  */
 
 export class AppError extends Error {
@@ -72,42 +82,24 @@ export function isAppError(error: unknown): error is AppError {
   return typeof code === "string" && typeof status === "number";
 }
 
-export interface CafeRecord {
-  id: string;
-  slug: string;
-  name: string;
-  address: string | null;
-  district: string | null;
-  city: string | null;
-  coverImageUrl: string | null;
-  /** Items that read peni as goods ("3 çay"). Defaults to the cheapest askı items. [G1] */
-  referenceProductIds?: string[];
-  /** The café's own colourway, once it picks one. [G9] */
-  hue?: CafeHue | null;
+export type CustomerRecord = Customer;
+
+export interface PeniStores {
+  ledger: LedgerStore;
+  directory: PeniDirectory;
+  identity: IdentityStore;
+  community: CommunityStore;
+  menu: MenuStore;
 }
 
-export interface CustomerRecord {
-  id: string;
-  phone: string;
-  displayName: string;
-  avatarUrl: string | null;
-  profileVisible: boolean;
-}
-
-export interface PostRecord {
-  id: string;
-  cafeId: string;
-  kind: "post" | "question" | "event";
-  /** Event topic. [G4] */
-  title?: string | null;
-  body: string;
-  publishedAt: Date;
-  pinned: boolean;
-  eventStartsAt: Date | null;
-  eventCapacity: number | null;
-  reactions: Set<string>;
-  rsvps: Set<string>;
-  comments: { id: string; customerId: string; body: string; createdAt: Date }[];
+export function inMemoryStores(): PeniStores {
+  return {
+    ledger: new InMemoryLedgerStore(),
+    directory: new InMemoryDirectory(),
+    identity: new InMemoryIdentityStore(),
+    community: new InMemoryCommunityStore(),
+    menu: new InMemoryMenuStore(),
+  };
 }
 
 export interface PeniAppOptions {
@@ -119,30 +111,31 @@ export interface PeniAppOptions {
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
+/** Customer sessions last this long. */
+const SESSION_MS = 90 * DAY_MS;
 /** Gift recipient lookups per customer per hour. [G6] */
 export const LOOKUP_LIMIT_PER_HOUR = 20;
 /** A Peni masası lasts this long in calendars. */
 const EVENT_LENGTH_MS = 2 * HOUR_MS;
 
 export class PeniApp {
-  readonly directory = new InMemoryDirectory();
-  readonly ledger = new Ledger(new InMemoryLedgerStore());
+  readonly directory: PeniDirectory;
+  readonly ledger: Ledger;
   readonly peni: PeniService;
-  readonly menu = new InMemoryMenuStore();
-
-  readonly cafes = new Map<string, CafeRecord>();
-  readonly customers = new Map<string, CustomerRecord>();
-  readonly posts = new Map<string, PostRecord>();
-  private readonly sessions = new Map<string, string>(); // token hash to customer id
-  private readonly memberIndex = new Map<string, string>(); // `${customerId}:${cafeId}` to membership id
-  private readonly memberCodes = new Map<string, string>(); // membership id to Peni kodu
-  private readonly membersByCode = new Map<string, string>(); // Peni kodu to membership id
-  private readonly staffRoles = new Map<string, { cafeId: string; role: StaffRole }[]>(); // customer id to cafés
-  private readonly lookups = new Map<string, number[]>(); // customer id to lookup times (ms)
-  private readonly thanks = new Map<string, Date>(); // gift id to when the recipient said thanks
+  readonly identity: IdentityStore;
+  readonly community: CommunityStore;
+  readonly menu: MenuStore;
   private clockOverride: Date | null = null;
 
-  constructor(private readonly options: PeniAppOptions) {
+  constructor(
+    private readonly options: PeniAppOptions,
+    stores: PeniStores = inMemoryStores(),
+  ) {
+    this.directory = stores.directory;
+    this.ledger = new Ledger(stores.ledger);
+    this.identity = stores.identity;
+    this.community = stores.community;
+    this.menu = stores.menu;
     this.peni = new PeniService(this.ledger, this.directory, () => this.now());
   }
 
@@ -164,20 +157,24 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── sessions
 
-  customerForToken(token: string | null): CustomerRecord | null {
+  async customerForToken(token: string | null): Promise<CustomerRecord | null> {
     if (!token) return null;
-    const id = this.sessions.get(sha256(token));
-    return id ? (this.customers.get(id) ?? null) : null;
+    const id = await this.identity.customerIdForSession(sha256(token), this.now());
+    return id ? this.identity.getCustomer(id) : null;
   }
 
   /**
    * Demo only: a session for a seeded customer, so the web demo can sign in with one tap.
    * Google, Apple and email sign-in replace it (plan piece 3).
    */
-  createSessionFor(customerId: string): string {
+  async createSessionFor(customerId: string): Promise<string> {
     const token = randomBytes(32).toString("base64url");
-    this.sessions.set(sha256(token), customerId);
+    await this.identity.createSession(customerId, sha256(token), new Date(this.now().getTime() + SESSION_MS));
     return token;
+  }
+
+  async signOut(token: string | null): Promise<void> {
+    if (token) await this.identity.revokeSession(sha256(token), this.now());
   }
 
   isStaffKey(key: string | null): boolean {
@@ -186,37 +183,37 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── me (profile, staff cafés)
 
-  me(customer: CustomerRecord): MeDTO {
-    return { customer: toCustomerDTO(customer), staffCafes: this.staffCafesFor(customer.id) };
+  async me(customer: CustomerRecord): Promise<MeDTO> {
+    return { customer: toCustomerDTO(customer), staffCafes: await this.staffCafesFor(customer.id) };
   }
 
   /** "Adın" and "Profilim görünsün". [G18] */
-  updateProfile(customer: CustomerRecord, input: { displayName?: string; profileVisible?: boolean }): MeDTO {
+  async updateProfile(customer: CustomerRecord, input: { displayName?: string; profileVisible?: boolean }): Promise<MeDTO> {
+    const updated = { ...customer };
     const name = input.displayName?.trim();
-    if (name) customer.displayName = name;
-    if (input.profileVisible !== undefined) customer.profileVisible = input.profileVisible;
-    return this.me(customer);
+    if (name) updated.displayName = name;
+    if (input.profileVisible !== undefined) updated.profileVisible = input.profileVisible;
+    await this.identity.saveCustomer(updated);
+    return this.me(updated);
   }
 
   /** Makes a customer staff at a café, so their session offers the café panel. [G19] */
-  grantStaff(customerId: string, cafeSlug: string, role: StaffRole): void {
-    const cafe = this.requireCafe(cafeSlug);
-    const roles = (this.staffRoles.get(customerId) ?? []).filter((r) => r.cafeId !== cafe.id);
-    this.staffRoles.set(customerId, [...roles, { cafeId: cafe.id, role }]);
+  async grantStaff(customerId: string, cafeSlug: string, role: StaffRole): Promise<void> {
+    const cafe = await this.requireCafe(cafeSlug);
+    await this.identity.grantStaff({ cafeId: cafe.id, customerId, role });
   }
 
   // ─────────────────────────────────────────────── cafés
 
   async listCafes(customer: CustomerRecord | null): Promise<CafeSummaryDTO[]> {
-    return Promise.all([...this.cafes.values()].map((c) => this.cafeSummary(c, customer)));
+    return Promise.all((await this.identity.listCafes()).map((c) => this.cafeSummary(c, customer)));
   }
 
   async cafeDetail(slug: string, customer: CustomerRecord | null): Promise<CafeDetailDTO> {
-    const cafe = this.requireCafe(slug);
+    const cafe = await this.requireCafe(slug);
     const settings = await this.directory.getSettings(cafe.id);
     const menu = await this.menu.listMenu(cafe.id);
-    const membershipId = customer ? this.memberIndex.get(`${customer.id}:${cafe.id}`) : undefined;
-    const membership = membershipId ? await this.directory.getMembership(membershipId) : null;
+    const membership = customer ? await this.directory.findMembership(customer.id, cafe.id) : null;
 
     return {
       ...(await this.cafeSummary(cafe, customer)),
@@ -225,51 +222,47 @@ export class PeniApp {
       maxRedeemSharePercent: settings.maxRedeemShareBps / 100,
       menu: menu.map((m) => toMenuDTO(m, settings)),
       askida: await this.askida(cafe, settings, menu, { membershipId: membership?.id ?? null }),
-      posts: this.postsFor(cafe.id, customer, settings.timeZone),
+      posts: await this.postsFor(cafe.id, customer, settings.timeZone),
       membership: membership
         ? {
             id: membership.id,
             balancePeni: await this.peni.walletBalance(membership.id),
             joinedAt: membership.joinedAt.toISOString(),
-            memberCode: this.memberCodeFor(membership.id),
+            memberCode: await this.memberCodeFor(membership.id),
           }
         : null,
     };
   }
 
   async join(slug: string, customer: CustomerRecord): Promise<CafeDetailDTO> {
-    const cafe = this.requireCafe(slug);
+    const cafe = await this.requireCafe(slug);
     await this.ensureMembership(customer.id, cafe.id);
     return this.cafeDetail(slug, customer);
   }
 
   async ensureMembership(customerId: string, cafeId: string, joinedAt = this.now()): Promise<string> {
-    const key = `${customerId}:${cafeId}`;
-    const existing = this.memberIndex.get(key);
-    if (existing) return existing;
+    const existing = await this.directory.findMembership(customerId, cafeId);
+    if (existing) return existing.id;
     const id = `mem_${crypto.randomUUID()}`;
-    this.memberIndex.set(key, id);
-    this.memberCodeFor(id);
     await this.directory.saveMembership({ id, cafeId, customerId, joinedAt, blocked: false });
+    await this.memberCodeFor(id);
     return id;
   }
 
   /** The Peni kodu of a membership: derived from its id, re-rolled only on a collision. [G7b] */
-  memberCodeFor(membershipId: string): string {
-    const known = this.memberCodes.get(membershipId);
+  async memberCodeFor(membershipId: string): Promise<string> {
+    const known = await this.identity.memberCodeOf(membershipId);
     if (known) return known;
-    let attempt = 0;
-    let code = memberCode(membershipId, attempt);
-    while (this.membersByCode.has(code)) code = memberCode(membershipId, ++attempt);
-    this.memberCodes.set(membershipId, code);
-    this.membersByCode.set(code, membershipId);
-    return code;
+    for (let attempt = 0; ; attempt++) {
+      const code = memberCode(membershipId, attempt);
+      if (await this.identity.setMemberCode(membershipId, code)) return code;
+    }
   }
 
   /** Which membership a Peni kodu belongs to, however the till typed it. */
-  membershipForCode(code: string): string | null {
+  async membershipForCode(code: string): Promise<string | null> {
     const normalized = normalizeMemberCode(code);
-    return normalized ? (this.membersByCode.get(normalized) ?? null) : null;
+    return normalized ? this.identity.membershipIdForCode(normalized) : null;
   }
 
   /**
@@ -277,13 +270,12 @@ export class PeniApp {
    * café, and only 20 times an hour per customer. Every lookup counts, hits or not.
    */
   async lookupMember(customer: CustomerRecord, slug: string, phone: string): Promise<MemberLookupDTO> {
-    const cafe = this.requireCafe(slug);
-    this.requireMembershipId(customer.id, cafe.id);
-    this.consumeLookup(customer.id);
+    const cafe = await this.requireCafe(slug);
+    await this.requireMembershipId(customer.id, cafe.id);
+    await this.consumeLookup(customer.id);
     if (phone === customer.phone) throw new AppError("GIFT_INVALID", "You cannot treat yourself", 400);
-    const recipient = [...this.customers.values()].find((c) => c.phone === phone);
-    const membershipId = recipient ? this.memberIndex.get(`${recipient.id}:${cafe.id}`) : undefined;
-    const membership = membershipId ? await this.directory.getMembership(membershipId) : null;
+    const recipient = await this.identity.getCustomerByPhone(phone);
+    const membership = recipient ? await this.directory.findMembership(recipient.id, cafe.id) : null;
     if (!recipient || !membership || membership.blocked) {
       throw new AppError("RECIPIENT_NOT_MEMBER", "No member with this number at this café", 404);
     }
@@ -300,11 +292,11 @@ export class PeniApp {
     const cafes: WalletDTO["cafes"] = [];
     const gifts: GiftDTO[] = [];
     const ledger: LedgerEntryDTO[] = [];
-    const recents: { cafe: CafeRecord; recipientId: string; at: Date }[] = [];
+    const recents: { cafe: Cafe; recipientId: string; at: Date }[] = [];
 
-    for (const [key, membershipId] of this.memberIndex) {
-      if (!key.startsWith(`${customer.id}:`)) continue;
-      const cafe = this.cafeById(key.slice(customer.id.length + 1));
+    for (const membership of await this.directory.listMemberships({ customerId: customer.id })) {
+      const membershipId = membership.id;
+      const cafe = await this.cafeById(membership.cafeId);
       const settings = await this.directory.getSettings(cafe.id);
       const menu = await this.menu.listMenu(cafe.id);
       cafes.push({
@@ -314,8 +306,8 @@ export class PeniApp {
         balancePeni: await this.peni.walletBalance(membershipId),
         district: cafe.district,
         refItems: refItemsFor(cafe, settings, menu),
-        memberCode: this.memberCodeFor(membershipId),
-        hue: cafe.hue ?? null,
+        memberCode: await this.memberCodeFor(membershipId),
+        hue: cafe.hue as CafeHue | null,
       });
 
       for (const g of await this.directory.listGifts({ membershipId })) {
@@ -338,7 +330,7 @@ export class PeniApp {
           orderId: entry.orderId,
           giftId: entry.giftId,
           counterpartName: gift
-            ? this.nameForMembership(entry.kind === "gift_in" ? gift.fromMembershipId : gift.toMembershipId)
+            ? await this.nameForMembership(entry.kind === "gift_in" ? gift.fromMembershipId : gift.toMembershipId)
             : null,
         });
       }
@@ -350,7 +342,7 @@ export class PeniApp {
       totalPeni: cafes.reduce((s, c) => s + c.balancePeni, 0),
       cafes,
       gifts,
-      recentRecipients: this.recentRecipients(recents),
+      recentRecipients: await this.recentRecipients(recents),
       ledger,
     };
   }
@@ -359,15 +351,15 @@ export class PeniApp {
     customer: CustomerRecord,
     input: { cafeSlug: string; toPhone: string; peni: number; message?: string; idempotencyKey: string },
   ): Promise<GiftDTO> {
-    const cafe = this.requireCafe(input.cafeSlug);
-    const from = this.requireMembershipId(customer.id, cafe.id);
+    const cafe = await this.requireCafe(input.cafeSlug);
+    const from = await this.requireMembershipId(customer.id, cafe.id);
     if (input.toPhone === customer.phone) throw new PeniError("GIFT_INVALID", "You cannot send a gift to yourself");
-    const recipient = [...this.customers.values()].find((c) => c.phone === input.toPhone);
-    const to = recipient ? this.memberIndex.get(`${recipient.id}:${cafe.id}`) : undefined;
+    const recipient = await this.identity.getCustomerByPhone(input.toPhone);
+    const to = recipient ? await this.directory.findMembership(recipient.id, cafe.id) : null;
     if (!to) throw new AppError("RECIPIENT_NOT_MEMBER", "Recipient is not a member of this café", 404);
     const gift = await this.peni.sendGift({
       fromMembershipId: from,
-      toMembershipId: to,
+      toMembershipId: to.id,
       peni: input.peni,
       message: input.message,
       idempotencyKey: `${customer.id}:${input.idempotencyKey}`,
@@ -378,7 +370,7 @@ export class PeniApp {
   async resolveGift(customer: CustomerRecord, giftId: string, action: "accept" | "decline"): Promise<GiftDTO> {
     const gift = await this.directory.getGift(giftId);
     if (!gift) throw new AppError("NOT_FOUND", "Gift not found", 404);
-    const membershipId = this.requireMembershipId(customer.id, gift.cafeId);
+    const membershipId = await this.requireMembershipId(customer.id, gift.cafeId);
     const resolved =
       action === "accept"
         ? await this.peni.acceptGift(giftId, membershipId)
@@ -390,7 +382,7 @@ export class PeniApp {
   async cancelGift(customer: CustomerRecord, giftId: string): Promise<GiftDTO> {
     const gift = await this.directory.getGift(giftId);
     if (!gift) throw new AppError("NOT_FOUND", "Gift not found", 404);
-    const membershipId = this.requireMembershipId(customer.id, gift.cafeId);
+    const membershipId = await this.requireMembershipId(customer.id, gift.cafeId);
     return this.giftDTO(await this.peni.cancelGift(giftId, membershipId), membershipId);
   }
 
@@ -398,10 +390,13 @@ export class PeniApp {
   async thankGift(customer: CustomerRecord, giftId: string): Promise<GiftDTO> {
     const gift = await this.directory.getGift(giftId);
     if (!gift) throw new AppError("NOT_FOUND", "Gift not found", 404);
-    const membershipId = this.requireMembershipId(customer.id, gift.cafeId);
+    const membershipId = await this.requireMembershipId(customer.id, gift.cafeId);
     if (gift.toMembershipId !== membershipId) throw new AppError("FORBIDDEN", "Only the recipient can say thanks", 403);
     if (gift.status !== "accepted") throw new AppError("GIFT_NOT_ACCEPTED", "Accept the gift first", 409);
-    if (!this.thanks.has(gift.id)) this.thanks.set(gift.id, this.now());
+    if (!gift.thankedAt) {
+      gift.thankedAt = this.now();
+      await this.directory.saveGift(gift);
+    }
     return this.giftDTO(gift, membershipId);
   }
 
@@ -410,15 +405,15 @@ export class PeniApp {
     await this.peni.expireGifts();
     const gift = await this.directory.getGift(giftId);
     if (!gift) throw new AppError("NOT_FOUND", "Gift not found", 404);
-    const cafe = this.cafeById(gift.cafeId);
+    const cafe = await this.cafeById(gift.cafeId);
     const settings = await this.directory.getSettings(cafe.id);
     const refItems = refItemsFor(cafe, settings, await this.menu.listMenu(cafe.id));
-    const viewerMembership = viewer ? this.memberIndex.get(`${viewer.id}:${cafe.id}`) : undefined;
+    const viewerMembership = viewer ? (await this.directory.findMembership(viewer.id, cafe.id))?.id : undefined;
     return {
       id: gift.id,
       cafeSlug: cafe.slug,
       cafeName: cafe.name,
-      fromFirstName: nameParts(this.nameForMembership(gift.fromMembershipId)).firstName,
+      fromFirstName: nameParts(await this.nameForMembership(gift.fromMembershipId)).firstName,
       peni: gift.peni,
       goods: goods(gift.peni, refItems),
       refItems,
@@ -442,8 +437,8 @@ export class PeniApp {
     customer: CustomerRecord,
     input: { cafeSlug: string; peni: number; showName: boolean; idempotencyKey: string },
   ) {
-    const cafe = this.requireCafe(input.cafeSlug);
-    const membershipId = this.requireMembershipId(customer.id, cafe.id);
+    const cafe = await this.requireCafe(input.cafeSlug);
+    const membershipId = await this.requireMembershipId(customer.id, cafe.id);
     const { matchedPeni } = await this.peni.donateToAskida({
       membershipId,
       peni: input.peni,
@@ -454,7 +449,7 @@ export class PeniApp {
   }
 
   async tillDonation(slug: string, input: { peni: number; idempotencyKey: string }) {
-    const cafe = this.requireCafe(slug);
+    const cafe = await this.requireCafe(slug);
     await this.peni.recordTillDonation({
       cafeId: cafe.id,
       peni: input.peni,
@@ -469,7 +464,7 @@ export class PeniApp {
   // ─────────────────────────────────────────────── staff dashboard
 
   async staffDashboard(slug: string): Promise<StaffDashboardDTO> {
-    const cafe = this.requireCafe(slug);
+    const cafe = await this.requireCafe(slug);
     const settings = await this.directory.getSettings(cafe.id);
     const menu = await this.menu.listMenu(cafe.id);
     const now = this.now();
@@ -477,7 +472,7 @@ export class PeniApp {
     const previousSince = new Date(now.getTime() - 60 * DAY_MS);
     const report = await this.peni.cafeReport(cafe.id, since);
     const previous = await this.peni.cafeReport(cafe.id, previousSince, since);
-    const members = [...this.directory.memberships.values()].filter((m) => m.cafeId === cafe.id);
+    const members = await this.directory.listMemberships({ cafeId: cafe.id });
 
     return {
       cafe: { id: cafe.id, slug: cafe.slug, name: cafe.name },
@@ -491,40 +486,39 @@ export class PeniApp {
           memberCount: members.filter((m) => m.joinedAt < since).length,
         },
       },
-      memberCount: [...this.memberIndex.keys()].filter((k) => k.endsWith(`:${cafe.id}`)).length,
+      memberCount: members.length,
     };
   }
 
   // ─────────────────────────────────────────────── community
 
-  react(customer: CustomerRecord, slug: string, postId: string) {
-    const post = this.requirePost(slug, postId, customer);
-    if (post.reactions.has(customer.id)) post.reactions.delete(customer.id);
-    else post.reactions.add(customer.id);
+  async react(customer: CustomerRecord, slug: string, postId: string) {
+    await this.requirePost(slug, postId, customer);
+    await this.community.toggleReaction(postId, customer.id, this.now());
     return { ok: true as const };
   }
 
-  rsvp(customer: CustomerRecord, slug: string, postId: string) {
-    const post = this.requirePost(slug, postId, customer);
+  async rsvp(customer: CustomerRecord, slug: string, postId: string) {
+    const post = await this.requirePost(slug, postId, customer);
     if (post.kind !== "event") throw new AppError("VALIDATION", "Only events take RSVPs");
-    if (post.rsvps.has(customer.id)) post.rsvps.delete(customer.id);
+    if (post.rsvps.includes(customer.id)) await this.community.removeRsvp(postId, customer.id);
     else {
-      if (post.eventCapacity && post.rsvps.size >= post.eventCapacity) throw new AppError("EVENT_FULL", "Event is full", 409);
-      post.rsvps.add(customer.id);
+      if (post.eventCapacity && post.rsvps.length >= post.eventCapacity) throw new AppError("EVENT_FULL", "Event is full", 409);
+      await this.community.addRsvp(postId, customer.id, this.now());
     }
     return { ok: true as const };
   }
 
-  comment(customer: CustomerRecord, slug: string, postId: string, body: string) {
-    const post = this.requirePost(slug, postId, customer);
-    post.comments.push({ id: `cmt_${crypto.randomUUID()}`, customerId: customer.id, body, createdAt: this.now() });
+  async comment(customer: CustomerRecord, slug: string, postId: string, body: string) {
+    await this.requirePost(slug, postId, customer);
+    await this.community.addComment(postId, { id: `cmt_${crypto.randomUUID()}`, customerId: customer.id, body, createdAt: this.now() });
     return { ok: true as const };
   }
 
   /** A Peni masası as an .ics file. Public, so a phone can hand the link to its calendar. [G22] */
-  eventIcs(slug: string, postId: string): { filename: string; body: string } {
-    const cafe = this.requireCafe(slug);
-    const post = this.posts.get(postId);
+  async eventIcs(slug: string, postId: string): Promise<{ filename: string; body: string }> {
+    const cafe = await this.requireCafe(slug);
+    const post = await this.community.getPost(postId);
     if (!post || post.cafeId !== cafe.id || post.kind !== "event" || !post.eventStartsAt) {
       throw new AppError("NOT_FOUND", "Event not found", 404);
     }
@@ -545,12 +539,12 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── internals
 
-  private async cafeSummary(cafe: CafeRecord, customer: CustomerRecord | null): Promise<CafeSummaryDTO> {
+  private async cafeSummary(cafe: Cafe, customer: CustomerRecord | null): Promise<CafeSummaryDTO> {
     const settings = await this.directory.getSettings(cafe.id);
     const menu = await this.menu.listMenu(cafe.id);
     const reference = askidaReference(cafe, settings, menu);
     const snap = await this.peni.askidaSnapshot(cafe.id, reference?.priceKurus ?? 100);
-    const membershipId = customer ? this.memberIndex.get(`${customer.id}:${cafe.id}`) : undefined;
+    const membership = customer ? await this.directory.findMembership(customer.id, cafe.id) : null;
     return {
       id: cafe.id,
       slug: cafe.slug,
@@ -559,17 +553,17 @@ export class PeniApp {
       city: cafe.city,
       coverImageUrl: cafe.coverImageUrl,
       askidaItemsAvailable: reference ? snap.itemsAvailable : 0,
-      isMember: !!membershipId,
-      balancePeni: membershipId ? await this.peni.walletBalance(membershipId) : null,
+      isMember: !!membership,
+      balancePeni: membership ? await this.peni.walletBalance(membership.id) : null,
       earnRatePercent: settings.earnRateBps / 100,
       refItems: refItemsFor(cafe, settings, menu),
-      nextEvent: this.nextEvent(cafe.id),
-      hue: cafe.hue ?? null,
+      nextEvent: await this.nextEvent(cafe.id),
+      hue: cafe.hue as CafeHue | null,
     };
   }
 
   private async askida(
-    cafe: CafeRecord,
+    cafe: Cafe,
     settings: CafePeniSettings,
     menu: MenuItem[],
     opts: { wallSize?: number; membershipId?: string | null } = {},
@@ -606,11 +600,16 @@ export class PeniApp {
     };
   }
 
-  private postsFor(cafeId: string, customer: CustomerRecord | null, timeZone: string): PostDTO[] {
+  private async postsFor(cafeId: string, customer: CustomerRecord | null, timeZone: string): Promise<PostDTO[]> {
     const today = startOfLocalDay(this.now(), timeZone);
     const viewer = customer?.id ?? null;
-    return [...this.posts.values()]
-      .filter((p) => p.cafeId === cafeId)
+    const posts = await this.community.listPosts(cafeId);
+    const people = new Map(
+      (await this.identity.getCustomers([...new Set(posts.flatMap((p) => [...p.rsvps, ...p.comments.map((c) => c.customerId)]))])).map(
+        (c) => [c.id, c],
+      ),
+    );
+    return [...posts]
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.publishedAt.getTime() - a.publishedAt.getTime())
       .map((p) => ({
         id: p.id,
@@ -620,20 +619,20 @@ export class PeniApp {
         pinned: p.pinned,
         eventStartsAt: p.eventStartsAt?.toISOString() ?? null,
         eventCapacity: p.eventCapacity,
-        reactionCount: p.reactions.size,
+        reactionCount: p.reactions.length,
         commentCount: p.comments.length,
-        rsvpCount: p.rsvps.size,
-        reactedByMe: !!viewer && p.reactions.has(viewer),
-        rsvpedByMe: !!viewer && p.rsvps.has(viewer),
+        rsvpCount: p.rsvps.length,
+        reactedByMe: !!viewer && p.reactions.includes(viewer),
+        rsvpedByMe: !!viewer && p.rsvps.includes(viewer),
         comments: p.comments.map((c) => ({
           id: c.id,
-          authorName: this.publicName(this.customers.get(c.customerId)),
+          authorName: publicName(people.get(c.customerId)),
           body: c.body,
           createdAt: c.createdAt.toISOString(),
         })),
-        title: p.title ?? null,
-        attendees: [...p.rsvps].map((id) => {
-          const c = this.customers.get(id);
+        title: p.title,
+        attendees: p.rsvps.map((id) => {
+          const c = people.get(id);
           const me = id === viewer;
           return { initials: c && (me || c.profileVisible) ? initialsOf(c.displayName) : null, me };
         }),
@@ -642,16 +641,16 @@ export class PeniApp {
       }));
   }
 
-  private nextEvent(cafeId: string): CafeSummaryDTO["nextEvent"] {
+  private async nextEvent(cafeId: string): Promise<CafeSummaryDTO["nextEvent"]> {
     const now = this.now();
-    const next = [...this.posts.values()]
-      .filter((p) => p.cafeId === cafeId && p.kind === "event" && p.eventStartsAt && p.eventStartsAt > now)
+    const next = (await this.community.listPosts(cafeId))
+      .filter((p) => p.kind === "event" && p.eventStartsAt && p.eventStartsAt > now)
       .sort((a, b) => a.eventStartsAt!.getTime() - b.eventStartsAt!.getTime())[0];
     return next ? { postId: next.id, startsAt: next.eventStartsAt!.toISOString(), title: postTitle(next) } : null;
   }
 
   private async giftDTO(g: Gift, viewerMembershipId: string): Promise<GiftDTO> {
-    const cafe = this.cafeById(g.cafeId);
+    const cafe = await this.cafeById(g.cafeId);
     const direction = g.toMembershipId === viewerMembershipId ? "in" : "out";
     return {
       id: g.id,
@@ -660,19 +659,19 @@ export class PeniApp {
       peni: g.peni,
       message: g.message,
       status: g.status,
-      fromName: this.nameForMembership(g.fromMembershipId),
-      toName: this.nameForMembership(g.toMembershipId),
+      fromName: await this.nameForMembership(g.fromMembershipId),
+      toName: await this.nameForMembership(g.toMembershipId),
       direction,
       createdAt: g.createdAt.toISOString(),
       expiresAt: g.expiresAt.toISOString(),
       canCancel: direction === "out" && g.status === "pending" && g.expiresAt > this.now(),
       cancelledBySender: g.status === "declined" && (await this.peni.giftCancelledBySender(g.id)),
-      thankedAt: this.thanks.get(g.id)?.toISOString() ?? null,
+      thankedAt: g.thankedAt?.toISOString() ?? null,
     };
   }
 
   /** "Son ısmarladıkların": per café, newest first, one row per person, at most 5 each. [G6] */
-  private recentRecipients(sent: { cafe: CafeRecord; recipientId: string; at: Date }[]): RecentRecipientDTO[] {
+  private async recentRecipients(sent: { cafe: Cafe; recipientId: string; at: Date }[]): Promise<RecentRecipientDTO[]> {
     const seen = new Set<string>();
     const perCafe = new Map<string, number>();
     const out: RecentRecipientDTO[] = [];
@@ -680,7 +679,7 @@ export class PeniApp {
       const key = `${s.cafe.id}:${s.recipientId}`;
       const count = perCafe.get(s.cafe.id) ?? 0;
       if (seen.has(key) || count >= 5) continue;
-      const customer = this.customerForMembership(s.recipientId);
+      const customer = await this.customerForMembership(s.recipientId);
       if (!customer) continue;
       seen.add(key);
       perCafe.set(s.cafe.id, count + 1);
@@ -697,73 +696,63 @@ export class PeniApp {
     return out;
   }
 
-  private consumeLookup(customerId: string): void {
-    const now = this.now().getTime();
-    const recent = (this.lookups.get(customerId) ?? []).filter((t) => t > now - HOUR_MS);
-    if (recent.length >= LOOKUP_LIMIT_PER_HOUR) {
-      this.lookups.set(customerId, recent);
+  private async consumeLookup(customerId: string): Promise<void> {
+    const now = this.now();
+    if ((await this.identity.countLookups(customerId, new Date(now.getTime() - HOUR_MS))) >= LOOKUP_LIMIT_PER_HOUR) {
       throw new AppError("LOOKUP_LIMITED", "Too many lookups; try again later", 429);
     }
-    recent.push(now);
-    this.lookups.set(customerId, recent);
+    await this.identity.recordLookup(customerId, now);
   }
 
-  private staffCafesFor(customerId: string): StaffCafeDTO[] {
-    return (this.staffRoles.get(customerId) ?? []).flatMap(({ cafeId, role }) => {
-      const cafe = this.cafes.get(cafeId);
-      return cafe ? [{ slug: cafe.slug, name: cafe.name, role }] : [];
-    });
-  }
-
-  private customerForMembership(membershipId: string): CustomerRecord | undefined {
-    for (const [key, id] of this.memberIndex) {
-      if (id === membershipId) return this.customers.get(key.split(":")[0]!);
+  private async staffCafesFor(customerId: string): Promise<StaffCafeDTO[]> {
+    const out: StaffCafeDTO[] = [];
+    for (const { cafeId, role } of await this.identity.staffGrantsFor(customerId)) {
+      const cafe = await this.identity.getCafe(cafeId);
+      if (cafe) out.push({ slug: cafe.slug, name: cafe.name, role });
     }
-    return undefined;
+    return out;
+  }
+
+  private async customerForMembership(membershipId: string): Promise<CustomerRecord | null> {
+    const m = await this.directory.getMembership(membershipId);
+    return m ? this.identity.getCustomer(m.customerId) : null;
   }
 
   /** Gifts are between people who know each other, so the real display name is shown. */
-  private nameForMembership(membershipId: string): string {
-    return this.customerForMembership(membershipId)?.displayName ?? "Misafir";
+  private async nameForMembership(membershipId: string): Promise<string> {
+    return (await this.customerForMembership(membershipId))?.displayName ?? "Misafir";
   }
 
   private async memberName(membershipId: string | null): Promise<string | null> {
     if (!membershipId) return null;
-    const m = await this.directory.getMembership(membershipId);
-    const c = m ? this.customers.get(m.customerId) : undefined;
+    const c = await this.customerForMembership(membershipId);
     return c ? firstNameAndInitial(c.displayName) : null;
   }
 
-  /** In the community, hidden profiles show as "Bir üye"; visible ones as "Ayşe Y.". */
-  private publicName(c: CustomerRecord | undefined): string {
-    if (!c) return "Bir üye";
-    return c.profileVisible ? firstNameAndInitial(c.displayName) : "Bir üye";
-  }
-
-  private requirePost(slug: string, postId: string, customer: CustomerRecord): PostRecord {
-    const cafe = this.requireCafe(slug);
-    const post = this.posts.get(postId);
+  private async requirePost(slug: string, postId: string, customer: CustomerRecord): Promise<PostWithActivity> {
+    const cafe = await this.requireCafe(slug);
+    const post = await this.community.getPost(postId);
     if (!post || post.cafeId !== cafe.id) throw new AppError("NOT_FOUND", "Post not found", 404);
-    this.requireMembershipId(customer.id, cafe.id);
+    await this.requireMembershipId(customer.id, cafe.id);
     return post;
   }
 
-  private requireCafe(slug: string): CafeRecord {
-    const cafe = [...this.cafes.values()].find((c) => c.slug === slug);
+  private async requireCafe(slug: string): Promise<Cafe> {
+    const cafe = await this.identity.getCafeBySlug(slug);
     if (!cafe) throw new AppError("NOT_FOUND", "Café not found", 404);
     return cafe;
   }
 
-  private cafeById(id: string): CafeRecord {
-    const cafe = this.cafes.get(id);
+  private async cafeById(id: string): Promise<Cafe> {
+    const cafe = await this.identity.getCafe(id);
     if (!cafe) throw new AppError("NOT_FOUND", "Café not found", 404);
     return cafe;
   }
 
-  private requireMembershipId(customerId: string, cafeId: string): string {
-    const id = this.memberIndex.get(`${customerId}:${cafeId}`);
-    if (!id) throw new AppError("NOT_A_MEMBER", "Join the café first", 403);
-    return id;
+  private async requireMembershipId(customerId: string, cafeId: string): Promise<string> {
+    const m = await this.directory.findMembership(customerId, cafeId);
+    if (!m) throw new AppError("NOT_A_MEMBER", "Join the café first", 403);
+    return m.id;
   }
 }
 
@@ -784,15 +773,15 @@ function toMenuDTO(m: MenuItem, settings: CafePeniSettings): MenuItemDTO {
 }
 
 /** The askı counts in this item: the café's first reference item that is on the askı, else the cheapest askı item. */
-function askidaReference(cafe: CafeRecord, settings: CafePeniSettings, menu: MenuItem[]): MenuItem | null {
+function askidaReference(cafe: Cafe, settings: CafePeniSettings, menu: MenuItem[]): MenuItem | null {
   const askidaItems = menu.filter((m) => settings.askidaProductIds.includes(m.productId));
-  const preferred = (cafe.referenceProductIds ?? []).map((id) => askidaItems.find((m) => m.productId === id)).find(Boolean);
+  const preferred = cafe.referenceProductIds.map((id) => askidaItems.find((m) => m.productId === id)).find(Boolean);
   return preferred ?? [...askidaItems].sort((a, b) => a.priceKurus - b.priceKurus)[0] ?? null;
 }
 
 /** Up to two reference items, cheapest first: the café's own picks, else its cheapest askı items. [G1] */
-function refItemsFor(cafe: CafeRecord, settings: CafePeniSettings, menu: MenuItem[]): RefItemDTO[] {
-  const chosen = (cafe.referenceProductIds ?? []).flatMap((id) => menu.filter((m) => m.productId === id));
+function refItemsFor(cafe: Cafe, settings: CafePeniSettings, menu: MenuItem[]): RefItemDTO[] {
+  const chosen = cafe.referenceProductIds.flatMap((id) => menu.filter((m) => m.productId === id));
   const pool = chosen.length > 0 ? chosen : menu.filter((m) => settings.askidaProductIds.includes(m.productId));
   return [...pool]
     .sort((a, b) => a.priceKurus - b.priceKurus)
@@ -800,8 +789,13 @@ function refItemsFor(cafe: CafeRecord, settings: CafePeniSettings, menu: MenuIte
     .map((m) => ({ name: m.name, priceKurus: m.priceKurus }));
 }
 
-function postTitle(p: PostRecord): string {
+function postTitle(p: Post): string {
   return p.title?.trim() || p.body.split("\n")[0]!.trim();
+}
+
+/** In the community, hidden profiles show as "Bir üye"; visible ones as "Ayşe Y.". */
+function publicName(c: CustomerRecord | undefined): string {
+  return c?.profileVisible ? firstNameAndInitial(c.displayName) : "Bir üye";
 }
 
 function reportFields(r: CafePeniReport, since: Date): StaffReportFieldsDTO {
