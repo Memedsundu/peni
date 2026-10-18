@@ -118,8 +118,9 @@ export async function seed(app: PeniApp): Promise<void> {
   const tillStaff = {} as Record<Slug, { cafe: Cafe; member: StaffMember }>;
   for (const s of Object.values(DEMO_STAFF)) {
     const account = await app.staff.ensureAccount({ name: s.name, email: s.email, password: DEMO_STAFF_PASSWORD });
-    for (const [slug, role] of Object.entries(s.roles) as [Slug, StaffRole][]) {
-      const member = await app.at(daysAgo(90), () => app.staff.join(account.id, CAFE_ID[slug], role));
+    // A day apart, so a person's cafés list in the same order in memory and in Postgres.
+    for (const [i, [slug, role]] of (Object.entries(s.roles) as [Slug, StaffRole][]).entries()) {
+      const member = await app.at(daysAgo(90 - i), () => app.staff.join(account.id, CAFE_ID[slug], role));
       if (role === "barista" || (role === "owner" && !tillStaff[slug])) {
         tillStaff[slug] = { cafe: (await app.identity.getCafe(CAFE_ID[slug]))!, member };
       }
