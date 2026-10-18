@@ -104,5 +104,11 @@ export function alertWords(a: AlertDTO, lang: AlertLang, money: (kurus: number) 
         detail: tr ? `Son 7 günde: ${a.names.join(", ")}` : `In the last 7 days: ${a.names.join(", ")}`,
         action: tr ? "Görevlere bak" : "Open tasks",
       };
+    case "draftsOpen":
+      return {
+        title: tr ? `${a.count} taslak onay bekliyor` : `${a.count} ${a.count === 1 ? "draft is" : "drafts are"} waiting for you`,
+        detail: names,
+        action: tr ? "Taslaklara bak" : "Open drafts",
+      };
   }
 }

@@ -332,6 +332,11 @@ const cashFrom = z.enum(["drawer", "reserve"]);
 
 export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.object({ method: payMethod, from: cashFrom.optional() }).optional() });
 
+/** "Onayla": a draft bill as the person checked it; it's added in their name. */
+export const confirmDraftSchema = z.object(billFields);
+
+export const dismissDraftSchema = z.object({ reason: optionalText(200) });
+
 /** "Düzelt": the whole bill again, with the version it was read at. */
 export const correctBillSchema = z.object({ version: z.number().int().min(1), ...billFields });
 
@@ -652,3 +657,5 @@ export type AddTaskListInput = z.input<typeof addTaskListSchema>;
 export type SaveTaskListInput = z.input<typeof saveTaskListSchema>;
 export type CheckTaskInput = z.input<typeof checkTaskSchema>;
 export type AlertEmailInput = z.input<typeof alertEmailSchema>;
+export type ConfirmDraftInput = z.input<typeof confirmDraftSchema>;
+export type DismissDraftInput = z.input<typeof dismissDraftSchema>;

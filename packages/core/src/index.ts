@@ -25,3 +25,4 @@ export * from "./books";
 export * from "./shifts";
 export * from "./tasks";
 export * from "./figures";
+export * from "./assistant";

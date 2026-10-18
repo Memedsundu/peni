@@ -35,6 +35,8 @@ import {
   InMemoryBooksStore,
   InMemoryShiftStore,
   InMemoryTaskStore,
+  InMemoryAssistantStore,
+  type AssistantStore,
   type BillStore,
   type BooksStore,
   type Shift,
@@ -96,6 +98,9 @@ import { PayService } from "./pay";
 import { TaskService } from "./tasks";
 import { AlertService } from "./alerts";
 import { SalesReportService } from "./sales-report";
+import { AssistantService, demoModel, type AiMode } from "./assistant";
+import { JobRunner } from "./jobs";
+import type { AiModel } from "@peni/ai";
 import { shiftEmail } from "./shift-email";
 import { ShiftService } from "./shifts";
 import { AppError } from "./errors";
@@ -144,6 +149,7 @@ export interface PeniStores {
   books: BooksStore;
   shifts: ShiftStore;
   tasks: TaskStore;
+  assistant: AssistantStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -167,6 +173,7 @@ export function inMemoryStores(): PeniStores {
     books: new InMemoryBooksStore(),
     shifts: new InMemoryShiftStore(),
     tasks: new InMemoryTaskStore(),
+    assistant: new InMemoryAssistantStore(),
   };
 }
 
@@ -182,6 +189,8 @@ export interface PeniAppOptions {
   terminals?: PaymentTerminals;
   /** The site's own address ("https://peni.app"), for links in emails. Without it no gift email goes out. */
   publicUrl?: string;
+  /** The assistant's model (piece 24): OpenAI with a key, the demo's stand-in, or none (off). */
+  ai?: { model: AiModel | null; mode: AiMode };
 }
 
 const HOUR_MS = 3_600_000;
@@ -232,6 +241,10 @@ export class PeniApp {
   readonly alerts: AlertService;
   /** Raporlar, and today's sales on Bugün (piece 23). */
   readonly salesReports: SalesReportService;
+  /** Background work: reading documents (piece 24), later the weekly letter. */
+  readonly jobs: JobRunner;
+  /** Taslaklar: documents in, drafts out, a person confirms (piece 24). */
+  readonly assistant: AssistantService;
   /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
   readonly orderStore: OrderStore;
   readonly paymentStore: PaymentStore;
@@ -304,12 +317,16 @@ export class PeniApp {
     this.orderStore = stores.orders;
     this.paymentStore = stores.payments;
     this.salesReports = new SalesReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
+    this.jobs = new JobRunner(stores.assistant, () => this.now());
+    const ai = options.ai ?? (options.demo ? { model: demoModel(() => localDateKey(this.now(), "Europe/Istanbul")), mode: "demo" as const } : { model: null, mode: "off" as const });
+    this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.staff, this.directory, ai, () => this.now());
     this.alerts = new AlertService({
       stock: this.stock,
       debts: this.debts,
       pay: this.pay,
       tasks: this.tasks,
       sales: this.salesReports,
+      drafts: this.assistant,
       store: stores.tasks,
       staff: stores.staff,
       directory: this.directory,

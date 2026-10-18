@@ -1,6 +1,7 @@
 import { addMonths, dayPay, defaultSettings, dueOn, localDateKey, monthDays, orderTotals, plusDays, rateOn, shiftEnds, startOfLocalDay, weekStartOf } from "@peni/core";
 import type { Bill, BillLine, Cafe, MenuItem, Order, OrderLine, Payment, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, TaskCheck, TaskItem, TaskList, Weekday, WorkDay } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
+import { receiptPdf } from "./demo-receipt";
 
 export const DEMO_CUSTOMERS = {
   ayse: { id: "cus_ayse", phone: "+905320000001", displayName: "Ayşe Yılmaz" },
@@ -50,7 +51,7 @@ const DAY = 24 * 60 * MIN;
  * line, a filling event, a question with answers and trends in the report.
  * Deterministic for a given day: no randomness beyond a fixed-seed generator.
  */
-export async function seed(app: PeniApp, opts: { sales?: boolean } = {}): Promise<void> {
+export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boolean } = {}): Promise<void> {
   const now = app.now();
   const today = startOfLocalDay(now, TZ);
   /** `daysAgo` local days back at hh:mm in Istanbul (no DST there, so plain arithmetic holds). */
@@ -162,6 +163,7 @@ export async function seed(app: PeniApp, opts: { sales?: boolean } = {}): Promis
     leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
     on,
   });
+  if (opts.drafts !== false) await seedDrafts(app);
   await seedTasks(app, {
     murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
     hakan: staffAt[`${DEMO_STAFF.hakan.email}:moda`]!.id,
@@ -1008,4 +1010,31 @@ async function seedSales(app: PeniApp, p: { murat: string; ece: string; leyla: s
     });
     await app.billStore.addPayment({ id: `bpy_${b.id}`, cafeId, billId: b.id, amountKurus: totalKurus, method: b.method, paidOn: b.date, account: null, memberId: p.leyla, createdAt: at });
   }
+}
+
+/**
+ * Taslaklar (piece 24): Murat photographed a packaging bill this morning and the assistant
+ * read it into a draft for Leyla to check. Only with the demo's stand-in, which answers at
+ * once; a real model reads it the first time Taslaklar opens.
+ */
+async function seedDrafts(app: PeniApp): Promise<void> {
+  if (app.assistant.mode === "off") return;
+  const murat = await app.staff.at((await app.staff.signIn(DEMO_STAFF.murat.email, DEMO_STAFF_PASSWORD)).token, "moda");
+  const today = localDateKey(app.now(), TZ).split("-").reverse().join(".");
+  const pdf = receiptPdf([
+    { text: "AMBALAJ DÜNYASI TİC. LTD. ŞTİ.", bold: true },
+    { text: "Ihlamurkuyu Sk. No:12 Kadiköy/Istanbul" },
+    { text: "VKN 0123456789" },
+    { text: "" },
+    { text: `FATURA NO: A-20511     TARIH: ${today}` },
+    { text: "----------------------------------------" },
+    { text: "Karton bardak 8 oz" },
+    { text: "  1000 adet x 1,45            1.450,00" },
+    { text: "Peçete" },
+    { text: "  20 paket x 18,00              360,00" },
+    { text: "----------------------------------------" },
+    { text: "TOPLAM (KDV DAHIL)            1.810,00", bold: true },
+  ]);
+  await app.assistant.upload(murat, pdf, "ambalaj-dunyasi.pdf");
+  if (app.assistant.mode === "demo") await app.jobs.runDue();
 }

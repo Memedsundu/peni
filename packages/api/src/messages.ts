@@ -196,6 +196,12 @@ export const errorMessagesTr: Record<string, string> = {
   TASK_NOT_DUE: "Bu görev o gün için değil.",
   TASK_DAY: "Geçmiş günlerin görevlerini ancak listeleri düzenleyen biri işaretleyebilir.",
   TASK_FUTURE: "İleriki günlerin görevleri henüz işaretlenemez.",
+  DOCUMENT_TYPE: "Bu dosya okunamaz. Bir fotoğraf (JPEG, PNG, WebP) ya da PDF seç.",
+  DOCUMENT_TOO_LARGE: "Dosya çok büyük. En çok 10 MB olabilir.",
+  DOCUMENT_NOT_FOUND: "Bu belge bulunamadı.",
+  DRAFT_NOT_FOUND: "Bu taslak bulunamadı.",
+  DRAFT_DECIDED: "Bu taslak zaten onaylandı ya da bırakıldı.",
+  AI_OFF: "Asistan şu an kapalı. Belgeyi elle girebilirsin.",
   REPORT_RANGE: "Bu tarihlerle rapor olmaz. Başlangıç bitişten önce, bitiş en geç bugün olmalı; en çok 400 gün.",
 };
 

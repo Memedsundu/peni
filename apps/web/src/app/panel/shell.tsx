@@ -12,6 +12,7 @@ export const field = "w-full rounded-2xl border border-line bg-paper px-4 py-3 t
 const PAGES = [
   // Everyone has a Bugün: alerts as far as their role sees, and today's tasks.
   { key: "bugun", href: "/panel/bugun", label: "navToday", can: () => true },
+  { key: "taslaklar", href: "/panel/taslaklar", label: "navDrafts", can: (c: StaffCafeAccessDTO) => has(c, "assistant.use") },
   { key: "raporlar", href: "/panel/raporlar", label: "navReports", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
   { key: "menu", href: "/panel/menu", label: "menu", can: (c: StaffCafeAccessDTO) => has(c, "menu.edit") || has(c, "menu.recipes") },
   { key: "faturalar", href: "/panel/faturalar", label: "bills", can: (c: StaffCafeAccessDTO) => has(c, "bills.view") },

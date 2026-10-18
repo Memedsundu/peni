@@ -19,6 +19,7 @@ import { PrismaDebtStore } from "./prisma-debt-store";
 import { PrismaBooksStore } from "./prisma-books-store";
 import { PrismaShiftStore } from "./prisma-shift-store";
 import { PrismaTaskStore } from "./prisma-task-store";
+import { PrismaAssistantStore } from "./prisma-assistant-store";
 
 export * from "./generated/client";
 export type { Db } from "./db";
@@ -41,6 +42,7 @@ export { PrismaDebtStore } from "./prisma-debt-store";
 export { PrismaBooksStore } from "./prisma-books-store";
 export { PrismaShiftStore } from "./prisma-shift-store";
 export { PrismaTaskStore } from "./prisma-task-store";
+export { PrismaAssistantStore } from "./prisma-assistant-store";
 
 export function createPrismaClient(connectionString = process.env.DATABASE_URL): PrismaClient {
   if (!connectionString) throw new Error("DATABASE_URL is not set");
@@ -75,5 +77,6 @@ export function createPrismaStores(prisma: PrismaClient) {
     books: new PrismaBooksStore(db),
     shifts: new PrismaShiftStore(db),
     tasks: new PrismaTaskStore(db),
+    assistant: new PrismaAssistantStore(db),
   };
 }

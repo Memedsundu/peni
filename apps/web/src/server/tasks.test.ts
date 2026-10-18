@@ -160,6 +160,7 @@ describe("Bugün and its alerts (plan piece 22)", () => {
       ["payClose", "critical", 1, null],
       ["payLeft", "warning", 1, 500_000],
       ["hoursMissing", "warning", 8, null],
+      ["draftsOpen", "warning", 1, null],
       ["stockLow", "warning", 3, null],
       ["tasksLate", "warning", 3, null],
       ["stockNoCost", "warning", 1, null],
@@ -168,6 +169,7 @@ describe("Bugün and its alerts (plan piece 22)", () => {
     expect(words("cardDue")).toEqual({ title: "İş kartı ekstresi: ₺1.700", detail: "Son ödeme günü 6 Ekim geçti.", action: "Kartı öde" });
     expect(words("payLeft")).toMatchObject({ title: "Eylül 2026 maaşından ₺5.000 ödenmedi", detail: "Hakan Usta" });
     expect(words("tasksLate")).toMatchObject({ title: "3 görev yapılmadı", detail: "Son 7 günde: Kapanış (2), Mutfak (1)" });
+    expect(words("draftsOpen")).toEqual({ title: "1 taslak onay bekliyor", detail: "Ambalaj Dünyası Tic. Ltd. Şti. · ₺1.810", action: "Taslaklara bak" });
     expect(words("hoursMissing")).toMatchObject({ title: "8 günün saati girilmedi", detail: "Hakan Usta, Murat Aksu, Ece Tan" });
     expect(today.alerts.find((a) => a.type === "hoursMissing")).toMatchObject({ month: "2026-10", href: "/panel/puantaj?ay=2026-10" });
     expect(today.tasks).toMatchObject({ done: 3, total: 11 });
@@ -206,8 +208,8 @@ describe("Bugün and its alerts (plan piece 22)", () => {
     ]);
     expect(sent.map((m) => m.to).sort()).toEqual([DEMO_STAFF.leyla.email, DEMO_STAFF.murat.email].sort());
     const mail = sent.find((m) => m.to === DEMO_STAFF.murat.email)!;
-    expect(mail.subject).toBe("Bugün 9 konu · Moda Kahvesi");
-    expect(mail.text).toContain("Günaydın Murat, bugün 9 konu var:");
+    expect(mail.subject).toBe("Bugün 10 konu · Moda Kahvesi");
+    expect(mail.text).toContain("Günaydın Murat, bugün 10 konu var:");
     expect(mail.text).toContain("• İş kartı ekstresi: ₺1.700 (Son ödeme günü 6 Ekim geçti.)");
     expect(mail.text).toContain("https://peni.test/panel/bugun?kafe=moda");
     expect(mail.html).toContain("Bugün'e git");
