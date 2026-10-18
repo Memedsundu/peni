@@ -121,6 +121,23 @@ export const errorMessagesTr: Record<string, string> = {
   RECIPE_EMPTY: "Tarife en az bir malzeme ekle.",
   RECIPE_DUPLICATE: "Bir malzeme tarifte bir kez olur. Miktarını artır.",
   WASTE_NOTE_REQUIRED: "Ne olduğunu kısaca yaz.",
+  SUPPLIER_NOT_FOUND: "Bu tedarikçi bulunamadı.",
+  SUPPLIER_EXISTS: "Bu adla bir tedarikçi zaten var.",
+  SUPPLIER_NAME_TOO_LONG: "Ad en fazla 80 harf olabilir.",
+  PHONE_INVALID: "Telefon numarasını kontrol et.",
+  EMAIL_INVALID: "E-posta adresini kontrol et.",
+  TAX_NO_INVALID: "Vergi numarası 10, TC kimlik numarası 11 rakamdır.",
+  IBAN_INVALID: "IBAN TR ile başlar, ardından 24 rakam gelir.",
+  BILL_NOT_FOUND: "Bu fatura bulunamadı.",
+  BILL_DATE_INVALID: "Tarihi kontrol et. Fatura tarihi bugünden sonra olamaz.",
+  BILL_DUE_INVALID: "Son ödeme günü fatura tarihinden önce olamaz.",
+  BILL_LINE_INVALID: "Satırları kontrol et: stok satırında miktar, diğerlerinde ne için olduğu yazmalı.",
+  BILL_LINE_DUPLICATE: "Bir malzeme faturada bir kez olur. Miktarını ve tutarını birleştir.",
+  BILL_TOTAL_ZERO: "Faturanın toplamı sıfır olamaz.",
+  BILL_CHANGED: "Bu fatura sen bakarken değişti. Yeniden aç ve tekrar dene.",
+  BILL_PAID: "Ödenmiş fatura değişmez. Önce ödemeyi geri al.",
+  BILL_VOIDED: "Bu fatura iptal edilmiş.",
+  PAID_ON_INVALID: "Ödeme günü fatura tarihinden önce ya da bugünden sonra olamaz.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

@@ -24,6 +24,10 @@ import type {
   StaffSessionDTO,
   StaffMenuDTO,
   StockDTO,
+  BillDTO,
+  BillsDTO,
+  SupplierDTO,
+  SuppliersDTO,
   StockItemHistoryDTO,
   RecipesDTO,
   StaffFeedDTO,
@@ -74,6 +78,13 @@ import type {
   CountStockInput,
   WasteStockInput,
   SaveRecipeInput,
+  AddSupplierInput,
+  UpdateSupplierInput,
+  AddBillInput,
+  CorrectBillInput,
+  PayBillInput,
+  VoidBillInput,
+  BillListQuery,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -286,6 +297,32 @@ export function createPeniClient(options: PeniClientOptions) {
           call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/items/${slug(itemId)}`, input, true),
         count: (cafeSlug: string, input: CountStockInput) => call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/count`, input, true),
         waste: (cafeSlug: string, input: WasteStockInput) => call<StockDTO>("POST", `/staff/${slug(cafeSlug)}/stock/waste`, input, true),
+      },
+      /** Faturalar (piece 18). Viewing needs "bills.view", adding "bills.add", the rest "bills.manage". */
+      bills: {
+        list: (cafeSlug: string, query: BillListQuery = {}) => {
+          const qs = new URLSearchParams(Object.entries(query).filter(([, v]) => v) as [string, string][]).toString();
+          return call<BillsDTO>("GET", `/staff/${slug(cafeSlug)}/bills${qs ? `?${qs}` : ""}`, undefined, true);
+        },
+        get: (cafeSlug: string, billId: string) => call<BillDTO>("GET", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}`, undefined, true),
+        /** The same `key` again returns the same bill. Stock lines add stock and set the item's price. */
+        add: (cafeSlug: string, input: AddBillInput) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills`, input, true),
+        /** BILL_CHANGED when someone else corrected it since `version`. */
+        correct: (cafeSlug: string, billId: string, input: CorrectBillInput) =>
+          call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}`, input, true),
+        pay: (cafeSlug: string, billId: string, input: PayBillInput) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/pay`, input, true),
+        unpay: (cafeSlug: string, billId: string) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/unpay`, {}, true),
+        /** Takes its stock back out; kept in the list as "İptal". */
+        void: (cafeSlug: string, billId: string, input: VoidBillInput) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/void`, input, true),
+      },
+      /** Tedarikçiler (piece 18). Viewing needs "suppliers.view"; changes "suppliers.edit". */
+      suppliers: {
+        list: (cafeSlug: string) => call<SuppliersDTO>("GET", `/staff/${slug(cafeSlug)}/suppliers`, undefined, true),
+        get: (cafeSlug: string, supplierId: string) => call<SupplierDTO>("GET", `/staff/${slug(cafeSlug)}/suppliers/${slug(supplierId)}`, undefined, true),
+        add: (cafeSlug: string, input: AddSupplierInput) => call<SupplierDTO>("POST", `/staff/${slug(cafeSlug)}/suppliers`, input, true),
+        /** Send only what changes; `removed` hides it from new bills or brings it back. */
+        update: (cafeSlug: string, supplierId: string, input: UpdateSupplierInput) =>
+          call<SupplierDTO>("POST", `/staff/${slug(cafeSlug)}/suppliers/${slug(supplierId)}`, input, true),
       },
       /** Satış ekranı: prices and totals always come from the server. */
       till: {

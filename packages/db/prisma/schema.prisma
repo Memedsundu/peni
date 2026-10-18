@@ -144,6 +144,8 @@ model Cafe {
   stockItems     StockItem[]
   stockMoves     StockMove[]
   recipes        StockRecipe[]
+  suppliers      Supplier[]
+  bills          Bill[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -573,9 +575,10 @@ model StockItem {
   archivedAt DateTime?
   createdAt  DateTime  @default(now())
 
-  cafe   Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  moves  StockMove[]
-  usedIn StockRecipeLine[]
+  cafe      Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  moves     StockMove[]
+  usedIn    StockRecipeLine[]
+  billLines BillLine[]
 
   @@index([cafeId, name])
 }
@@ -629,6 +632,112 @@ model StockRecipeLine {
 
   @@id([cafeId, productId, itemId])
   @@index([itemId])
+}
+
+// ─────────────────────────────────────────────────────────── suppliers and bills (plan piece 18)
+
+enum BillCategory {
+  ingredients
+  supplies
+  rent
+  utilities
+  services
+  wages
+  other
+}
+
+enum BillPayMethod {
+  cash
+  card
+  bank
+}
+
+/// Who the café buys from. Archived instead of deleted, so old bills keep their name.
+model Supplier {
+  id         String    @id
+  cafeId     String
+  name       String
+  phone      String?
+  email      String?
+  /// VKN or TCKN.
+  taxNo      String?
+  iban       String?
+  note       String?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  cafe  Cafe   @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  bills Bill[]
+
+  @@index([cafeId, name])
+}
+
+/// Every bill or receipt the café gets: stock bought, rent, a repair. Stock lines add stock.
+model Bill {
+  id          String    @id
+  cafeId      String
+  supplierId  String?
+  number      String?
+  /// The bill's own date in the café's time zone, YYYY-MM-DD.
+  date        String
+  dueDate     String?
+  note        String?
+  totalKurus  Int
+  paidKurus   Int       @default(0)
+  /// When the last of it was paid; null while anything is owed.
+  paidAt      DateTime?
+  /// Each correction adds one; stock moves of version n are batch "bill:<id>:<n>".
+  version     Int       @default(1)
+  voidedAt    DateTime?
+  voidedById  String?
+  voidReason  String?
+  createdById String
+  createdAt   DateTime
+  updatedAt   DateTime
+  createKey   String
+
+  cafe     Cafe          @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  supplier Supplier?     @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines    BillLine[]
+  payments BillPayment[]
+
+  @@unique([cafeId, createKey])
+  @@index([cafeId, date])
+  @@index([cafeId, supplierId, date])
+}
+
+model BillLine {
+  billId     String
+  sortOrder  Int
+  /// Null for a line that isn't stock.
+  itemId     String?
+  name       String
+  category   BillCategory
+  qtyMilli   Int?
+  totalKurus Int
+
+  bill Bill       @relation(fields: [billId], references: [id], onDelete: Cascade)
+  item StockItem? @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@id([billId, sortOrder])
+  @@index([itemId])
+}
+
+model BillPayment {
+  id          String        @id
+  cafeId      String
+  billId      String
+  amountKurus Int
+  method      BillPayMethod
+  /// YYYY-MM-DD in the café's time zone.
+  paidOn      String
+  memberId    String
+  createdAt   DateTime
+
+  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, paidOn])
+  @@index([billId])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni

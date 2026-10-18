@@ -276,6 +276,73 @@ export const saveRecipeSchema = z.object({
   lines: z.array(z.object({ itemId: z.string().min(1).max(100), qtyMilli: milli.refine((v) => v > 0, "Miktar yaz") })).max(20),
 });
 
+// ─────────────────────────────────────────────── suppliers and bills (plan piece 18)
+
+const billDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tarihi kontrol et");
+/** Empty text is sent as null. */
+const optionalText = (max: number) => z.string().trim().max(max, `En çok ${max} karakter`).nullable().optional();
+
+const supplierFields = {
+  name: z.string().trim().min(1, "Bir ad yaz").max(80, "Ad en fazla 80 harf olabilir"),
+  phone: optionalText(30),
+  email: optionalText(200),
+  taxNo: optionalText(20),
+  iban: optionalText(40),
+  note: optionalText(300),
+};
+
+export const addSupplierSchema = z.object({ key: actionKey, ...supplierFields });
+
+/** Send only what changes; `removed` hides it from new bills or brings it back. */
+export const updateSupplierSchema = z.object({
+  name: supplierFields.name.optional(),
+  phone: supplierFields.phone,
+  email: supplierFields.email,
+  taxNo: supplierFields.taxNo,
+  iban: supplierFields.iban,
+  note: supplierFields.note,
+  removed: z.boolean().optional(),
+});
+
+/** A stock line has `itemId` and `qtyMilli`; any other line has `name` and `category`. */
+const billLine = z.object({
+  itemId: z.string().min(1).max(100).nullable(),
+  name: z.string().trim().max(80, "En çok 80 karakter").optional(),
+  category: z.enum(["ingredients", "supplies", "rent", "utilities", "services", "wages", "other"]).optional(),
+  qtyMilli: milli.nullable().optional(),
+  totalKurus: z.number().int().min(0).max(100_000_000),
+});
+
+const billFields = {
+  supplierId: z.string().min(1).max(100).nullable(),
+  number: optionalText(40),
+  date: billDay,
+  dueDate: billDay.nullable().optional(),
+  note: optionalText(300),
+  lines: z.array(billLine).min(1, "En az bir satır ekle").max(50),
+};
+
+const payMethod = z.enum(["cash", "card", "bank"]);
+
+/** "Fatura ekle". `paid` marks it paid on the spot (needs "bills.manage"). */
+export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.object({ method: payMethod }).optional() });
+
+/** "Düzelt": the whole bill again, with the version it was read at. */
+export const correctBillSchema = z.object({ version: z.number().int().min(1), ...billFields });
+
+/** "Ödendi": the rest of it, paid today unless another day is given. */
+export const payBillSchema = z.object({ method: payMethod, paidOn: billDay.optional() });
+
+export const voidBillSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
+
+export const billListQuerySchema = z.object({
+  month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
+  show: z.enum(["month", "owed"]).optional(),
+});
+
 export const orderReasonSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -376,6 +443,13 @@ export type CashMoveInput = z.input<typeof cashMoveSchema>;
 export type OrderListQuery = z.input<typeof orderListQuerySchema>;
 export type AddStockItemInput = z.input<typeof addStockItemSchema>;
 export type UpdateStockItemInput = z.input<typeof updateStockItemSchema>;
+export type AddSupplierInput = z.input<typeof addSupplierSchema>;
+export type UpdateSupplierInput = z.input<typeof updateSupplierSchema>;
+export type AddBillInput = z.input<typeof addBillSchema>;
+export type CorrectBillInput = z.input<typeof correctBillSchema>;
+export type PayBillInput = z.input<typeof payBillSchema>;
+export type VoidBillInput = z.input<typeof voidBillSchema>;
+export type BillListQuery = z.input<typeof billListQuerySchema>;
 export type CountStockInput = z.input<typeof countStockSchema>;
 export type WasteStockInput = z.input<typeof wasteStockSchema>;
 export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;

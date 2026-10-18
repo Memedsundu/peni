@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { field } from "./shell";
+import { errorText, type Lang } from "./text";
 
 /** A row of choices, one picked: kg / L / adet, or why something went to waste. */
 export function Segmented<V extends string>({
@@ -89,4 +90,36 @@ export function LevelPill({ level, label }: { level: "ok" | "low" | "out"; label
       {label}
     </span>
   );
+}
+
+/** A number with its label over it, for the top of a page. */
+export function Stat({ label, value, tone, sub }: { label: string; value: string; tone?: "red"; sub?: string }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className={`text-2xl font-semibold tabular ${tone === "red" ? "text-red" : ""}`}>{value}</dd>
+      {sub && <dd className="text-xs text-muted">{sub}</dd>}
+    </div>
+  );
+}
+
+/** Runs a save once at a time, shows its error, and hands the answer on. */
+export function useSave<R>(lang: Lang, onDone: (r: R) => void) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = (fn: () => Promise<R>) => {
+    setBusy(true);
+    setError(null);
+    fn().then(
+      (r) => {
+        setBusy(false);
+        onDone(r);
+      },
+      (e: unknown) => {
+        setError(errorText(e, lang));
+        setBusy(false);
+      },
+    );
+  };
+  return { busy, error, setError, run };
 }

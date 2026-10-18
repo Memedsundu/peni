@@ -6,8 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice, Sheet } from "../../kasa/ui";
 import { bigInput, bigUnit, formatChange, formatQty, parseBig, parseTL, tlInput } from "../amounts";
-import { Field, LevelPill, Segmented } from "../controls";
-import { field, PanelShell, when, type PanelProps } from "../shell";
+import { Field, LevelPill, Segmented, Stat, useSave } from "../controls";
+import { field, has, PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
 
 type Open = { kind: "add" } | { kind: "count" } | { kind: "waste"; itemId: string | null } | { kind: "item"; itemId: string } | null;
@@ -29,8 +29,8 @@ const REASON: Record<StockMoveDTO["reason"], TextKey> = {
 
 /**
  * Stok (plan piece 17): what the café has, what is out or running low, counts and waste.
- * Sales take stock away by each product's recipe (set on Menü); deliveries come with bills
- * (piece 18), so until then a delivery is entered as a count.
+ * Sales take stock away by each product's recipe (set on Menü); deliveries come in with
+ * their bill on Faturalar (piece 18).
  */
 export function Stock({ cafeSlug }: { cafeSlug: string | null }) {
   return (
@@ -66,6 +66,14 @@ function StockPage({ cafe, t, lang, signedOut }: PanelProps) {
         <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("stock")}</h1>
         <p className="max-w-2xl leading-normal text-muted">{t("stockHelp")}</p>
+        {has(cafe, "bills.add") && (
+          <p className="text-sm text-muted">
+            {t("deliveryCame")}{" "}
+            <a className="font-semibold text-ink underline underline-offset-4" href={`/panel/faturalar?kafe=${encodeURIComponent(cafe.slug)}&yeni=1`}>
+              {t("enterBill")}
+            </a>
+          </p>
+        )}
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && (
@@ -166,15 +174,6 @@ function StockPage({ cafe, t, lang, signedOut }: PanelProps) {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "red" }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <dt className="text-xs text-muted">{label}</dt>
-      <dd className={`text-2xl font-semibold tabular ${tone === "red" ? "text-red" : ""}`}>{value}</dd>
-    </div>
-  );
-}
-
 function levelLabel(t: T, level: StockItemDTO["level"]) {
   return level === "out" ? t("levelOut") : t("levelLow");
 }
@@ -230,21 +229,6 @@ function MoveRow({ t, lang, move, showItem }: { t: T; lang: Lang; move: StockMov
       </span>
     </div>
   );
-}
-
-/** Runs a save once at a time, shows its error, and hands the answer on. */
-function useSave<R>(lang: Lang, onDone: (r: R) => void) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = (fn: () => Promise<R>) => {
-    setBusy(true);
-    setError(null);
-    fn().then(onDone, (e: unknown) => {
-      setError(errorText(e, lang));
-      setBusy(false);
-    });
-  };
-  return { busy, error, setError, run };
 }
 
 type SheetProps = {

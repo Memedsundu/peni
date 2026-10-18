@@ -186,6 +186,125 @@ export interface RecipesDTO {
   items: { id: string; name: string; unit: StockUnitDTO; kind: "ingredient" | "supply"; costKurus: number | null }[];
 }
 
+// ─────────────────────────────────────────────── suppliers and bills (plan piece 18)
+
+export type BillCategoryDTO = "ingredients" | "supplies" | "rent" | "utilities" | "services" | "wages" | "other";
+export type BillPayMethodDTO = "cash" | "card" | "bank";
+/** Overdue: unpaid and past its due date in the café's time zone. */
+export type BillStateDTO = "unpaid" | "overdue" | "paid" | "voided";
+
+/** A bill in a list. Money is in kuruş, KDV included. */
+export interface BillSummaryDTO {
+  id: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  number: string | null;
+  /** The bill's own date, "2026-10-18". */
+  date: string;
+  dueDate: string | null;
+  totalKurus: number;
+  paidKurus: number;
+  state: BillStateDTO;
+  /** What it was for: the first lines' names. */
+  summary: string;
+  lineCount: number;
+  /** It brought stock. */
+  stock: boolean;
+}
+
+export interface BillLineDTO {
+  /** The stock item it added to; null for a line that isn't stock. */
+  itemId: string | null;
+  name: string;
+  category: BillCategoryDTO;
+  qtyMilli: number | null;
+  /** The item's unit, for stock lines. */
+  unit: StockUnitDTO | null;
+  totalKurus: number;
+  /** Per kg, litre or piece, for stock lines with an amount. */
+  unitKurus: number | null;
+}
+
+/** `GET /staff/:slug/bills/:id`: one bill with its lines and payments. */
+export interface BillDTO extends BillSummaryDTO {
+  lines: BillLineDTO[];
+  note: string | null;
+  /** Send it back when correcting, so two people don't overwrite each other. */
+  version: number;
+  createdBy: string | null;
+  createdAt: string;
+  payments: { amountKurus: number; method: BillPayMethodDTO; paidOn: string; by: string | null }[];
+  voidedAt: string | null;
+  voidedBy: string | null;
+  voidReason: string | null;
+  /** The viewer can correct, pay and void it ("bills.manage"). */
+  canManage: boolean;
+}
+
+/** `GET /staff/:slug/bills?month=2026-10` or `?show=owed`: Faturalar. Needs "bills.view". */
+export interface BillsDTO {
+  /** The month shown ("2026-10"), or null when showing everything still owed. */
+  month: string | null;
+  /** Newest first. Voided bills show in their month, not under "owed". */
+  bills: BillSummaryDTO[];
+  /** The month's bills that aren't voided, and how they split by category. */
+  monthTotalKurus: number;
+  byCategory: { category: BillCategoryDTO; totalKurus: number }[];
+  /** Everything owed across all months. */
+  owed: { count: number; totalKurus: number; overdueCount: number; overdueKurus: number };
+  /** The café's date today. */
+  today: string;
+  /** For the form: suppliers and stock items that can go on a new bill. */
+  suppliers: { id: string; name: string }[];
+  items: { id: string; name: string; unit: StockUnitDTO; kind: "ingredient" | "supply"; costKurus: number | null }[];
+  canAdd: boolean;
+  canManage: boolean;
+  /** Can add a supplier from the bill form ("suppliers.edit"). */
+  canAddSupplier: boolean;
+}
+
+export interface SupplierSummaryDTO {
+  id: string;
+  name: string;
+  phone: string | null;
+  /** Unpaid bills, and the part of it past due. */
+  owedKurus: number;
+  overdueKurus: number;
+  lastBillDate: string | null;
+  /** Bills over the last 30 days, not voided. */
+  monthKurus: number;
+}
+
+/** `GET /staff/:slug/suppliers`: Tedarikçiler. Needs "suppliers.view". */
+export interface SuppliersDTO {
+  /** Owed most first, then by name. */
+  suppliers: SupplierSummaryDTO[];
+  removed: SupplierSummaryDTO[];
+  owedKurus: number;
+  canEdit: boolean;
+}
+
+/** How the price of one item changed on this supplier's bills, newest first. */
+export interface SupplierPriceDTO {
+  itemId: string;
+  name: string;
+  unit: StockUnitDTO;
+  points: { date: string; unitKurus: number; billId: string }[];
+}
+
+/** `GET /staff/:slug/suppliers/:id`: one supplier, what you owe them, their bills and prices. */
+export interface SupplierDTO {
+  supplier: { id: string; name: string; phone: string | null; email: string | null; taxNo: string | null; iban: string | null; note: string | null; removed: boolean };
+  owedKurus: number;
+  overdueKurus: number;
+  /** Newest first, at most 50. */
+  bills: BillSummaryDTO[];
+  prices: SupplierPriceDTO[];
+  canEdit: boolean;
+  /** The viewer can open Faturalar. */
+  canSeeBills: boolean;
+}
+
 // ─────────────────────────────────────────────── till: Satış ekranı (plan piece 6)
 
 /** `GET /staff/:slug/till-menu`: the till's tabs and tiles, only what can be sold now. */
@@ -739,6 +858,8 @@ export interface StaffDashboardDTO {
   memberCount: number;
   /** Items out or running low, worst first; null when the viewer can't see stock. */
   lowStock: Pick<StockItemDTO, "id" | "name" | "unit" | "qtyMilli" | "minMilli" | "level">[] | null;
+  /** Bills still owed, for Bugün; null without "bills.view". */
+  billsOwed: BillsDTO["owed"] | null;
 }
 
 // ─────────────────────────────────────────────── staff (plan piece 2)

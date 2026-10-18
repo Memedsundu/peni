@@ -444,4 +444,63 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.stock.getRecipe(cafeId, recipe.productId)).toEqual({ ...recipe, lines: [{ itemId: milk.id, qtyMilli: 220 }, { itemId: beans.id, qtyMilli: 18 }] });
     expect(await stores.stock.listRecipes(cafeId)).toHaveLength(1);
   });
+
+  it("keeps suppliers and bills with their lines and payments, finds them by month, item and what is owed, and prices from the newest bill", async () => {
+    const item = { id: `stk_bill_milk_${run}`, cafeId, name: "Süt", kind: "ingredient" as const, unit: "l" as const, qtyMilli: 0, minMilli: 0, costKurus: null, archivedAt: null, createdAt: at };
+    await stores.stock.saveItem(item);
+    const supplier = { id: `sup_${run}`, cafeId, name: "Moda Süt", phone: null, email: null, taxNo: "5730412298", iban: null, note: null, archivedAt: null, createdAt: at };
+    await stores.bills.saveSupplier(supplier);
+    await stores.bills.saveSupplier({ ...supplier, phone: "0532 410 22 18" });
+    expect(await stores.bills.getSupplier(cafeId, supplier.id)).toMatchObject({ phone: "0532 410 22 18", taxNo: "5730412298" });
+
+    const bill = (id: string, date: string, qty: number, kurus: number) => ({
+      id: `${id}_${run}`, cafeId, supplierId: supplier.id, number: null, date, dueDate: null, note: null,
+      lines: [{ itemId: item.id, name: "Süt", category: "ingredients" as const, qtyMilli: qty, totalKurus: kurus }],
+      totalKurus: kurus, paidKurus: 0, paidAt: null, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
+      createdById: "stf_x", createdAt: at, updatedAt: at, createKey: `${id}_key_${run}`,
+    });
+    const sep = bill("bil_sep", "2026-09-28", 20_000, 86_000);
+    const oct = bill("bil_oct", "2026-10-10", 12_000, 54_000);
+    const late = bill("bil_late", "2026-10-02", 10_000, 40_000);
+    for (const b of [sep, oct, late]) await stores.bills.saveBill(b);
+    // A correction replaces the lines.
+    await stores.bills.saveBill({
+      ...oct, version: 2, totalKurus: 59_000,
+      lines: [oct.lines[0]!, { itemId: null, name: "Kasa depozitosu", category: "other", qtyMilli: null, totalKurus: 5_000 }],
+    });
+    expect((await stores.bills.getBill(cafeId, oct.id))!.lines.map((l) => l.name)).toEqual(["Süt", "Kasa depozitosu"]);
+    expect((await stores.bills.findBillByKey(cafeId, oct.createKey))!.version).toBe(2);
+    // Entered late, dated earlier: the October 10th bill still sets the price.
+    expect(await stores.bills.lastPrice(cafeId, item.id)).toEqual({ billId: oct.id, date: "2026-10-10", qtyMilli: 12_000, totalKurus: 54_000 });
+
+    await stores.bills.addPayment({ id: `bpy_${run}`, cafeId, billId: sep.id, amountKurus: 86_000, method: "cash", paidOn: "2026-09-28", memberId: "stf_x", createdAt: at });
+    await stores.bills.saveBill({ ...sep, paidKurus: 86_000, paidAt: at });
+    expect((await stores.bills.getBill(cafeId, sep.id))!.payments).toEqual([
+      { id: `bpy_${run}`, cafeId, billId: sep.id, amountKurus: 86_000, method: "cash", paidOn: "2026-09-28", memberId: "stf_x", createdAt: at },
+    ]);
+    await stores.bills.saveBill({ ...oct, version: 3, voidedAt: at, voidedById: "stf_x", voidReason: "İki kez" });
+
+    const ids = async (q: Parameters<typeof stores.bills.listBills>[1]) => (await stores.bills.listBills(cafeId, q)).map((b) => b.id);
+    expect(await ids({})).toEqual([late.id, sep.id]);
+    expect(await ids({ includeVoided: true })).toEqual([oct.id, late.id, sep.id]);
+    expect(await ids({ from: "2026-10-01", to: "2026-10-31", includeVoided: true })).toEqual([oct.id, late.id]);
+    expect(await ids({ unpaid: true })).toEqual([late.id]);
+    expect(await ids({ itemId: item.id, supplierId: supplier.id, limit: 1 })).toEqual([late.id]);
+    // A voided bill no longer prices anything.
+    expect((await stores.bills.lastPrice(cafeId, item.id))!.billId).toBe(late.id);
+
+    await stores.bills.removePayments(cafeId, sep.id);
+    expect((await stores.bills.getBill(cafeId, sep.id))!.payments).toEqual([]);
+
+    // Inside the ledger's transaction, a bill and its stock commit or roll back together.
+    await expect(
+      stores.ledger.atomically(async () => {
+        await stores.bills.saveBill(bill("bil_rollback", "2026-10-11", 1_000, 4_500));
+        await stores.stock.applyBatch({ cafeId, batchKey: `bill:rollback_${run}:1`, reason: "bill", at, changes: [{ id: `rb_${run}`, itemId: item.id, changeMilli: 1_000 }] });
+        throw new Error("no");
+      }),
+    ).rejects.toThrow("no");
+    expect(await stores.bills.getBill(cafeId, `bil_rollback_${run}`)).toBeNull();
+    expect((await stores.stock.getItem(cafeId, item.id))!.qtyMilli).toBe(0);
+  });
 });

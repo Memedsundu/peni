@@ -74,3 +74,32 @@ export function parseTL(raw: string): number | null {
 export function tlInput(kurus: number | null): string {
   return kurus === null ? "" : String(kurus / 100).replace(".", ",");
 }
+
+/** A calendar day "2026-10-16" as "16 Eki" (with the year when it isn't this one). */
+export function formatDay(day: string, lang: Lang, opts: { year?: boolean } = {}): string {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", {
+    day: "numeric",
+    month: "short",
+    ...(opts.year ? { year: "numeric" } : {}),
+    timeZone: "UTC",
+  });
+}
+
+/** "2026-10" as "Ekim 2026". */
+export function formatMonth(month: string, lang: Lang): string {
+  return new Date(`${month}-15T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+/** The month before or after "2026-10". */
+export function shiftMonth(month: string, by: number): string {
+  const d = new Date(`${month}-15T12:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + by);
+  return d.toISOString().slice(0, 7);
+}
+
+/** A day "2026-10-16" plus some days. */
+export function addDaysTo(day: string, days: number): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
