@@ -141,7 +141,12 @@ export async function seed(app: PeniApp): Promise<void> {
     on,
     earlierToday,
   });
-  await seedBills(app, { leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id, ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id, on });
+  await seedBills(app, {
+    leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
+    murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
+    ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
+    on,
+  });
 
   // ─────────────────────────────────────────── people and memberships
 
@@ -545,7 +550,7 @@ async function seedStock(
  * moved stock in seedStock; the older bills came before Peni counted stock, so their
  * amounts are in the starting counts. Prices match the items' prices on Stok.
  */
-async function seedBills(app: PeniApp, p: { leyla: string; ece: string; on: (daysAgo: number, hh: number, mm?: number) => Date }): Promise<void> {
+async function seedBills(app: PeniApp, p: { leyla: string; murat: string; ece: string; on: (daysAgo: number, hh: number, mm?: number) => Date }): Promise<void> {
   const cafeId = "cafe_moda";
   const timeZone = (await app.directory.getSettings(cafeId)).timeZone;
   const day = (daysAgo: number) => localDateKey(p.on(daysAgo, 12), timeZone);
@@ -569,12 +574,12 @@ async function seedBills(app: PeniApp, p: { leyla: string; ece: string; on: (day
   const thisMonth = day(0).slice(0, 8);
   const rentPaidOn = [`${thisMonth}03`, day(0)].sort()[0]!;
   const bills: (Omit<Bill, "cafeId" | "totalKurus" | "paidKurus" | "paidAt" | "payments" | "version" | "voidedAt" | "voidedById" | "voidReason" | "updatedAt" | "createKey"> & {
-    paid?: { method: "cash" | "card" | "bank"; on: string; daysAgo: number };
+    paid?: { method: Bill["payments"][number]["method"]; on: string; daysAgo: number };
   })[] = [
     {
       id: "bil_seed_ambalaj", supplierId: "sup_seed_ambalaj", number: "A-20418", date: day(20), dueDate: null, note: null,
       lines: [stock("stk_bardak", "Karton bardak (8 oz)", "supplies", 1_000_000, 250_000), stock("stk_kapak", "Bardak kapağı", "supplies", 1_000_000, 120_000)],
-      createdById: p.leyla, createdAt: p.on(20, 15), paid: { method: "bank", on: day(19), daysAgo: 19 },
+      createdById: p.leyla, createdAt: p.on(20, 15), paid: { method: "credit", on: day(20), daysAgo: 20 },
     },
     {
       id: "bil_seed_sut1", supplierId: "sup_seed_sut", number: null, date: day(16), dueDate: null, note: null,
@@ -598,7 +603,7 @@ async function seedBills(app: PeniApp, p: { leyla: string; ece: string; on: (day
     {
       id: "bil_seed_sut2", supplierId: "sup_seed_sut", number: null, date: day(6), dueDate: null, note: null,
       lines: [stock("stk_sut", "Süt", "ingredients", 12_000, 54_000)],
-      createdById: p.leyla, createdAt: p.on(6, 10), paid: { method: "cash", on: day(6), daysAgo: 6 },
+      createdById: p.leyla, createdAt: p.on(6, 10), paid: { method: "loan", on: day(6), daysAgo: 6 },
     },
     {
       id: "bil_seed_simit", supplierId: "sup_seed_firin", number: null, date: day(6), dueDate: null, note: "Hafta sonu ödenecek",
@@ -608,7 +613,7 @@ async function seedBills(app: PeniApp, p: { leyla: string; ece: string; on: (day
     {
       id: "bil_seed_kira", supplierId: "sup_seed_ev", number: null, date: `${thisMonth}01`, dueDate: `${thisMonth}05`, note: null,
       lines: [other("Dükkân kirası", "rent", 4_500_000)],
-      createdById: p.leyla, createdAt: new Date(`${thisMonth}01T08:00:00Z`), paid: { method: "bank", on: rentPaidOn, daysAgo: 0 },
+      createdById: p.leyla, createdAt: new Date(`${thisMonth}01T08:00:00Z`), paid: { method: "check", on: rentPaidOn, daysAgo: 0 },
     },
   ];
   for (const { paid, ...b } of bills) {
@@ -624,4 +629,35 @@ async function seedBills(app: PeniApp, p: { leyla: string; ece: string; on: (day
       });
     }
   }
+  await seedDebts(app, { ...p, day, rentPaidOn });
+}
+
+/**
+ * What those payments left owed (plan piece 19): the packaging went on the credit card,
+ * the rent was paid with a check due later this month, and Murat paid last week's milk
+ * out of his own pocket and has had some of it back. The card's days follow the seed's
+ * clock so its statement has closed and fallen due, part of it unpaid, whatever today is.
+ */
+async function seedDebts(
+  app: PeniApp,
+  p: { leyla: string; murat: string; on: (daysAgo: number, hh: number, mm?: number) => Date; day: (daysAgo: number) => string; rentPaidOn: string },
+): Promise<void> {
+  const cafeId = "cafe_moda";
+  const dayOfMonth = (daysAgo: number) => Math.min(28, Number(p.day(daysAgo).slice(8)));
+  await app.debtStore.saveCard({ cafeId, name: "İş kartı", limitKurus: 10_000_000, statementDay: dayOfMonth(20), dueDay: dayOfMonth(10), updatedAt: p.on(30, 9) });
+  await app.debtStore.addCardPayment({ id: "cpy_seed_1", cafeId, amountKurus: 200_000, method: "bank", paidOn: p.day(12), memberId: p.leyla, createdAt: p.on(12, 11) });
+
+  await app.debtStore.saveCheck({
+    id: "chk_seed_kira", cafeId, number: "0048213", bankName: "Ziraat Bankası", payee: null, supplierId: "sup_seed_ev", amountKurus: 4_500_000,
+    writtenOn: p.rentPaidOn, dueDate: p.day(-12), note: null, billPaymentId: "bpy_bil_seed_kira", cashedOn: null, cashedById: null,
+    createdById: p.leyla, createdAt: new Date(`${p.rentPaidOn}T09:00:00Z`),
+  });
+
+  await app.debtStore.saveLoan({
+    id: "lon_seed_sut2", cafeId, lenderKey: `member:${p.murat}`, lenderMemberId: p.murat, lenderName: "Murat Aksu", amountKurus: 54_000,
+    borrowedOn: p.day(6), dueDate: null, note: null, billPaymentId: "bpy_bil_seed_sut2", createdById: p.leyla, createdAt: p.on(6, 17),
+  });
+  await app.debtStore.addRepayment({
+    id: "lrp_seed_1", cafeId, lenderKey: `member:${p.murat}`, amountKurus: 20_000, method: "cash", paidOn: p.day(3), memberId: p.leyla, createdAt: p.on(3, 19),
+  });
 }

@@ -17,6 +17,7 @@ import { api } from "../../kasa/api";
 import { Button, Notice, Sheet } from "../../kasa/ui";
 import { bigInput, bigUnit, formatDay, formatMonth, formatQty, parseBig, parseTL, shiftMonth, tlInput } from "../amounts";
 import { Field, Segmented, Stat, useSave } from "../controls";
+import { METHOD, PaymentLine, PayForm } from "../pay";
 import { field, PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
 
@@ -34,12 +35,13 @@ export const CATEGORY: Record<BillCategoryDTO, TextKey> = {
 };
 /** What a line that isn't stock can be: the stock kinds come from the item. */
 const EXPENSE_CATEGORIES: BillCategoryDTO[] = ["rent", "utilities", "services", "wages", "ingredients", "supplies", "other"];
-const METHOD: Record<BillPayMethodDTO, TextKey> = { cash: "payCash", card: "payCard", bank: "payBank" };
+/** "Paid?" on a new bill: settled on the spot. Card, check and pocket come after, with "Öde". */
+const QUICK_METHODS = ["cash", "card", "bank"] as const satisfies readonly BillPayMethodDTO[];
 
 /**
  * Faturalar (plan piece 18): every bill and receipt, one kind of record whether it brought
  * stock or not. A month at a time, or everything still to pay; a bill opens to its lines,
- * its payment, and (for the manager) "Düzelt", "Ödendi" and "İptal et".
+ * its payments, and (for the manager) "Öde", "Düzelt" and "İptal et".
  */
 export function Bills({ cafeSlug, billId, adding }: { cafeSlug: string | null; billId: string | null; adding: boolean }) {
   return (
@@ -289,22 +291,18 @@ function BillSheet({
   onCorrect: (bill: BillDTO) => void;
 }) {
   const [bill, setBill] = useState<BillDTO | null>(null);
-  const [method, setMethod] = useState<BillPayMethodDTO>("cash");
-  const [paidOn, setPaidOn] = useState(today ?? "");
   const [voiding, setVoiding] = useState(false);
   const [reason, setReason] = useState("");
-  const save = useSave<BillDTO>(lang, (b) => {
+  const changed = (b: BillDTO) => {
     setBill(b);
     setVoiding(false);
     onChanged();
-  });
+  };
+  const save = useSave<BillDTO>(lang, changed);
   useEffect(() => {
     api.staff.bills.get(slug, billId).then(setBill, (e: unknown) => save.setError(errorText(e, lang)));
     // Once per bill.
   }, [slug, billId]);
-  useEffect(() => {
-    if (today && !paidOn) setPaidOn(today);
-  }, [today]);
 
   const title = bill ? (bill.supplierName ?? t("noSupplier")) : t("loading");
   return (
@@ -363,29 +361,34 @@ function BillSheet({
           {bill.note && <p className="leading-normal">{bill.note}</p>}
           <p className="text-sm text-muted">{fill(t("addedBy"), { name: bill.createdBy ?? "", when: when(bill.createdAt, lang) })}</p>
 
-          {bill.payments.map((p, i) => (
-            <p key={i} className="rounded-2xl bg-green-soft px-4 py-3 text-sm text-green">
-              {fill(t("paidBy"), {
-                method: lang === "en" ? t(METHOD[p.method]).toLowerCase() : t(METHOD[p.method]),
-                day: formatDay(p.paidOn, lang),
-                by: p.by ? ` · ${p.by}` : "",
-              })}
-            </p>
+          {bill.payments.map((p) => (
+            <PaymentLine
+              key={p.id}
+              t={t}
+              lang={lang}
+              payment={p}
+              busy={save.busy}
+              onUndo={p.canRemove ? () => save.run(() => api.staff.bills.removePayment(slug, bill.id, p.id)) : null}
+            />
           ))}
+          {bill.paidKurus > 0 && bill.state !== "paid" && (
+            <p className="text-sm text-muted">
+              {fill(t("partlyPaid"), { paid: formatTL(bill.paidKurus), left: formatTL(bill.totalKurus - bill.paidKurus) })}
+            </p>
+          )}
 
+          {bill.payWith && today && (
+            <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5">
+              <h3 className="font-semibold">{bill.paidKurus > 0 ? t("addPayment") : t("markPaid")}</h3>
+              <PayForm t={t} lang={lang} slug={slug} bill={bill} today={today} onDone={changed} />
+            </section>
+          )}
           {bill.canManage && bill.state !== "voided" && (
-            <section className="flex flex-col gap-4 rounded-3xl bg-panel p-5">
-              {bill.state === "paid" ? (
-                <>
-                  <p className="text-sm text-muted">{t("paidLocked")}</p>
-                  <div>
-                    <Button kind="quiet" disabled={save.busy} onClick={() => save.run(() => api.staff.bills.unpay(slug, bill.id))}>
-                      {t("undoPayment")}
-                    </Button>
-                  </div>
-                </>
+            <section className="flex flex-col gap-4">
+              {bill.paidKurus > 0 ? (
+                <p className="text-sm text-muted">{t("paidLocked")}</p>
               ) : voiding ? (
-                <>
+                <div className="flex flex-col gap-4 rounded-3xl bg-panel p-5">
                   <p className="text-sm leading-normal text-muted">{t("voidHelp")}</p>
                   <Field label={t("voidReason")} value={reason} onChange={setReason} placeholder={t("voidReasonPlaceholder")} maxLength={200} autoFocus />
                   <div className="flex flex-wrap gap-2">
@@ -400,42 +403,16 @@ function BillSheet({
                       {t("close")}
                     </Button>
                   </div>
-                </>
+                </div>
               ) : (
-                <>
-                  <Segmented
-                    label={t("markPaid")}
-                    value={method}
-                    onChange={setMethod}
-                    options={(Object.keys(METHOD) as BillPayMethodDTO[]).map((m) => ({ value: m, label: t(METHOD[m]) }))}
-                  />
-                  <label className="flex flex-col gap-2 text-sm text-muted">
-                    {t("paidOn")}
-                    <input
-                      type="date"
-                      className={`${field} min-h-12`}
-                      value={paidOn}
-                      min={bill.date}
-                      max={today ?? undefined}
-                      onChange={(e) => setPaidOn(e.target.value)}
-                    />
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      kind="primary"
-                      disabled={save.busy || !paidOn}
-                      onClick={() => save.run(() => api.staff.bills.pay(slug, bill.id, { method, paidOn }))}
-                    >
-                      {t("markPaid")} · {formatTL(bill.totalKurus - bill.paidKurus)}
-                    </Button>
-                    <Button kind="quiet" onClick={() => onCorrect(bill)}>
-                      {t("correctBill")}
-                    </Button>
-                    <Button kind="bare" onClick={() => setVoiding(true)}>
-                      {t("voidBill")}
-                    </Button>
-                  </div>
-                </>
+                <div className="flex flex-wrap gap-2">
+                  <Button kind="quiet" onClick={() => onCorrect(bill)}>
+                    {t("correctBill")}
+                  </Button>
+                  <Button kind="bare" onClick={() => setVoiding(true)}>
+                    {t("voidBill")}
+                  </Button>
+                </div>
               )}
             </section>
           )}
@@ -478,7 +455,7 @@ function BillForm({
   const [number, setNumber] = useState(bill?.number ?? "");
   const [dueDate, setDueDate] = useState(bill?.dueDate ?? "");
   const [note, setNote] = useState(bill?.note ?? "");
-  const [paid, setPaid] = useState<"no" | BillPayMethodDTO>("no");
+  const [paid, setPaid] = useState<"no" | (typeof QUICK_METHODS)[number]>("no");
   const [lines, setLines] = useState<LineForm[]>(() =>
     bill
       ? bill.lines.map((l) => ({
@@ -681,7 +658,7 @@ function BillForm({
           label={t("paidQuestion")}
           value={paid}
           onChange={setPaid}
-          options={[{ value: "no", label: t("notPaidYet") }, ...(Object.keys(METHOD) as BillPayMethodDTO[]).map((m) => ({ value: m, label: t(METHOD[m]) }))]}
+          options={[{ value: "no", label: t("notPaidYet") }, ...QUICK_METHODS.map((m) => ({ value: m, label: t(METHOD[m]) }))]}
         />
       )}
       {paid === "no" && (

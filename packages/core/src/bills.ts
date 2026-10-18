@@ -19,9 +19,13 @@ import { MILLI } from "./stock";
 export type BillCategory = "ingredients" | "supplies" | "rent" | "utilities" | "services" | "wages" | "other";
 export const BILL_CATEGORIES: readonly BillCategory[] = ["ingredients", "supplies", "rent", "utilities", "services", "wages", "other"];
 
-/** How a bill was paid. Checks, the credit card and borrowed money come with piece 19. */
-export type BillPayMethod = "cash" | "card" | "bank";
-export const BILL_PAY_METHODS: readonly BillPayMethod[] = ["cash", "card", "bank"];
+/**
+ * How a bill was paid (piece 19). Cash, the café's bank card and a transfer settle it there
+ * and then. The other three move what is owed elsewhere, to Borçlar: "credit" onto the
+ * credit card, "check" into a check due later, "loan" to whoever paid it out of pocket.
+ */
+export type BillPayMethod = "cash" | "card" | "bank" | "credit" | "check" | "loan";
+export const BILL_PAY_METHODS: readonly BillPayMethod[] = ["cash", "card", "bank", "credit", "check", "loan"];
 
 export const SUPPLIER_NAME_MAX = 80;
 export const BILL_MAX_LINES = 50;
@@ -82,7 +86,7 @@ export interface Bill {
   note: string | null;
   lines: BillLine[];
   totalKurus: Kurus;
-  /** What has been paid so far. Piece 18 pays a bill in one go; piece 19 adds parts. */
+  /** What has been paid so far, in one payment or several. */
   paidKurus: Kurus;
   /** When the last of it was paid; null while anything is owed. */
   paidAt: Date | null;
@@ -132,8 +136,11 @@ export interface BillStore {
   /** Creates the bill or replaces its details and lines. Payments are left alone. */
   saveBill(bill: Bill): Promise<void>;
   addPayment(payment: BillPayment): Promise<void>;
-  /** Removes every payment of the bill ("Ödemeyi geri al"). */
-  removePayments(cafeId: string, billId: string): Promise<void>;
+  getPayment(cafeId: string, id: string): Promise<BillPayment | null>;
+  /** "Geri al": one payment, made by mistake. */
+  removePayment(cafeId: string, id: string): Promise<void>;
+  /** Oldest first; only this method when given (the credit card's charges). */
+  listPayments(cafeId: string, opts?: { method?: BillPayMethod }): Promise<BillPayment[]>;
   lastPrice(cafeId: string, itemId: string): Promise<LastPrice | null>;
 }
 
@@ -259,11 +266,21 @@ export class InMemoryBillStore implements BillStore {
     this.payments.push({ ...payment });
   }
 
-  async removePayments(cafeId: string, billId: string) {
-    for (let i = this.payments.length - 1; i >= 0; i--) {
-      const p = this.payments[i]!;
-      if (p.cafeId === cafeId && p.billId === billId) this.payments.splice(i, 1);
-    }
+  async getPayment(cafeId: string, id: string) {
+    const p = this.payments.find((x) => x.cafeId === cafeId && x.id === id);
+    return p ? { ...p } : null;
+  }
+
+  async removePayment(cafeId: string, id: string) {
+    const i = this.payments.findIndex((p) => p.cafeId === cafeId && p.id === id);
+    if (i >= 0) this.payments.splice(i, 1);
+  }
+
+  async listPayments(cafeId: string, opts: { method?: BillPayMethod } = {}) {
+    return this.payments
+      .filter((p) => p.cafeId === cafeId && (!opts.method || p.method === opts.method))
+      .sort((a, b) => a.paidOn.localeCompare(b.paidOn) || a.createdAt.getTime() - b.createdAt.getTime())
+      .map((p) => ({ ...p }));
   }
 
   async lastPrice(cafeId: string, itemId: string) {

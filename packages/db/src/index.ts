@@ -15,6 +15,7 @@ import { PrismaImageStore } from "./prisma-image-store";
 import { PrismaReportStore } from "./prisma-report-store";
 import { PrismaStockStore } from "./prisma-stock-store";
 import { PrismaBillStore } from "./prisma-bill-store";
+import { PrismaDebtStore } from "./prisma-debt-store";
 
 export * from "./generated/client";
 export type { Db } from "./db";
@@ -33,6 +34,7 @@ export { PrismaImageStore } from "./prisma-image-store";
 export { PrismaReportStore } from "./prisma-report-store";
 export { PrismaStockStore } from "./prisma-stock-store";
 export { PrismaBillStore } from "./prisma-bill-store";
+export { PrismaDebtStore } from "./prisma-debt-store";
 
 export function createPrismaClient(connectionString = process.env.DATABASE_URL): PrismaClient {
   if (!connectionString) throw new Error("DATABASE_URL is not set");
@@ -63,5 +65,6 @@ export function createPrismaStores(prisma: PrismaClient) {
     reports: new PrismaReportStore(db),
     stock: new PrismaStockStore(db),
     bills: new PrismaBillStore(db),
+    debts: new PrismaDebtStore(db),
   };
 }

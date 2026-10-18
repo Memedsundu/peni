@@ -35,6 +35,7 @@ import type {
   TillDTO,
   TillDeviceDTO,
   ApiErrorBody,
+  DebtsDTO,
 } from "./dto";
 import { errorMessageTr } from "./messages";
 import type {
@@ -85,6 +86,12 @@ import type {
   PayBillInput,
   VoidBillInput,
   BillListQuery,
+  AddCheckInput,
+  AddLoanInput,
+  CardSettingsInput,
+  CashCheckInput,
+  PayCardInput,
+  RepayLenderInput,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -311,9 +318,31 @@ export function createPeniClient(options: PeniClientOptions) {
         correct: (cafeSlug: string, billId: string, input: CorrectBillInput) =>
           call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}`, input, true),
         pay: (cafeSlug: string, billId: string, input: PayBillInput) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/pay`, input, true),
-        unpay: (cafeSlug: string, billId: string) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/unpay`, {}, true),
+        /** "Geri al" on one payment. CHECK_CASHED or LOAN_REPAID when what it made has moved on. */
+        removePayment: (cafeSlug: string, billId: string, paymentId: string) =>
+          call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/payments/${slug(paymentId)}/remove`, {}, true),
         /** Takes its stock back out; kept in the list as "İptal". */
         void: (cafeSlug: string, billId: string, input: VoidBillInput) => call<BillDTO>("POST", `/staff/${slug(cafeSlug)}/bills/${slug(billId)}/void`, input, true),
+      },
+      /**
+       * Borçlar (piece 19). Viewing needs "debts.view"; checks and loans "debts.edit"; the
+       * card "debts.card". Every call answers with the whole page.
+       */
+      debts: {
+        get: (cafeSlug: string) => call<DebtsDTO>("GET", `/staff/${slug(cafeSlug)}/debts`, undefined, true),
+        addCheck: (cafeSlug: string, input: AddCheckInput) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/checks`, input, true),
+        cashCheck: (cafeSlug: string, checkId: string, input: CashCheckInput) =>
+          call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/checks/${slug(checkId)}`, input, true),
+        removeCheck: (cafeSlug: string, checkId: string) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/checks/${slug(checkId)}/remove`, {}, true),
+        addLoan: (cafeSlug: string, input: AddLoanInput) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/loans`, input, true),
+        removeLoan: (cafeSlug: string, loanId: string) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/loans/${slug(loanId)}/remove`, {}, true),
+        repay: (cafeSlug: string, input: RepayLenderInput) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/repayments`, input, true),
+        removeRepayment: (cafeSlug: string, repaymentId: string) =>
+          call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/repayments/${slug(repaymentId)}/remove`, {}, true),
+        setCard: (cafeSlug: string, input: CardSettingsInput) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/card`, input, true),
+        payCard: (cafeSlug: string, input: PayCardInput) => call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/card/payments`, input, true),
+        removeCardPayment: (cafeSlug: string, paymentId: string) =>
+          call<DebtsDTO>("POST", `/staff/${slug(cafeSlug)}/debts/card/payments/${slug(paymentId)}/remove`, {}, true),
       },
       /** Tedarikçiler (piece 18). Viewing needs "suppliers.view"; changes "suppliers.edit". */
       suppliers: {

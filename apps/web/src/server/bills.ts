@@ -1,9 +1,10 @@
-import type { BillDTO, BillsDTO, BillSummaryDTO, SupplierDTO, SupplierPriceDTO, SuppliersDTO, SupplierSummaryDTO } from "@peni/api";
+import type { BillDTO, BillPaymentDTO, BillsDTO, BillSummaryDTO, PayOptionsDTO, SupplierDTO, SupplierPriceDTO, SuppliersDTO, SupplierSummaryDTO } from "@peni/api";
 import {
   billState,
   billStock,
   billTotal,
   compactIban,
+  lenderKey,
   localDateKey,
   sameMenuName,
   stockDifference,
@@ -13,8 +14,10 @@ import {
   type Bill,
   type BillCategory,
   type BillLine,
+  type BillPayment,
   type BillPayMethod,
   type BillStore,
+  type DebtStore,
   type PeniDirectory,
   type Permission,
   type StaffStore,
@@ -48,6 +51,17 @@ export interface BillInput {
   lines: BillLineInput[];
 }
 
+export interface PayInput {
+  key: string;
+  method: BillPayMethod;
+  /** The rest of the bill when left out. */
+  amountKurus?: number;
+  paidOn?: string;
+  check?: { number: string; bankName?: string | null; dueDate: string };
+  lender?: { memberId?: string | null; name?: string };
+  loanDueDate?: string | null;
+}
+
 export interface SupplierInput {
   name?: string;
   phone?: string | null;
@@ -70,6 +84,8 @@ export class BillService {
     private readonly stock: StockStore,
     private readonly directory: PeniDirectory,
     private readonly staff: StaffStore,
+    /** Checks and loans a payment writes (piece 19). */
+    private readonly debts: DebtStore,
     /** Runs the bill, its stock moves and the prices together (the ledger's transaction). */
     private readonly atomically: <T>(fn: () => Promise<T>) => Promise<T>,
     private readonly now: () => Date,
@@ -194,30 +210,61 @@ export class BillService {
     return this.get(ctx, billId);
   }
 
-  /** "Ödendi": what is left of it, by cash, card or bank transfer, today unless another day is given. */
-  async pay(ctx: StaffContext, billId: string, input: { method: BillPayMethod; paidOn?: string }): Promise<BillDTO> {
+  /**
+   * "Öde": all that is left of it, or part of it. Cash, card and bank settle that part;
+   * "credit" puts it on the credit card, "check" writes a check due later, "loan" makes it
+   * owed to whoever paid it. Either way the bill counts it as paid, and Borçlar shows what
+   * is owed instead. The same `key` twice pays once.
+   */
+  async pay(ctx: StaffContext, billId: string, input: PayInput): Promise<BillDTO> {
     this.require(ctx, "bills.manage");
-    const today = await this.today(ctx.cafe.id);
+    this.requireFor(ctx, input.method);
+    const cafeId = ctx.cafe.id;
+    const id = `bpy_${keyHash(cafeId, input.key)}`;
+    const today = await this.today(cafeId);
     await this.atomically(async () => {
+      if (await this.store.getPayment(cafeId, id)) return;
       const bill = await this.bill(ctx, billId);
       if (bill.voidedAt) throw new AppError("BILL_VOIDED", "This bill was voided", 409);
-      if (bill.paidAt) return;
+      const left = bill.totalKurus - bill.paidKurus;
+      const amountKurus = input.amountKurus ?? left;
+      if (amountKurus > left || left <= 0) throw new AppError("BILL_OVERPAY", "That's more than is left of it", 409);
+      if (!Number.isInteger(amountKurus) || amountKurus <= 0) throw new AppError("AMOUNT_INVALID", "Check the amount", 400);
       const paidOn = input.paidOn ?? today;
       if (!validDate(paidOn) || paidOn > today || paidOn < bill.date) throw new AppError("PAID_ON_INVALID", "Check the day it was paid", 400);
-      await this.store.addPayment(this.payment(ctx, bill, bill.totalKurus - bill.paidKurus, input.method, paidOn));
-      await this.store.saveBill({ ...bill, paidKurus: bill.totalKurus, paidAt: this.now(), updatedAt: this.now() });
+      const payment: BillPayment = { id, cafeId, billId, amountKurus, method: input.method, paidOn, memberId: ctx.member.id, createdAt: this.now() };
+      const debt = await this.debtFor(ctx, bill, payment, input);
+      await this.store.addPayment(payment);
+      if (debt?.check) await this.debts.saveCheck(debt.check);
+      if (debt?.loan) await this.debts.saveLoan(debt.loan);
+      const paidKurus = bill.paidKurus + amountKurus;
+      await this.store.saveBill({ ...bill, paidKurus, paidAt: paidKurus === bill.totalKurus ? this.now() : null, updatedAt: this.now() });
     });
     return this.get(ctx, billId);
   }
 
-  /** "Ödemeyi geri al": marked paid by mistake. */
-  async unpay(ctx: StaffContext, billId: string): Promise<BillDTO> {
+  /**
+   * "Geri al": one payment, made by mistake. The check or debt it made goes with it,
+   * unless the check was cashed or the debt paid back (undo those first).
+   */
+  async removePayment(ctx: StaffContext, billId: string, paymentId: string): Promise<BillDTO> {
     this.require(ctx, "bills.manage");
+    const cafeId = ctx.cafe.id;
+    const found = await this.store.getPayment(cafeId, paymentId);
+    if (!found || found.billId !== billId) throw new AppError("PAYMENT_NOT_FOUND", "No such payment", 404);
+    this.requireFor(ctx, found.method);
     await this.atomically(async () => {
+      const payment = await this.store.getPayment(cafeId, paymentId);
+      if (!payment) return;
+      const locked = await this.locked(payment);
+      if (locked) throw new AppError(locked, locked === "CHECK_CASHED" ? "The check was cashed" : "Some of it was paid back", 409);
+      const check = await this.debts.findCheckByPayment(cafeId, payment.id);
+      if (check) await this.debts.removeCheck(cafeId, check.id);
+      const loan = await this.debts.findLoanByPayment(cafeId, payment.id);
+      if (loan) await this.debts.removeLoan(cafeId, loan.id);
+      await this.store.removePayment(cafeId, payment.id);
       const bill = await this.bill(ctx, billId);
-      if (bill.paidKurus === 0) return;
-      await this.store.removePayments(ctx.cafe.id, billId);
-      await this.store.saveBill({ ...bill, paidKurus: 0, paidAt: null, updatedAt: this.now() });
+      await this.store.saveBill({ ...bill, paidKurus: bill.paidKurus - payment.amountKurus, paidAt: null, updatedAt: this.now() });
     });
     return this.get(ctx, billId);
   }
@@ -301,7 +348,7 @@ export class BillService {
     this.require(ctx, "suppliers.edit");
     const cafeId = ctx.cafe.id;
     // The key decides the id, so a retried tap finds the first one.
-    const id = `sup_${createHash("sha256").update(`${cafeId}:${input.key}`).digest("hex").slice(0, 24)}`;
+    const id = `sup_${keyHash(cafeId, input.key)}`;
     if (await this.store.getSupplier(cafeId, id)) return this.supplier(ctx, id);
     const s: Supplier = {
       id,
@@ -413,6 +460,116 @@ export class BillService {
     return { id: `bpy_${randomUUID()}`, cafeId: bill.cafeId, billId: bill.id, amountKurus, method, paidOn, memberId: ctx.member.id, createdAt: this.now() };
   }
 
+  /** Paying by card, check or loan also needs the right to make that debt. */
+  private requireFor(ctx: StaffContext, method: BillPayMethod): void {
+    if (method === "credit") this.require(ctx, "debts.card");
+    if (method === "check" || method === "loan") this.require(ctx, "debts.edit");
+  }
+
+  /** The check or loan a payment makes, checked; nothing for cash, card or bank. */
+  private async debtFor(ctx: StaffContext, bill: Bill, payment: BillPayment, input: PayInput) {
+    const base = { cafeId: bill.cafeId, amountKurus: payment.amountKurus, billPaymentId: payment.id, note: null, createdById: ctx.member.id, createdAt: payment.createdAt };
+    const tail = payment.id.slice(4);
+    if (payment.method === "credit") {
+      if (!(await this.debts.getCard(bill.cafeId))) throw new AppError("CARD_NOT_SET", "Set up the credit card first", 409);
+    }
+    if (payment.method === "check") {
+      const number = input.check?.number.trim() ?? "";
+      if (!number || number.length > 30) throw new AppError("CHECK_NUMBER_REQUIRED", "Type the check's number", 400);
+      const dueDate = input.check!.dueDate;
+      if (!validDate(dueDate) || dueDate < payment.paidOn) throw new AppError("CHECK_DUE_INVALID", "The check's date is before the day it was written", 400);
+      return {
+        check: {
+          ...base, id: `chk_${tail}`, number, bankName: input.check!.bankName?.trim() || null, payee: null, supplierId: bill.supplierId,
+          writtenOn: payment.paidOn, dueDate, cashedOn: null, cashedById: null,
+        },
+      };
+    }
+    if (payment.method === "loan") {
+      const lender = await this.lender(ctx, input.lender);
+      const dueDate = input.loanDueDate || null;
+      if (dueDate && (!validDate(dueDate) || dueDate < payment.paidOn)) throw new AppError("LOAN_DUE_INVALID", "It can't be due before it was lent", 400);
+      return { loan: { ...base, id: `lon_${tail}`, ...lender, borrowedOn: payment.paidOn, dueDate } };
+    }
+    return null;
+  }
+
+  /** A lender from the team (by member id) or anyone else by name. */
+  async lender(ctx: StaffContext, input: { memberId?: string | null; name?: string } | undefined) {
+    if (input?.memberId) {
+      const member = await this.staff.getMember(input.memberId);
+      const account = member && member.cafeId === ctx.cafe.id ? await this.staff.getAccount(member.accountId) : null;
+      if (!member || !account) throw new AppError("LENDER_REQUIRED", "Pick who paid", 400);
+      return { lenderKey: lenderKey({ memberId: member.id, name: account.name }), lenderMemberId: member.id, lenderName: account.name };
+    }
+    const name = input?.name?.trim().replace(/\s+/g, " ") ?? "";
+    if (!name || name.length > 80) throw new AppError("LENDER_REQUIRED", "Pick or type who paid", 400);
+    return { lenderKey: lenderKey({ memberId: null, name }), lenderMemberId: null, lenderName: name };
+  }
+
+  /** Why a payment can't be undone any more. */
+  private async locked(payment: BillPayment): Promise<"CHECK_CASHED" | "LOAN_REPAID" | null> {
+    if (payment.method === "check") {
+      const check = await this.debts.findCheckByPayment(payment.cafeId, payment.id);
+      if (check?.cashedOn) return "CHECK_CASHED";
+    }
+    if (payment.method === "loan") {
+      const loan = await this.debts.findLoanByPayment(payment.cafeId, payment.id);
+      if (loan) {
+        const [loans, repaid] = await Promise.all([
+          this.debts.listLoans(payment.cafeId, { lenderKey: loan.lenderKey }),
+          this.debts.listRepayments(payment.cafeId, { lenderKey: loan.lenderKey }),
+        ]);
+        const borrowed = loans.reduce((s, l) => s + l.amountKurus, 0);
+        if (repaid.reduce((s, r) => s + r.amountKurus, 0) > borrowed - loan.amountKurus) return "LOAN_REPAID";
+      }
+    }
+    return null;
+  }
+
+  private async paymentDto(ctx: StaffContext, p: BillPayment, names: Map<string, string>): Promise<BillPaymentDTO> {
+    const check = p.method === "check" ? await this.debts.findCheckByPayment(p.cafeId, p.id) : null;
+    const loan = p.method === "loan" ? await this.debts.findLoanByPayment(p.cafeId, p.id) : null;
+    const allowed = ctx.permissions.has("bills.manage") && (p.method !== "credit" || ctx.permissions.has("debts.card")) && (!(check || loan) || ctx.permissions.has("debts.edit"));
+    return {
+      id: p.id,
+      amountKurus: p.amountKurus,
+      method: p.method,
+      paidOn: p.paidOn,
+      by: names.get(p.memberId) ?? null,
+      check: check && { id: check.id, number: check.number, dueDate: check.dueDate, cashedOn: check.cashedOn },
+      lender: loan?.lenderName ?? null,
+      locked: await this.locked(p),
+      canRemove: allowed,
+    };
+  }
+
+  private async payOptions(ctx: StaffContext, bill: Bill): Promise<PayOptionsDTO | null> {
+    const leftKurus = bill.totalKurus - bill.paidKurus;
+    if (bill.voidedAt || leftKurus <= 0 || !ctx.permissions.has("bills.manage")) return null;
+    const cafeId = ctx.cafe.id;
+    const canCard = ctx.permissions.has("debts.card");
+    const canDebt = ctx.permissions.has("debts.edit");
+    const card = canCard ? await this.debts.getCard(cafeId) : null;
+    const team = canDebt ? await this.team(cafeId) : [];
+    // One name per lender, as it was first typed.
+    const byKey = new Map<string, string>();
+    for (const l of canDebt ? await this.debts.listLoans(cafeId) : []) if (!l.lenderMemberId && !byKey.has(l.lenderKey)) byKey.set(l.lenderKey, l.lenderName);
+    const lenderNames = [...byKey.values()];
+    return { leftKurus, credit: card?.name ?? null, creditNotSet: canCard && !card, check: canDebt, loan: canDebt, team, lenderNames };
+  }
+
+  /** Who is on the team now, by name. */
+  async team(cafeId: string): Promise<{ memberId: string; name: string }[]> {
+    const out: { memberId: string; name: string }[] = [];
+    for (const m of await this.staff.listMembers(cafeId)) {
+      if (m.removedAt) continue;
+      const account = await this.staff.getAccount(m.accountId);
+      if (account) out.push({ memberId: m.id, name: account.name });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  }
+
   private async dto(ctx: StaffContext, bill: Bill): Promise<BillDTO> {
     const cafeId = ctx.cafe.id;
     const [today, supplier, items] = await Promise.all([
@@ -437,11 +594,12 @@ export class BillService {
       version: bill.version,
       createdBy: names.get(bill.createdById) ?? null,
       createdAt: bill.createdAt.toISOString(),
-      payments: bill.payments.map((p) => ({ amountKurus: p.amountKurus, method: p.method, paidOn: p.paidOn, by: names.get(p.memberId) ?? null })),
+      payments: await Promise.all(bill.payments.map((p) => this.paymentDto(ctx, p, names))),
       voidedAt: bill.voidedAt?.toISOString() ?? null,
       voidedBy: bill.voidedById ? (names.get(bill.voidedById) ?? null) : null,
       voidReason: bill.voidReason,
       canManage: ctx.permissions.has("bills.manage"),
+      payWith: await this.payOptions(ctx, bill),
     };
   }
 
@@ -492,6 +650,11 @@ export class BillService {
     if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
     throw new AppError("FORBIDDEN", "Your role can't do this", 403);
   }
+}
+
+/** The same key at the same café gives the same id, so a retried tap finds what the first one made. */
+export function keyHash(cafeId: string, key: string): string {
+  return createHash("sha256").update(`${cafeId}:${key}`).digest("hex").slice(0, 24);
 }
 
 function categoryOf(item: StockItem): BillCategory {

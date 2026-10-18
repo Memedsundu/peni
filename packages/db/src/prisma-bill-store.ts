@@ -1,4 +1,4 @@
-import type { Bill, BillPayment, BillQuery, BillStore, LastPrice, Supplier } from "@peni/core";
+import type { Bill, BillPayMethod, BillPayment, BillQuery, BillStore, LastPrice, Supplier } from "@peni/core";
 import type { Db } from "./db";
 import { Prisma, type PrismaClient, type BillLine as LineRow, type BillPayment as PaymentRow, type Bill as BillRow } from "./generated/client";
 
@@ -103,8 +103,21 @@ export class PrismaBillStore implements BillStore {
     await this.db().billPayment.create({ data: p });
   }
 
-  async removePayments(cafeId: string, billId: string): Promise<void> {
-    await this.db().billPayment.deleteMany({ where: { cafeId, billId } });
+  async getPayment(cafeId: string, id: string): Promise<BillPayment | null> {
+    const p = await this.db().billPayment.findFirst({ where: { id, cafeId } });
+    return p ? toPayment(p) : null;
+  }
+
+  async removePayment(cafeId: string, id: string): Promise<void> {
+    await this.db().billPayment.deleteMany({ where: { id, cafeId } });
+  }
+
+  async listPayments(cafeId: string, opts: { method?: BillPayMethod } = {}): Promise<BillPayment[]> {
+    const rows = await this.db().billPayment.findMany({
+      where: { cafeId, ...(opts.method ? { method: opts.method } : {}) },
+      orderBy: [{ paidOn: "asc" }, { createdAt: "asc" }],
+    });
+    return rows.map(toPayment);
   }
 
   async lastPrice(cafeId: string, itemId: string): Promise<LastPrice | null> {
