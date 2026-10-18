@@ -17,7 +17,9 @@ export interface Post {
   imageUrls?: string[];
   /** The staff member who posted it, when known. */
   authorId?: string | null;
-  /** Taken down by the café: gone from the feed, kept on record. */
+  /** The member who opened this event (D4, plan piece 15); null when the café posted it. */
+  hostCustomerId?: string | null;
+  /** Taken down by the café, its host, or enough reports: gone from the feed, kept on record. */
   hiddenAt?: Date | null;
 }
 
@@ -40,12 +42,12 @@ export interface PostWithActivity extends Post {
   comments: PostComment[];
 }
 
-/** Moderators see hidden comments too; everyone else never does. */
-export type ListOptions = { hiddenComments?: boolean };
+/** Moderators see hidden comments too, and find taken-down posts that were reported; everyone else never does. */
+export type ListOptions = { hiddenComments?: boolean; hiddenPosts?: boolean };
 
 export interface CommunityStore {
   savePost(post: Post): Promise<void>;
-  /** Posts the café took down aren't found. */
+  /** Posts taken down aren't found, unless `hiddenPosts`. */
   getPost(id: string, opts?: ListOptions): Promise<PostWithActivity | null>;
   /** All of a café's posts still up, newest first. */
   listPosts(cafeId: string, opts?: ListOptions): Promise<PostWithActivity[]>;
@@ -78,7 +80,7 @@ export class InMemoryCommunityStore implements CommunityStore {
 
   async getPost(id: string, opts: ListOptions = {}) {
     const p = this.posts.get(id);
-    return p && !p.hiddenAt ? copy(p, opts) : null;
+    return p && (opts.hiddenPosts || !p.hiddenAt) ? copy(p, opts) : null;
   }
 
   async listPosts(cafeId: string, opts: ListOptions = {}) {

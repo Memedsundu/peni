@@ -369,6 +369,28 @@ export async function seed(app: PeniApp): Promise<void> {
     { rsvps: ["ayse", "mehmet", "zeynep", "can", "elif", "emre", "selin", "burak", "irem"] },
   );
 
+  // A neighbour's own event (D4), and a comment two neighbours reported to the café (plan piece 15).
+  await post(
+    {
+      id: "post_member_event_1",
+      cafeId: "cafe_moda",
+      kind: "event",
+      title: "Cumartesi satranç",
+      body: "Tahtamı getiriyorum. Bilen de bilmeyen de gelsin, oynamayı öğretirim.",
+      publishedAt: earlierToday(95),
+      pinned: false,
+      // The Saturday after the café's own Thursday table, so the card still leads with the café's.
+      eventStartsAt: new Date(nextWeekday(now, 4, 15, 0).getTime() + 2 * DAY),
+      eventCapacity: 6,
+      hostCustomerId: id("zeynep"),
+    },
+    { rsvps: ["zeynep", "can", "emre"], reactions: ["selin"] },
+  );
+  await app.community.addComment("post_2", answer("cmt_spam_1", "kerem", "Az kullanılmış espresso makinesi satıyorum, çok ucuz. Mesaj atın.", on(1, 21, 10)));
+  for (const who of ["selin", "irem"] as const) {
+    await app.report((await app.identity.getCustomer(id(who)))!, "moda", { targetType: "comment", targetId: "cmt_spam_1", reason: "spam" });
+  }
+
   await post(
     {
       id: "post_k1",

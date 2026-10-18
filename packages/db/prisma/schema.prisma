@@ -33,6 +33,7 @@ model Customer {
   comments       PostComment[]
   reactions      PostReaction[]
   rsvps          EventRsvp[]
+  hostedEvents   CafePost[]        @relation("HostedEvents")
   staffAccount   StaffAccount?
   lookups        GiftLookup[]
   claimMisses    ClaimCodeMiss[]
@@ -522,13 +523,15 @@ model CashMove {
 // ─────────────────────────────────────────────────────────── membership & peni
 
 model Membership {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   cafeId     String
   customerId String
-  joinedAt   DateTime @default(now())
-  blocked    Boolean  @default(false)
+  joinedAt   DateTime  @default(now())
+  blocked    Boolean   @default(false)
+  /// Paused in the community by a moderator: reads, but can't write. Peni untouched.
+  pausedAt   DateTime?
   /// Peni kodu shown at the till, e.g. "M7K-42Q".
-  memberCode String?  @unique
+  memberCode String?   @unique
 
   cafe      Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   customer  Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -653,23 +656,26 @@ enum PostKind {
 
 /// Café posts, questions and events. Members comment, react and RSVP.
 model CafePost {
-  id            String    @id @default(cuid())
-  cafeId        String
+  id             String    @id @default(cuid())
+  cafeId         String
   /// The staff member who posted it, when known.
-  authorId      String?
-  kind          PostKind  @default(post)
+  authorId       String?
+  /// The member who opened this event (D4); null when the café posted it.
+  hostCustomerId String?
+  kind           PostKind  @default(post)
   /// Event topic.
-  title         String?   @db.VarChar(200)
-  body          String    @db.VarChar(2000)
-  imageUrls     String[]  @default([])
-  pinned        Boolean   @default(false)
-  eventStartsAt DateTime?
-  eventCapacity Int?
-  publishedAt   DateTime  @default(now())
-  hiddenAt      DateTime?
+  title          String?   @db.VarChar(200)
+  body           String    @db.VarChar(2000)
+  imageUrls      String[]  @default([])
+  pinned         Boolean   @default(false)
+  eventStartsAt  DateTime?
+  eventCapacity  Int?
+  publishedAt    DateTime  @default(now())
+  hiddenAt       DateTime?
 
   cafe      Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   author    StaffMember?   @relation(fields: [authorId], references: [id])
+  host      Customer?      @relation("HostedEvents", fields: [hostCustomerId], references: [id], onDelete: Cascade)
   comments  PostComment[]
   reactions PostReaction[]
   rsvps     EventRsvp[]
@@ -741,16 +747,23 @@ enum ReportStatus {
   dismissed
 }
 
+/// A member's report on another member's comment or event (plan piece 15).
 model ContentReport {
   id         String       @id @default(cuid())
   cafeId     String
   targetType ReportTarget
   targetId   String
+  /// The post the content is on: the event itself, or the comment's post.
+  postId     String?
   reporterId String
+  /// spam, rude, unsafe or other.
   reason     String       @db.VarChar(300)
+  note       String?      @db.VarChar(300)
   status     ReportStatus @default(open)
   createdAt  DateTime     @default(now())
   resolvedAt DateTime?
+  /// The staff member who looked at it.
+  resolvedBy String?
 
   @@unique([targetType, targetId, reporterId])
   @@index([cafeId, status])

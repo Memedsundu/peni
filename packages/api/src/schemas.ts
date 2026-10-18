@@ -48,22 +48,70 @@ export const tillDonationSchema = z.object({
 
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(500) });
 
-/** A café post (plan piece 14): words, photos or both. Events come with piece 15. */
-export const createPostSchema = z.object({
-  /** Made once per post on the device, so a retried tap posts once. */
-  createKey: z.string().trim().min(8).max(100),
-  kind: z.enum(["post", "question"]).default("post"),
-  body: z.string().trim().max(2000).default(""),
-  imageUrls: z.array(z.string().max(200)).max(6).default([]),
-  pinned: z.boolean().default(false),
-});
+const eventTitle = z.string().trim().min(3).max(120);
+const eventStartsAt = z.iso.datetime({ offset: true });
+/** Empty means no limit. */
+const eventCapacity = z.number().int().min(2).max(200).nullable();
 
-/** Send only what changes. */
+/** A café post (plan piece 14): words, photos or both; an event (piece 15) also has a topic and a time. */
+export const createPostSchema = z
+  .object({
+    /** Made once per post on the device, so a retried tap posts once. */
+    createKey: z.string().trim().min(8).max(100),
+    kind: z.enum(["post", "question", "event"]).default("post"),
+    body: z.string().trim().max(2000).default(""),
+    imageUrls: z.array(z.string().max(200)).max(6).default([]),
+    pinned: z.boolean().default(false),
+    title: eventTitle.optional(),
+    eventStartsAt: eventStartsAt.optional(),
+    eventCapacity: eventCapacity.default(null),
+  })
+  .refine((p) => p.kind !== "event" || (p.title && p.eventStartsAt), { message: "Bir konu ve bir saat seç", path: ["title"] });
+
+/** Send only what changes. Topic, time and capacity are for events. */
 export const updatePostSchema = z.object({
   body: z.string().trim().max(2000).optional(),
   imageUrls: z.array(z.string().max(200)).max(6).optional(),
   pinned: z.boolean().optional(),
+  title: eventTitle.optional(),
+  eventStartsAt: eventStartsAt.optional(),
+  eventCapacity: eventCapacity.optional(),
 });
+
+/** `POST /cafes/:slug/events`: a member opens an event (D4, plan piece 15). */
+export const createEventSchema = z.object({
+  createKey: z.string().trim().min(8).max(100),
+  title: eventTitle,
+  body: z.string().trim().max(1000).default(""),
+  startsAt: eventStartsAt,
+  capacity: eventCapacity.default(null),
+});
+
+/** The host changes their event. Send only what changes. */
+export const updateEventSchema = z.object({
+  title: eventTitle.optional(),
+  body: z.string().trim().max(1000).optional(),
+  startsAt: eventStartsAt.optional(),
+  capacity: eventCapacity.optional(),
+});
+
+/** `POST /cafes/:slug/reports`: a member reports another member's comment or event. */
+export const reportSchema = z.object({
+  targetType: z.enum(["post", "comment"]),
+  targetId: z.string().min(1).max(120),
+  reason: z.enum(["spam", "rude", "unsafe", "other"]),
+  note: z.string().trim().max(300).optional(),
+});
+
+/** A moderator's answer to a report: take it down (and maybe pause the writer), or keep it. */
+export const resolveReportSchema = z.object({
+  targetType: z.enum(["post", "comment"]),
+  targetId: z.string().min(1).max(120),
+  action: z.enum(["remove", "keep"]),
+  pauseAuthor: z.boolean().default(false),
+});
+
+export const pauseMemberSchema = z.object({ paused: z.boolean() });
 
 /** `POST /cafes/:slug/members/lookup`: by phone or by Peni kodu, one of them. [G6, D28] */
 export const memberLookupSchema = z
@@ -296,3 +344,7 @@ export type UsePeniInput = z.input<typeof usePeniSchema>;
 export type GiveAskidaInput = z.input<typeof giveAskidaSchema>;
 export type CreatePostInput = z.input<typeof createPostSchema>;
 export type UpdatePostInput = z.input<typeof updatePostSchema>;
+export type CreateEventInput = z.input<typeof createEventSchema>;
+export type UpdateEventInput = z.input<typeof updateEventSchema>;
+export type ReportInput = z.input<typeof reportSchema>;
+export type ResolveReportInput = z.input<typeof resolveReportSchema>;

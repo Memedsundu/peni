@@ -1,6 +1,6 @@
 "use client";
 
-import type { CafeDetailDTO, PostDTO } from "@peni/api";
+import type { CafeDetailDTO, PostDTO, ReportInput } from "@peni/api";
 import { goods } from "@peni/brand/format";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../kasa/api";
@@ -10,7 +10,8 @@ import { errorText, fill, text, type Lang, type T } from "../p/text";
 
 /**
  * The café's page (DS25): its photo and name, the viewer's peni here, what's on the askı,
- * then the feed (plan piece 14). Anyone can read it; members like and comment.
+ * then the feed (plan piece 14). Anyone can read it; members like, comment, open events and
+ * report what other members wrote (piece 15).
  */
 export function CafePage({ slug }: { slug: string }) {
   const [lang, toggleLang] = useLang();
@@ -19,6 +20,9 @@ export function CafePage({ slug }: { slug: string }) {
   const [cafe, setCafe] = useState<CafeDetailDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [signingIn, setSigningIn] = useState(false);
+  /** null: closed; "new": opening one; a post: editing it. */
+  const [eventSheet, setEventSheet] = useState<"new" | PostDTO | null>(null);
+  const [reporting, setReporting] = useState<ReportTarget | null>(null);
 
   const load = useCallback(() => api.cafes.get(slug).then(setCafe, (e: unknown) => setError(errorText(e, lang))), [slug, lang]);
   useEffect(() => {
@@ -44,6 +48,8 @@ export function CafePage({ slug }: { slug: string }) {
     );
   }
   const member = !!cafe.membership;
+  const paused = !!cafe.membership?.paused;
+  const canWrite = member && !paused;
   const askiItems = cafe.menu.filter((m) => m.askida && m.available);
   const waiting = goods(cafe.askida.balancePeni, askiItems);
   const ask = member ? null : signedIn ? "join" : "signIn";
@@ -98,13 +104,64 @@ export function CafePage({ slug }: { slug: string }) {
         </a>
       )}
 
+      {paused && <Notice>{t("pausedNotice")}</Notice>}
+      {canWrite && (
+        <section className="flex flex-col gap-3">
+          <Button kind="secondary" size="md" className="w-full" onClick={() => setEventSheet("new")}>
+            <span aria-hidden="true" className="text-xl leading-none">
+              +
+            </span>
+            {t("openEvent")}
+          </Button>
+          <p className="text-center text-sm leading-normal text-muted">{t("openEventHelp")}</p>
+        </section>
+      )}
+
       {error && <Notice tone="red">{error}</Notice>}
       <section aria-label={t("fromCafe")} className="flex flex-col gap-10">
         {cafe.posts.length === 0 && <p className="py-6 text-center text-muted">{t("noFeed")}</p>}
         {cafe.posts.map((p) => (
-          <Post key={p.id} t={t} lang={lang} slug={cafe.slug} post={p} member={member} act={act} onNeedMember={() => (signedIn ? void act(() => api.cafes.join(cafe.slug)) : setSigningIn(true))} />
+          <Post
+            key={p.id}
+            t={t}
+            lang={lang}
+            slug={cafe.slug}
+            post={p}
+            member={member}
+            paused={paused}
+            act={act}
+            onEdit={() => setEventSheet(p)}
+            onReport={setReporting}
+            onNeedMember={() => (signedIn ? void act(() => api.cafes.join(cafe.slug)) : setSigningIn(true))}
+          />
         ))}
       </section>
+
+      {eventSheet && (
+        <EventSheet
+          t={t}
+          lang={lang}
+          slug={cafe.slug}
+          editing={eventSheet === "new" ? null : eventSheet}
+          onClose={() => setEventSheet(null)}
+          onDone={async () => {
+            setEventSheet(null);
+            await load();
+          }}
+        />
+      )}
+      {reporting && (
+        <ReportSheet
+          t={t}
+          lang={lang}
+          slug={cafe.slug}
+          target={reporting}
+          onClose={() => {
+            setReporting(null);
+            void load();
+          }}
+        />
+      )}
 
       {signingIn && (
         <Sheet title={t("signIn")} onClose={() => setSigningIn(false)} labelClose={t("close")}>
@@ -124,13 +181,18 @@ export function CafePage({ slug }: { slug: string }) {
   );
 }
 
+type ReportTarget = Pick<ReportInput, "targetType" | "targetId">;
+
 function Post({
   t,
   lang,
   slug,
   post,
   member,
+  paused,
   act,
+  onEdit,
+  onReport,
   onNeedMember,
 }: {
   t: T;
@@ -138,11 +200,16 @@ function Post({
   slug: string;
   post: PostDTO;
   member: boolean;
+  paused: boolean;
   act: (call: () => Promise<unknown>) => Promise<void>;
+  onEdit: () => void;
+  onReport: (target: ReportTarget) => void;
   onNeedMember: () => void;
 }) {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const canWrite = member && !paused;
   const run = async (call: () => Promise<unknown>) => {
     setBusy(true);
     await act(call);
@@ -163,7 +230,11 @@ function Post({
       <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
         {post.pinned && <span className="rounded-full bg-[var(--cafe)] px-3 py-1 font-medium text-paper">{t("pinnedPost")}</span>}
         {label && <span className="rounded-full bg-panel px-3 py-1">{label}</span>}
+        {post.host && <span>{post.host.mine ? t("hostedByYou") : fill(t("hostedBy"), { name: post.host.name })}</span>}
         <span>{date(post.publishedAt)}</span>
+        {post.host && !post.host.mine && canWrite && (
+          <ReportButton t={t} done={post.reportedByMe} onClick={() => onReport({ targetType: "post", targetId: post.id })} className="ml-auto" />
+        )}
       </p>
       {post.title && <h2 className="font-serif text-3xl leading-tight">{post.title}</h2>}
       {post.kind === "event" && post.eventStartsAt && <p className="text-lg">{date(post.eventStartsAt, true)}</p>}
@@ -183,7 +254,7 @@ function Post({
           type="button"
           aria-pressed={post.reactedByMe}
           aria-label={post.reactedByMe ? t("unlike") : t("like")}
-          disabled={busy}
+          disabled={busy || paused}
           onClick={() => (member ? void run(() => api.cafes.react(slug, post.id)) : onNeedMember())}
           className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 ${post.reactedByMe ? "border-[var(--cafe)] text-[var(--cafe)]" : "border-line"}`}
         >
@@ -192,11 +263,14 @@ function Post({
           </svg>
           <span className="tabular">{post.reactionCount}</span>
         </button>
-        {post.kind === "event" && (
+        {post.kind === "event" && post.host?.mine && (
+          <span className="inline-flex min-h-11 items-center rounded-full bg-[var(--cafe)] px-4 text-sm font-semibold text-paper">{t("goingYes")} ✓</span>
+        )}
+        {post.kind === "event" && !post.host?.mine && (
           <Button
             kind={post.rsvpedByMe ? "primary" : "quiet"}
             size="sm"
-            disabled={busy}
+            disabled={busy || paused}
             onClick={() => (member ? void run(() => api.cafes.rsvp(slug, post.id)) : onNeedMember())}
             className={post.rsvpedByMe ? "border-[var(--cafe)] bg-[var(--cafe)]" : ""}
           >
@@ -204,9 +278,37 @@ function Post({
           </Button>
         )}
         <span className="ml-auto text-sm text-muted">
-          {post.kind === "event" ? fill(t("goingN"), { n: post.rsvpCount }) : fill(t("commentsN"), { n: post.commentCount })}
+          {post.kind !== "event"
+            ? fill(t("commentsN"), { n: post.commentCount })
+            : post.eventCapacity
+              ? fill(t("goingOfN"), { n: post.rsvpCount, max: post.eventCapacity })
+              : fill(t("goingN"), { n: post.rsvpCount })}
         </span>
       </div>
+
+      {post.host?.mine && (
+        <div className="flex gap-2">
+          <Button kind="quiet" size="sm" disabled={busy || paused} onClick={onEdit}>
+            {t("editEvent")}
+          </Button>
+          <Button kind="quiet" size="sm" disabled={busy} onClick={() => setCancelling(true)}>
+            {t("cancelEvent")}
+          </Button>
+        </div>
+      )}
+      {cancelling && (
+        <Sheet title={t("cancelEventTitle")} onClose={() => setCancelling(false)} labelClose={t("close")}>
+          <p className="leading-normal text-muted">{t("cancelEventBody")}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button kind="quiet" onClick={() => setCancelling(false)}>
+              {t("keepEvent")}
+            </Button>
+            <Button kind="danger" disabled={busy} onClick={() => void run(() => api.cafes.cancelEvent(slug, post.id)).then(() => setCancelling(false))}>
+              {t("cancelEventYes")}
+            </Button>
+          </div>
+        </Sheet>
+      )}
 
       {post.comments.length > 0 && (
         <ul className="flex flex-col gap-3 border-l-2 border-line pl-4">
@@ -220,12 +322,13 @@ function Post({
                   {t("deleteComment")}
                 </Button>
               )}
+              {!c.mine && canWrite && <ReportButton t={t} done={c.reportedByMe} onClick={() => onReport({ targetType: "comment", targetId: c.id })} className="-my-2" />}
             </li>
           ))}
         </ul>
       )}
       {post.kind === "question" && post.answeredTodayByMe && <p className="text-sm text-muted">{t("answeredToday")}</p>}
-      {member && (
+      {canWrite && (
         <form
           className="flex items-center gap-2"
           onSubmit={(e) => {
@@ -249,5 +352,183 @@ function Post({
         </form>
       )}
     </article>
+  );
+}
+
+/** A small flag: reports a member's comment or event, once. */
+function ReportButton({ t, done, onClick, className = "" }: { t: T; done: boolean; onClick: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      disabled={done}
+      onClick={onClick}
+      aria-label={done ? t("reported") : t("report")}
+      title={done ? t("reported") : t("report")}
+      className={`flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted hover:text-ink disabled:cursor-default disabled:text-red ${className}`}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill={done ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+      </svg>
+    </button>
+  );
+}
+
+/** "2026-10-17T15:00" in the device's own time, for a datetime-local field. */
+function localInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Opening an event, or the host changing theirs: a plan, a time, maybe a limit. */
+function EventSheet({
+  t,
+  lang,
+  slug,
+  editing,
+  onClose,
+  onDone,
+}: {
+  t: T;
+  lang: Lang;
+  slug: string;
+  editing: PostDTO | null;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const [createKey] = useState(() => `event-${crypto.randomUUID()}`);
+  const [title, setTitle] = useState(editing?.title ?? "");
+  const [when, setWhen] = useState(localInput(editing?.eventStartsAt ?? null));
+  const [capacity, setCapacity] = useState(editing?.eventCapacity ? String(editing.eventCapacity) : "");
+  const [body, setBody] = useState(editing?.body ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ready = title.trim().length >= 3 && !!when;
+  const field = "min-h-12 w-full rounded-2xl border border-line bg-paper px-4 text-base outline-none focus:border-ink";
+
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    const input = { title: title.trim(), body: body.trim(), startsAt: new Date(when).toISOString(), capacity: capacity ? Number(capacity) : null };
+    try {
+      if (editing) await api.cafes.updateEvent(slug, editing.id, input);
+      else await api.cafes.openEvent(slug, { createKey, ...input });
+      await onDone();
+    } catch (e) {
+      setError(errorText(e, lang));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Sheet title={editing ? t("editEventTitle") : t("openEvent")} onClose={onClose} labelClose={t("close")}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) void submit();
+        }}
+      >
+        <label className="flex flex-col gap-2">
+          <span className="font-medium">{t("eventTitle")}</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder={t("eventTitleHint")} className={field} />
+        </label>
+        <label className="flex flex-col gap-2">
+          <span className="font-medium">{t("eventWhen")}</span>
+          <input type="datetime-local" value={when} min={localInput(new Date().toISOString())} onChange={(e) => setWhen(e.target.value)} className={field} />
+        </label>
+        <label className="flex flex-col gap-2">
+          <span className="font-medium">{t("eventCapacity")}</span>
+          <input type="number" inputMode="numeric" min={2} max={200} value={capacity} onChange={(e) => setCapacity(e.target.value)} className={`${field} tabular`} />
+          <span className="text-sm text-muted">{t("eventCapacityHelp")}</span>
+        </label>
+        <label className="flex flex-col gap-2">
+          <span className="font-medium">
+            {t("eventBody")} <span className="font-normal text-muted">({t("optional")})</span>
+          </span>
+          <textarea value={body} onChange={(e) => setBody(e.target.value)} maxLength={1000} rows={3} className={`${field} py-3 leading-normal`} />
+        </label>
+        {error && <Notice tone="red">{error}</Notice>}
+        <Button kind="primary" size="lg" type="submit" disabled={!ready || busy} className="border-[var(--cafe)] bg-[var(--cafe)]">
+          {editing ? t("eventSave") : t("eventOpenSubmit")}
+        </Button>
+      </form>
+    </Sheet>
+  );
+}
+
+/** Why a member reports something: four plain reasons and room for a note. */
+function ReportSheet({ t, lang, slug, target, onClose }: { t: T; lang: Lang; slug: string; target: ReportTarget; onClose: () => void }) {
+  const [reason, setReason] = useState<ReportInput["reason"] | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const reasons = [
+    ["spam", t("reasonSpam")],
+    ["rude", t("reasonRude")],
+    ["unsafe", t("reasonUnsafe")],
+    ["other", t("reasonOther")],
+  ] as const;
+
+  const send = async () => {
+    if (!reason) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.cafes.report(slug, { ...target, reason, note: note.trim() || undefined });
+      setSent(true);
+    } catch (e) {
+      setError(errorText(e, lang));
+    }
+    setBusy(false);
+  };
+
+  return (
+    <Sheet title={sent ? t("report") : t("reportTitle")} onClose={onClose} labelClose={t("close")}>
+      {sent ? (
+        <>
+          <p className="text-lg leading-normal">{t("reportThanks")}</p>
+          <Button kind="primary" onClick={onClose}>
+            {t("close")}
+          </Button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm leading-normal text-muted">{t("reportHelp")}</p>
+          <div role="radiogroup" aria-label={t("reportTitle")} className="flex flex-col gap-2">
+            {reasons.map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="radio"
+                aria-checked={reason === key}
+                onClick={() => setReason(key)}
+                className={`flex min-h-12 cursor-pointer items-center rounded-2xl border px-4 text-left ${reason === key ? "border-ink bg-panel font-semibold" : "border-line"}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <label className="flex flex-col gap-2">
+            <span className="font-medium">
+              {t("reportNote")} <span className="font-normal text-muted">({t("optional")})</span>
+            </span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={300}
+              rows={2}
+              className="w-full rounded-2xl border border-line bg-paper px-4 py-3 text-base leading-normal outline-none focus:border-ink"
+            />
+          </label>
+          {error && <Notice tone="red">{error}</Notice>}
+          <Button kind="primary" disabled={!reason || busy} onClick={() => void send()}>
+            {t("reportSend")}
+          </Button>
+        </>
+      )}
+    </Sheet>
   );
 }

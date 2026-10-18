@@ -2,7 +2,7 @@ import type { CafePeniSettings, Gift, GiftFilter, Membership, MembershipFilter, 
 import { defaultSettings } from "@peni/core";
 import type { Db } from "./db";
 
-const MEMBERSHIP = { id: true, cafeId: true, customerId: true, joinedAt: true, blocked: true } as const;
+const MEMBERSHIP = { id: true, cafeId: true, customerId: true, joinedAt: true, blocked: true, pausedAt: true } as const;
 
 export class PrismaDirectory implements PeniDirectory {
   constructor(private readonly db: Db) {}
@@ -26,8 +26,9 @@ export class PrismaDirectory implements PeniDirectory {
   async saveMembership(m: Membership): Promise<void> {
     await this.db().membership.upsert({
       where: { id: m.id },
-      create: { id: m.id, cafeId: m.cafeId, customerId: m.customerId, joinedAt: m.joinedAt, blocked: m.blocked },
-      update: { blocked: m.blocked },
+      create: { id: m.id, cafeId: m.cafeId, customerId: m.customerId, joinedAt: m.joinedAt, blocked: m.blocked, pausedAt: m.pausedAt ?? null },
+      // A membership saved without `pausedAt` leaves the pause as it is.
+      update: { blocked: m.blocked, ...(m.pausedAt !== undefined ? { pausedAt: m.pausedAt } : {}) },
     });
   }
 

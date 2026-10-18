@@ -57,7 +57,8 @@ describe("café cards and the café page (G1, G2, G9, G12)", () => {
       startsAt: "2026-10-22T16:00:00.000Z", // Perşembe 19:00
       title: "Mahalleye bir takas kütüphanesi kursak?",
     });
-    tick(7 * 24 * HOUR);
+    // Past Thursday's table and the neighbours' Saturday chess after it, nothing is left.
+    tick(9 * 24 * HOUR);
     expect((await app.listCafes(null))[0]!.nextEvent).toBeNull();
   });
 

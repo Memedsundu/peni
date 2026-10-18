@@ -58,6 +58,10 @@ import type {
   CheckPeniInput,
   UsePeniInput,
   GiveAskidaInput,
+  CreateEventInput,
+  UpdateEventInput,
+  ReportInput,
+  ResolveReportInput,
   CreatePostInput,
   UpdatePostInput,
   TillDonationInput,
@@ -171,6 +175,17 @@ export function createPeniClient(options: PeniClientOptions) {
       /** Members who show their profile, to pick whom to treat; `q` searches names. [D28] */
       members: (cafeSlug: string, q?: string) =>
         call<CafeMembersDTO>("GET", `/cafes/${slug(cafeSlug)}/members${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+      /** A member opens an event (D4); the same `createKey` again opens it once. */
+      openEvent: (cafeSlug: string, input: CreateEventInput) =>
+        call<{ ok: true; postId: string }>("POST", `/cafes/${slug(cafeSlug)}/events`, input),
+      /** The host changes their event. */
+      updateEvent: (cafeSlug: string, postId: string, input: UpdateEventInput) =>
+        call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/events/${slug(postId)}`, input),
+      /** The host calls it off. */
+      cancelEvent: (cafeSlug: string, postId: string) =>
+        call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/events/${slug(postId)}/cancel`, {}),
+      /** Reports another member's comment or event to the café, once. */
+      report: (cafeSlug: string, input: ReportInput) => call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/reports`, input),
       /** Public `text/calendar` link for a Peni masası; open it with `Linking`. [G22] */
       icsUrl: (cafeSlug: string, postId: string) =>
         `${base}/api/v1/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/ics`,
@@ -322,6 +337,12 @@ export function createPeniClient(options: PeniClientOptions) {
           call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}/comments/${slug(commentId)}`, { hidden }, true),
         /** A JPEG, PNG or WebP of at most 2 MB, shrunk on the device first. Answers with its URL for `imageUrls`. */
         uploadImage: (cafeSlug: string, photo: Blob) => call<{ url: string }>("POST", `/staff/${slug(cafeSlug)}/images`, photo, true),
+        /** Needs "posts.moderate": take the reported thing down (and maybe pause its writer), or keep it. */
+        resolveReport: (cafeSlug: string, input: ResolveReportInput) =>
+          call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/reports`, input, true),
+        /** Needs "posts.moderate". */
+        pauseMember: (cafeSlug: string, customerId: string, paused: boolean) =>
+          call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/members/${slug(customerId)}`, { paused }, true),
       },
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>
