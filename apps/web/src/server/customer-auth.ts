@@ -129,9 +129,9 @@ export class OutboxEmailSender implements EmailSender {
     if (this.sent.length > 100) this.sent.shift();
   }
 
-  /** The newest code sent to an address. */
+  /** The newest code sent to an address. Other emails to it (a gift) are passed over. */
   lastCodeFor(email: string): string | null {
-    const m = [...this.sent].reverse().find((x) => x.to === normalizeEmail(email));
+    const m = [...this.sent].reverse().find((x) => x.to === normalizeEmail(email) && x.subject.startsWith(CODE_SUBJECT));
     return m ? (/\b(\d{6})\b/.exec(m.text)?.[1] ?? null) : null;
   }
 }
@@ -249,11 +249,13 @@ function sameHash(a: string, b: string): boolean {
   return a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
+const CODE_SUBJECT = "Peni giriş kodun";
+
 /** Turkish, sen, short: the code first so it shows in the notification. */
 function codeEmail(to: string, code: string): EmailMessage {
   return {
     to,
-    subject: `Peni giriş kodun: ${code}`,
+    subject: `${CODE_SUBJECT}: ${code}`,
     text: `Peni giriş kodun: ${code}\n\nKod 10 dakika geçerli. Bu girişi sen istemediysen bu e-postayı yok sayabilirsin.`,
     html: `<p style="font-family:system-ui,sans-serif;font-size:16px">Peni giriş kodun:</p>
 <p style="font-family:system-ui,sans-serif;font-size:32px;font-weight:600;letter-spacing:6px">${code}</p>

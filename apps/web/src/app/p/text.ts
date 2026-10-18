@@ -44,6 +44,93 @@ const TEXT = {
   cancelledBody: { tr: "İade edilen satışın penisi alınamaz.", en: "A refunded sale earns no peni." },
   notFound: { tr: "Bu peni kodu bulunamadı.", en: "We couldn't find this peni code." },
 
+  // Ismarlama (piece 12). {name}, {n} and {h} are filled in with fill().
+  treats: { tr: "Ismarlamalar", en: "Treats" },
+  treatSomeone: { tr: "Birine ısmarla", en: "Treat someone" },
+  treatWhichCafe: { tr: "Hangi kafede ısmarlıyorsun?", en: "At which café?" },
+  treatWho: { tr: "Kime ısmarlıyorsun?", en: "Who are you treating?" },
+  treatOnlyHere: {
+    tr: "Peni yalnız bu kafede geçer; bu yüzden kafenin üyelerine ısmarlayabilirsin.",
+    en: "Peni only work at this café, so you can treat its members.",
+  },
+  recents: { tr: "Son ısmarladıkların", en: "People you treated" },
+  byList: { tr: "Üyeler", en: "Members" },
+  byCode: { tr: "Peni kodu", en: "Peni code" },
+  byPhone: { tr: "Telefon", en: "Phone" },
+  searchMembers: { tr: "İsimle ara", en: "Search by name" },
+  noMembers: { tr: "Profilini gösteren üye bulunamadı.", en: "No members who show their profile." },
+  listHelp: {
+    tr: "Listede yalnız profilini gösteren üyeler var. Arkadaşın yoksa Peni kodunu sor.",
+    en: "Only members who show their profile are listed. If your friend isn't here, ask for their Peni code.",
+  },
+  codeHelpTreat: {
+    tr: "Arkadaşının Peni kodu, kendi Ismarlamalar sayfasında yazar.",
+    en: "Your friend's Peni code is on their own Treats page.",
+  },
+  phoneNumber: { tr: "Telefon numarası", en: "Phone number" },
+  find: { tr: "Bul", en: "Find" },
+  change: { tr: "Değiştir", en: "Change" },
+  howMuch: { tr: "Kaç peni?", en: "How many peni?" },
+  yourBalance: { tr: "Bakiyen", en: "Your balance" },
+  other: { tr: "Başka", en: "Other" },
+  note: { tr: "Not (isteğe bağlı)", en: "Note (optional)" },
+  notePlaceholder: { tr: "Afiyet olsun!", en: "Enjoy!" },
+  treat: { tr: "Ismarla", en: "Treat" },
+  treatTo: { tr: "{name} {n} peni ısmarla", en: "Treat {name} to {n} peni" },
+  sent: { tr: "{name} {n} peni ısmarladın", en: "You treated {name} to {n} peni" },
+  sentBody: {
+    tr: "Kabul edince peni onun hesabına geçer. {h} saat içinde kabul edilmezse sana geri döner.",
+    en: "They get the peni when they accept. If not accepted within {h} hours, the peni come back to you.",
+  },
+  shareHelp: { tr: "Bağlantıyı gönder, haberi olsun.", en: "Send them the link so they know." },
+  share: { tr: "Bağlantıyı paylaş", en: "Share the link" },
+  copied: { tr: "Bağlantı kopyalandı", en: "Link copied" },
+  shareText: { tr: "Sana {n} peni ısmarladım", en: "I treated you to {n} peni" },
+  takeBack: { tr: "Geri al", en: "Take back" },
+  takenBack: { tr: "Geri aldın; peni bakiyene döndü.", en: "Taken back; the peni are in your balance again." },
+  treatAnother: { tr: "Başka birine ısmarla", en: "Treat someone else" },
+  signInToTreat: { tr: "Ismarlamak için giriş yap.", en: "Sign in to treat someone." },
+  treatNoCafe: {
+    tr: "Henüz bir kafeye üye değilsin. Bir alışverişin penisini aldığında kafeye katılırsın.",
+    en: "You're not a member of any café yet. Taking the peni from a purchase makes you one.",
+  },
+
+  // One treat, by its link
+  treatedYou: { tr: "{name} sana ısmarladı", en: "{name} treated you" },
+  treatedSomeone: { tr: "{name} bir arkadaşına ısmarladı", en: "{name} treated a friend" },
+  ifForYou: { tr: "Senin içinse giriş yap, sonra kabul et.", en: "If it's for you, sign in, then accept it." },
+  acceptBy: { tr: "Son kabul", en: "Accept by" },
+  accept: { tr: "Kabul et", en: "Accept" },
+  accepting: { tr: "Kabul ediliyor…", en: "Accepting…" },
+  decline: { tr: "İstemiyorum", en: "No, thanks" },
+  inYourAccount: { tr: "hesabına geçti", en: "is in your account" },
+  declinedBody: { tr: "Peni gönderene geri döndü.", en: "The peni went back to the sender." },
+  thank: { tr: "Teşekkür et", en: "Say thanks" },
+  thanked: { tr: "Teşekkür ettin", en: "You said thanks" },
+  theyThanked: { tr: "{name} teşekkür etti", en: "{name} said thanks" },
+  notForYou: { tr: "Bu ısmarlama başka biri için.", en: "This treat is for someone else." },
+  treatGone: { tr: "Bu ısmarlama artık açık değil.", en: "This treat isn't open any more." },
+  treatNotFound: { tr: "Bu ısmarlama bulunamadı.", en: "We couldn't find this treat." },
+  myTreats: { tr: "Ismarlamalarım", en: "My treats" },
+
+  // Ismarlamalar list
+  waitingForYou: { tr: "Seni bekleyenler", en: "Waiting for you" },
+  earlier: { tr: "Geçmiş", en: "Earlier" },
+  noTreats: { tr: "Henüz ısmarlama yok.", en: "No treats yet." },
+  yourCode: { tr: "Peni kodun", en: "Your Peni code" },
+  yourCodeHelp: { tr: "Sana ısmarlamak isteyen bu kodu kullanabilir.", en: "Friends can use it to treat you." },
+  inPending: { tr: "Seni bekliyor", en: "Waiting for you" },
+  inAccepted: { tr: "Kabul ettin", en: "Accepted" },
+  inDeclined: { tr: "İstemedin", en: "Declined" },
+  inExpired: { tr: "Süresi doldu", en: "Ran out" },
+  outPending: { tr: "Kabul bekleniyor", en: "Not accepted yet" },
+  outAccepted: { tr: "Kabul etti", en: "Accepted" },
+  outDeclined: { tr: "İstemedi, sana döndü", en: "Declined, came back to you" },
+  outCancelled: { tr: "Geri aldın", en: "Taken back" },
+  outExpired: { tr: "Süresi doldu, sana döndü", en: "Ran out, came back to you" },
+  from: { tr: "Gönderen", en: "From" },
+  to: { tr: "Alan", en: "To" },
+
   // Typing the code
   codeTitle: { tr: "Ekrandaki kodu yaz", en: "Type the code on the screen" },
   codeBody: {
@@ -76,6 +163,11 @@ export function text(lang: Lang) {
 }
 
 export type T = ReturnType<typeof text>;
+
+/** "{name} {n} peni ısmarla" with its blanks filled. */
+export function fill(template: string, values: Record<string, string | number>): string {
+  return template.replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? String(values[key]) : all));
+}
 
 /** What to show for a failed call: the Turkish copy, or the server's English message. */
 export function errorText(error: unknown, lang: Lang): string {

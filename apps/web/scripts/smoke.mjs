@@ -175,11 +175,15 @@ const byCode = await call("POST", "/cafes/moda/members/lookup", { token: ayse, b
 assert.deepEqual(byCode.json, { firstName: "Nazlı", lastInitial: "E" });
 assert.equal((await call("POST", "/gifts", { token: ayse, body: { cafeSlug: "moda", toPhone: "+905320000002", toCode: nazliCode, peni: 5, idempotencyKey: key() } })).json.error.code, "VALIDATION");
 const welcome = (await call("POST", "/gifts", { token: ayse, body: { cafeSlug: "moda", toCode: nazliCode, peni: 20, message: "Hoş geldin", idempotencyKey: key() } })).json;
+assert.equal((await call("GET", `/gifts/${welcome.id}/preview`)).json.gift, null, "a stranger with the link sees no note");
+assert.equal((await call("GET", `/gifts/${welcome.id}/preview`, { token: nazli })).json.gift.message, "Hoş geldin");
 assert.equal((await call("POST", `/gifts/${welcome.id}/accept`, { token: nazli })).json.status, "accepted");
+await call("POST", `/gifts/${welcome.id}/thanks`, { token: nazli });
+assert.ok((await call("GET", `/gifts/${welcome.id}/preview`, { token: ayse })).json.gift.thankedAt, "Ayşe sees the thanks on the link");
 const again = (await call("GET", "/me/wallet", { token: ayse })).json.recentRecipients.find((r) => r.firstName === "Nazlı");
 assert.equal(again.phone, null);
 assert.equal(again.memberId, picked[0].memberId);
-step("Ayşe finds Nazlı (no phone) in Moda's member list and by her Peni kodu, treats her 20 peni, and can send again from recents");
+step("Ayşe finds Nazlı (no phone) in Moda's member list and by her Peni kodu, treats her 20 peni; Nazlı opens the link, accepts and says thanks, and Ayşe can send again from recents");
 
 // 5c. Menü: Leyla adds a product, changes its price, takes it off and back; Ece can't edit.
 let menu = (await call("GET", "/staff/moda/menu", { headers: STAFF })).json;
