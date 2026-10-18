@@ -77,6 +77,8 @@ export interface StaffContext {
   tokenHash: string;
   /** "pin" at the till: only TILL_PERMISSIONS, at this café, on that device. */
   method: StaffSignInMethod;
+  /** The till computer a PIN session belongs to; payments go to its terminal. */
+  deviceId: string | null;
   /** What the role may do after a password sign-in. */
   rolePermissions: Set<Permission>;
 }
@@ -163,6 +165,7 @@ export class StaffService {
       rolePermissions,
       tokenHash,
       method: session.method,
+      deviceId: session.deviceId,
     };
     if (permission) this.require(ctx, permission);
     return ctx;

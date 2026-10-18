@@ -126,6 +126,9 @@ export const payOrderSchema = z.object({
   tenderedKurus: z.number().int().min(0).max(100_000_000).optional(),
 });
 
+/** Backing out of a payment still waiting; `declined` when the terminal said no. */
+export const cancelPaymentSchema = z.object({ declined: z.boolean().optional() });
+
 export const orderReasonSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -213,6 +216,7 @@ export type MenuOrderInput = z.input<typeof menuOrderSchema>;
 export type CreateOrderInput = z.input<typeof createOrderSchema>;
 export type UpdateOrderInput = z.input<typeof updateOrderSchema>;
 export type PayOrderInput = z.input<typeof payOrderSchema>;
+export type CancelPaymentInput = z.input<typeof cancelPaymentSchema>;
 export type OrderListQuery = z.input<typeof orderListQuerySchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
 

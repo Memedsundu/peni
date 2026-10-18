@@ -212,7 +212,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     const line = (productId: string, unitPriceKurus: number, quantity: number, discountPercent = 0) => ({ productId, name: productId, unitPriceKurus, quantity, discountPercent });
     const base = {
       cafeId, businessDay: day, status: "open" as const, discountPercent: 0, createdByMemberId: "sm_x",
-      paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null, payKey: null,
+      paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null,
       voidedAt: null, voidedByMemberId: null, voidReason: null, refundedAt: null, refundedByMemberId: null, refundReason: null,
       refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
     };
@@ -222,7 +222,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.orders.getOrder(cafeId, first.id))!.lines).toEqual(first.lines);
 
     // Paying replaces the lines and fields in one write.
-    await stores.orders.saveOrder({ ...first, status: "paid", paidAt: at, paymentMethod: "cash", tenderedKurus: 10_000, changeKurus: 1_750, payKey: `pk_${run}`, lines: [line("cay", 3_000, 2)] });
+    await stores.orders.saveOrder({ ...first, status: "paid", paidAt: at, paymentMethod: "cash", tenderedKurus: 10_000, changeKurus: 1_750, lines: [line("cay", 3_000, 2)] });
     expect(await stores.orders.getOrder(cafeId, first.id)).toMatchObject({ status: "paid", paymentMethod: "cash", changeKurus: 1_750, lines: [line("cay", 3_000, 2)] });
     expect((await stores.orders.findByCreateKey(cafeId, `ck1_${run}`))!.id).toBe(first.id);
 
@@ -243,7 +243,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       id: orderId, cafeId, number: 1, businessDay: day, status: "paid" as const, discountPercent: 0, createdByMemberId: "sm_x",
       createKey: `ckc_${run}`, createdAt: at, lines: [{ productId: "cay", name: "Çay", unitPriceKurus: 3_000, quantity: 1, discountPercent: 0 }],
       subtotalKurus: 3_000, discountKurus: 0, totalKurus: 3_000, paidAt: at, paidByMemberId: "sm_x", paymentMethod: "cash" as const,
-      tenderedKurus: null, changeKurus: null, payKey: `pkc_${run}`, voidedAt: null, voidedByMemberId: null, voidReason: null,
+      tenderedKurus: null, changeKurus: null, voidedAt: null, voidedByMemberId: null, voidReason: null,
       refundedAt: null, refundedByMemberId: null, refundReason: null, refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
     };
     await stores.orders.saveOrder(order);
@@ -257,5 +257,24 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect([...(await stores.claims.codesUsed(cafeId, day))]).toEqual(["0427"]);
     expect(await stores.claims.saveClaim({ ...claim, cancelledAt: at })).toBe(true);
     expect(await stores.claims.getClaimByOrder(cafeId, orderId)).toEqual({ ...claim, cancelledAt: at });
+  });
+
+  it("keeps payments with one per key at a café, oldest first per order", async () => {
+    const orderId = `ord_c_${run}`; // made by the claims test above
+    const payment = {
+      id: `pay_${run}`, cafeId, orderId, kind: "sale" as const, method: "card" as const, status: "pending" as const, amountKurus: 3_000,
+      tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, key: `pk_${run}`, reason: null,
+      startedAt: at, startedByMemberId: "sm_x", settledAt: null, settledByMemberId: null, reference: null, receiptNo: null, failure: null,
+    };
+    expect(await stores.payments.savePayment(payment)).toBe(true);
+    // A double tap with the same key is refused; the first one is found by its key.
+    expect(await stores.payments.savePayment({ ...payment, id: `pay_dup_${run}` })).toBe(false);
+    expect((await stores.payments.findPaymentByKey(cafeId, `pk_${run}`))!.id).toBe(payment.id);
+    const approved = { ...payment, status: "approved" as const, settledAt: at, settledByMemberId: "sm_x" };
+    expect(await stores.payments.savePayment(approved)).toBe(true);
+    const later = { ...payment, id: `pay_2_${run}`, kind: "refund" as const, key: `rk_${run}`, reason: "Soğuk", startedAt: new Date(at.getTime() + 60_000) };
+    await stores.payments.savePayment(later);
+    expect(await stores.payments.listPayments(cafeId, [orderId, "ord_none"])).toEqual([approved, later]);
+    expect(await stores.payments.getPayment("cafe_other", payment.id)).toBeNull();
   });
 });

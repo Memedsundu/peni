@@ -39,14 +39,13 @@ export interface Order {
   createdByMemberId: string;
   /** The client's key for "create", so a double tap makes one order. */
   createKey: string;
+  /** paidAt to changeKurus are copied from the approved payment for lists and reports; the payment holds the detail. */
   paidAt: Date | null;
   paidByMemberId: string | null;
   paymentMethod: PaymentMethod | null;
   /** Cash handed over and change given back, when the barista entered it. */
   tenderedKurus: Kurus | null;
   changeKurus: Kurus | null;
-  /** The client's key for "pay": a retry after a lost answer returns the same result. */
-  payKey: string | null;
   voidedAt: Date | null;
   voidedByMemberId: string | null;
   voidReason: string | null;

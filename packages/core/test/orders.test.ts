@@ -32,7 +32,7 @@ describe("InMemoryOrderStore", () => {
   const blank = (id: string, number: number, cafeId = "c1", businessDay = "2026-10-16"): Order => ({
     id, cafeId, number, businessDay, status: "open", lines: [line(100, 1)], discountPercent: 0,
     subtotalKurus: 100, discountKurus: 0, totalKurus: 100, createdAt: new Date(2026, 9, 16, 9, number), createdByMemberId: "m",
-    createKey: `k-${id}`, paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null, payKey: null,
+    createKey: `k-${id}`, paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null,
     voidedAt: null, voidedByMemberId: null, voidReason: null, refundedAt: null, refundedByMemberId: null, refundReason: null,
     refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { newIdempotencyKey, PeniApiError, type OrderDTO, type PaymentMethodDTO, type TillMenuDTO } from "@peni/api";
+import { newIdempotencyKey, PeniApiError, type OrderDTO, type PaymentAnswerDTO, type PaymentDTO, type PaymentMethodDTO, type TillMenuDTO } from "@peni/api";
 import { formatPercent, formatTL } from "@peni/brand/format";
 import { lineTotal, orderTotals, QUICK_DISCOUNTS, type OrderLine } from "@peni/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,7 +18,12 @@ type Cart = {
   order: OrderDTO | null;
 };
 
-type Panel = null | { kind: "cash" } | { kind: "card" } | { kind: "discount"; productId: string | null };
+type Panel =
+  | null
+  | { kind: "cash" }
+  /** A payment the terminal or the barista still has to settle, or one that just failed. */
+  | { kind: "payment"; orderId: string; payment: PaymentDTO; tenderedKurus?: number }
+  | { kind: "discount"; productId: string | null };
 
 const emptyCart = (): Cart => ({ lines: [], discountPercent: 0, createKey: newIdempotencyKey(), order: null });
 
@@ -147,11 +152,7 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
       const attempt = `${order.id}|${method}|${tenderedKurus ?? ""}|${order.totalKurus}`;
       const payKey = payKeys.current.get(attempt) ?? newIdempotencyKey();
       payKeys.current.set(attempt, payKey);
-      const done = await api.staff.till.pay(slug, order.id, { method, payKey, tenderedKurus });
-      setPanel(null);
-      setPaid(done);
-      setCart(emptyCart());
-      payKeys.current.clear();
+      settled(await api.staff.till.pay(slug, order.id, { method, payKey, tenderedKurus }), tenderedKurus);
     } catch (e) {
       if (e instanceof PeniApiError && e.code === "PRODUCT_UNAVAILABLE") void loadMenu();
       setError(onError(e));
@@ -159,6 +160,47 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
     } finally {
       setBusy(false);
     }
+  };
+
+  /**
+   * Every payment answer lands here, whichever terminal took it: approved shows the paid
+   * order; anything else keeps the payment sheet open on it.
+   */
+  const settled = (answer: PaymentAnswerDTO, tenderedKurus?: number) => {
+    if (answer.payment.status === "approved") {
+      setPanel(null);
+      setPaid(answer.order);
+      setCart(emptyCart());
+      payKeys.current.clear();
+      return;
+    }
+    // A declined or cancelled payment is over: trying again is a new payment.
+    if (answer.payment.status !== "pending") payKeys.current.clear();
+    setCart((c) => ({ ...c, order: answer.order }));
+    setPanel({ kind: "payment", orderId: answer.order.id, payment: answer.payment, tenderedKurus });
+  };
+
+  const settle = async (action: (orderId: string, paymentId: string) => Promise<PaymentAnswerDTO>) => {
+    if (panel?.kind !== "payment" || busy) return;
+    setBusy(true);
+    try {
+      settled(await action(panel.orderId, panel.payment.id), panel.tenderedKurus);
+    } catch (e) {
+      setError(onError(e));
+      setPanel(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closePayment = () => {
+    if (panel?.kind === "payment" && panel.payment.status === "pending") {
+      const { orderId, payment } = panel;
+      // The barista backs out; the order stays as it is for the next try.
+      api.staff.till.cancelPayment(slug, orderId, payment.id).catch((e: unknown) => setError(onError(e)));
+      payKeys.current.clear();
+    }
+    setPanel(null);
   };
 
   const products = menu?.categories.find((c) => c.id === tab)?.products ?? [];
@@ -274,7 +316,7 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
                 <Button kind="secondary" size="lg" disabled={cart.lines.length === 0 || busy} onClick={() => setPanel({ kind: "cash" })}>
                   {t("cash")}
                 </Button>
-                <Button kind="primary" size="lg" disabled={cart.lines.length === 0 || busy} onClick={() => setPanel({ kind: "card" })}>
+                <Button kind="primary" size="lg" disabled={cart.lines.length === 0 || busy} onClick={() => void pay("card")}>
                   {t("card")}
                 </Button>
               </div>
@@ -284,14 +326,17 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
       </aside>
 
       {panel?.kind === "cash" && <CashPanel t={t} dueKurus={totals.totalKurus} busy={busy} onClose={() => setPanel(null)} onPay={(k) => void pay("cash", k)} />}
-      {panel?.kind === "card" && (
-        <Sheet title={t("cardTitle")} onClose={() => setPanel(null)} labelClose={t("close")}>
-          <p className="tabular font-serif text-5xl">{formatTL(totals.totalKurus)}</p>
-          <p className="text-muted">{t("cardBody")}</p>
-          <Button kind="primary" size="lg" disabled={busy} onClick={() => void pay("card")} autoFocus>
-            {t("cardDone")}
-          </Button>
-        </Sheet>
+      {panel?.kind === "payment" && (
+        <PaymentSheet
+          t={t}
+          payment={panel.payment}
+          busy={busy}
+          onClose={closePayment}
+          onConfirm={() => void settle((o, p) => api.staff.till.confirmPayment(slug, o, p))}
+          onDecline={() => void settle((o, p) => api.staff.till.cancelPayment(slug, o, p, { declined: true }))}
+          onCheck={() => void settle((o, p) => api.staff.till.payment(slug, o, p))}
+          onRetry={() => void pay(panel.payment.method, panel.tenderedKurus)}
+        />
       )}
       {panel?.kind === "discount" && (panel.productId === null || discountLine) && (
         <DiscountPanel
@@ -306,6 +351,85 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
         />
       )}
     </>
+  );
+}
+
+/** How often the till asks while the terminal works on a payment. */
+const TERMINAL_POLL_MS = 1500;
+
+/**
+ * One sheet for a payment that isn't through yet. With the manual terminal (D24) the
+ * barista taps once the terminal approves; with a terminal behind the till bridge the
+ * till waits for its answer. A decline, or a terminal that can't be reached, says so
+ * and offers another try.
+ */
+function PaymentSheet({
+  t,
+  payment,
+  busy,
+  onClose,
+  onConfirm,
+  onDecline,
+  onCheck,
+  onRetry,
+}: {
+  t: TillProps["t"];
+  payment: PaymentDTO;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  onDecline: () => void;
+  onCheck: () => void;
+  onRetry: () => void;
+}) {
+  const waitingOnTerminal = payment.status === "pending" && payment.confirmBy === "terminal";
+  const check = useRef(onCheck);
+  check.current = onCheck;
+  useEffect(() => {
+    if (!waitingOnTerminal) return;
+    const timer = setInterval(() => check.current(), TERMINAL_POLL_MS);
+    return () => clearInterval(timer);
+  }, [waitingOnTerminal, payment.id]);
+
+  const problem =
+    payment.status === "declined"
+      ? payment.failure === "TERMINAL_UNREACHABLE"
+        ? t("terminalUnreachable")
+        : `${t("cardDeclined")}${payment.failure ? ` (${payment.failure})` : ""}`
+      : payment.status === "cancelled"
+        ? t("paymentClosed")
+        : null;
+
+  return (
+    <Sheet title={payment.method === "cash" ? t("cashTitle") : t("cardTitle")} onClose={onClose} labelClose={t("close")}>
+      <p className="tabular font-serif text-5xl">{formatTL(payment.amountKurus)}</p>
+      {problem ? (
+        <>
+          <Notice tone="red">{problem}</Notice>
+          <Button kind="primary" size="lg" disabled={busy} onClick={onRetry} autoFocus>
+            {t("retry")}
+          </Button>
+        </>
+      ) : waitingOnTerminal ? (
+        <>
+          <p className="flex items-center gap-3 text-muted" role="status">
+            <span aria-hidden="true" className="h-3 w-3 animate-pulse rounded-full bg-green" />
+            {payment.method === "cash" ? t("waiting_cash") : t("waiting_card")}
+          </p>
+          <Button onClick={onClose}>{t("cancel")}</Button>
+        </>
+      ) : (
+        <>
+          <p className="text-muted">{t("cardBody")}</p>
+          <Button kind="primary" size="lg" disabled={busy} onClick={onConfirm} autoFocus>
+            {t("cardDone")}
+          </Button>
+          <Button kind="quiet" disabled={busy} onClick={onDecline}>
+            {t("cardDeclinedAction")}
+          </Button>
+        </>
+      )}
+    </Sheet>
   );
 }
 

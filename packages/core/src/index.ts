@@ -10,6 +10,7 @@ export * from "./member-code";
 export * from "./menu";
 export * from "./orders";
 export * from "./claims";
+export * from "./payments";
 export * from "./identity";
 export * from "./community";
 export * from "./staff";
