@@ -14,10 +14,8 @@ import type {
   PostDTO,
   RecentRecipientDTO,
   RefItemDTO,
-  StaffCafeDTO,
   StaffDashboardDTO,
   StaffReportFieldsDTO,
-  StaffRole,
   WalletDTO,
 } from "@peni/api";
 import {
@@ -26,6 +24,7 @@ import {
   InMemoryIdentityStore,
   InMemoryLedgerStore,
   InMemoryMenuStore,
+  InMemoryStaffStore,
   Ledger,
   PeniError,
   PeniService,
@@ -46,10 +45,13 @@ import {
   type PeniDirectory,
   type Post,
   type PostWithActivity,
+  type StaffStore,
 } from "@peni/core";
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
 import { createHash, randomBytes } from "node:crypto";
+import { AppError } from "./errors";
 import { buildIcs } from "./ics";
+import { StaffService, type StaffContext } from "./staff";
 
 /**
  * The Peni application layer: everything the HTTP routes call.
@@ -60,27 +62,7 @@ import { buildIcs } from "./ics";
  * is set (see runtime.ts).
  */
 
-export class AppError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status = 400,
-  ) {
-    super(message);
-    this.name = "AppError";
-  }
-}
-
-/**
- * `instanceof AppError` fails after a dev hot reload: the app singleton keeps
- * throwing errors built from the old copy of this module. Match the shape too.
- */
-export function isAppError(error: unknown): error is AppError {
-  if (error instanceof AppError) return true;
-  if (!(error instanceof Error) || error.name !== "AppError") return false;
-  const { code, status } = error as Partial<AppError>;
-  return typeof code === "string" && typeof status === "number";
-}
+export { AppError, isAppError } from "./errors";
 
 export type CustomerRecord = Customer;
 
@@ -90,6 +72,7 @@ export interface PeniStores {
   identity: IdentityStore;
   community: CommunityStore;
   menu: MenuStore;
+  staff: StaffStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -99,12 +82,14 @@ export function inMemoryStores(): PeniStores {
     identity: new InMemoryIdentityStore(),
     community: new InMemoryCommunityStore(),
     menu: new InMemoryMenuStore(),
+    staff: new InMemoryStaffStore(),
   };
 }
 
 export interface PeniAppOptions {
   demo: boolean;
-  staffKey: string;
+  /** bcrypt cost for staff passwords. Tests lower it. */
+  bcryptRounds?: number;
   /** Defaults to the system clock. Tests move it to check day boundaries. */
   clock?: () => Date;
 }
@@ -125,6 +110,8 @@ export class PeniApp {
   readonly identity: IdentityStore;
   readonly community: CommunityStore;
   readonly menu: MenuStore;
+  /** Staff sign-in, the team and roles. */
+  readonly staff: StaffService;
   private clockOverride: Date | null = null;
 
   constructor(
@@ -137,6 +124,7 @@ export class PeniApp {
     this.community = stores.community;
     this.menu = stores.menu;
     this.peni = new PeniService(this.ledger, this.directory, () => this.now());
+    this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
@@ -177,14 +165,10 @@ export class PeniApp {
     if (token) await this.identity.revokeSession(sha256(token), this.now());
   }
 
-  isStaffKey(key: string | null): boolean {
-    return !!key && key === this.options.staffKey;
-  }
-
   // ─────────────────────────────────────────────── me (profile, staff cafés)
 
   async me(customer: CustomerRecord): Promise<MeDTO> {
-    return { customer: toCustomerDTO(customer), staffCafes: await this.staffCafesFor(customer.id) };
+    return { customer: toCustomerDTO(customer), staffCafes: await this.staff.cafesForCustomer(customer.id) };
   }
 
   /** "Adın" and "Profilim görünsün". [G18] */
@@ -195,12 +179,6 @@ export class PeniApp {
     if (input.profileVisible !== undefined) updated.profileVisible = input.profileVisible;
     await this.identity.saveCustomer(updated);
     return this.me(updated);
-  }
-
-  /** Makes a customer staff at a café, so their session offers the café panel. [G19] */
-  async grantStaff(customerId: string, cafeSlug: string, role: StaffRole): Promise<void> {
-    const cafe = await this.requireCafe(cafeSlug);
-    await this.identity.grantStaff({ cafeId: cafe.id, customerId, role });
   }
 
   // ─────────────────────────────────────────────── cafés
@@ -448,12 +426,12 @@ export class PeniApp {
     return { balancePeni: await this.peni.walletBalance(membershipId), matchedPeni };
   }
 
-  async tillDonation(slug: string, input: { peni: number; idempotencyKey: string }) {
-    const cafe = await this.requireCafe(slug);
+  async tillDonation(staff: Pick<StaffContext, "cafe" | "member">, input: { peni: number; idempotencyKey: string }) {
+    const { cafe } = staff;
     await this.peni.recordTillDonation({
       cafeId: cafe.id,
       peni: input.peni,
-      staffUserId: "staff",
+      staffUserId: staff.member.id,
       idempotencyKey: input.idempotencyKey,
     });
     const settings = await this.directory.getSettings(cafe.id);
@@ -463,8 +441,7 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── staff dashboard
 
-  async staffDashboard(slug: string): Promise<StaffDashboardDTO> {
-    const cafe = await this.requireCafe(slug);
+  async staffDashboard({ cafe }: Pick<StaffContext, "cafe">): Promise<StaffDashboardDTO> {
     const settings = await this.directory.getSettings(cafe.id);
     const menu = await this.menu.listMenu(cafe.id);
     const now = this.now();
@@ -702,15 +679,6 @@ export class PeniApp {
       throw new AppError("LOOKUP_LIMITED", "Too many lookups; try again later", 429);
     }
     await this.identity.recordLookup(customerId, now);
-  }
-
-  private async staffCafesFor(customerId: string): Promise<StaffCafeDTO[]> {
-    const out: StaffCafeDTO[] = [];
-    for (const { cafeId, role } of await this.identity.staffGrantsFor(customerId)) {
-      const cafe = await this.identity.getCafe(cafeId);
-      if (cafe) out.push({ slug: cafe.slug, name: cafe.name, role });
-    }
-    return out;
   }
 
   private async customerForMembership(membershipId: string): Promise<CustomerRecord | null> {

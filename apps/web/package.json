@@ -15,6 +15,7 @@
     "@peni/brand": "workspace:*",
     "@peni/core": "workspace:*",
     "@peni/db": "workspace:*",
+    "bcryptjs": "3.0.2",
     "next": "16.4.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",

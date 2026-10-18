@@ -5,6 +5,7 @@ import { PrismaDirectory } from "./prisma-directory";
 import { PrismaIdentityStore } from "./prisma-identity-store";
 import { PrismaLedgerStore } from "./prisma-ledger-store";
 import { PrismaMenuStore } from "./prisma-menu-store";
+import { PrismaStaffStore } from "./prisma-staff-store";
 
 export * from "./generated/client";
 export type { Db } from "./db";
@@ -13,6 +14,7 @@ export { PrismaDirectory } from "./prisma-directory";
 export { PrismaIdentityStore } from "./prisma-identity-store";
 export { PrismaCommunityStore } from "./prisma-community-store";
 export { PrismaMenuStore } from "./prisma-menu-store";
+export { PrismaStaffStore } from "./prisma-staff-store";
 
 export function createPrismaClient(connectionString = process.env.DATABASE_URL): PrismaClient {
   if (!connectionString) throw new Error("DATABASE_URL is not set");
@@ -33,5 +35,6 @@ export function createPrismaStores(prisma: PrismaClient) {
     identity: new PrismaIdentityStore(db),
     community: new PrismaCommunityStore(db),
     menu: new PrismaMenuStore(db),
+    staff: new PrismaStaffStore(db),
   };
 }

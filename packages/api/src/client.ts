@@ -6,12 +6,21 @@ import type {
   GiftPreviewDTO,
   MeDTO,
   MemberLookupDTO,
+  RolesDTO,
   StaffDashboardDTO,
+  StaffMeDTO,
+  StaffSessionDTO,
+  TeamDTO,
   ApiErrorBody,
 } from "./dto";
 import { errorMessageTr } from "./messages";
 import type {
+  AddStaffInput,
+  ChangePasswordInput,
   DonateAskidaInput,
+  SaveRolesInput,
+  StaffSignInInput,
+  UpdateStaffInput,
   SendGiftInput,
   TillDonationInput,
   UpdateProfileInput,
@@ -32,8 +41,8 @@ export interface PeniClientOptions {
   baseUrl: string;
   /** Returns the customer's bearer token, if signed in. */
   getToken?: () => string | null | Promise<string | null>;
-  /** Staff key for café panel calls. */
-  getStaffKey?: () => string | null | Promise<string | null>;
+  /** The staff session token for café panel calls (the Expo app's café mode). The web panel uses the cookie. */
+  getStaffToken?: () => string | null | Promise<string | null>;
   fetch?: typeof fetch;
 }
 
@@ -52,8 +61,8 @@ export function createPeniClient(options: PeniClientOptions) {
     const token = await options.getToken?.();
     if (token) headers.authorization = `Bearer ${token}`;
     if (staff) {
-      const key = await options.getStaffKey?.();
-      if (key) headers["x-peni-staff-key"] = key;
+      const staffToken = await options.getStaffToken?.();
+      if (staffToken) headers["x-peni-staff-token"] = staffToken;
     }
     let res: Response;
     try {
@@ -121,6 +130,20 @@ export function createPeniClient(options: PeniClientOptions) {
         call<{ balancePeni: number; matchedPeni: number }>("POST", "/askida/donate", input),
     },
     staff: {
+      /** Email and password. Keep `token` for later calls; the web panel also gets a cookie. */
+      signIn: (input: StaffSignInInput) => call<StaffSessionDTO>("POST", "/staff-session", input, true),
+      signOut: () => call<{ ok: true }>("POST", "/staff-session/sign-out", {}, true),
+      /** The signed-in staff member and, per café, their role and permission keys. */
+      me: () => call<StaffMeDTO>("GET", "/staff-session", undefined, true),
+      changePassword: (input: ChangePasswordInput) => call<{ ok: true }>("POST", "/staff-session/password", input, true),
+      team: (cafeSlug: string) => call<TeamDTO>("GET", `/staff/${slug(cafeSlug)}/team`, undefined, true),
+      addMember: (cafeSlug: string, input: AddStaffInput) => call<TeamDTO>("POST", `/staff/${slug(cafeSlug)}/team`, input, true),
+      updateMember: (cafeSlug: string, memberId: string, input: UpdateStaffInput) =>
+        call<TeamDTO>("POST", `/staff/${slug(cafeSlug)}/team/${slug(memberId)}`, input, true),
+      resetPassword: (cafeSlug: string, memberId: string, password: string) =>
+        call<{ ok: true }>("POST", `/staff/${slug(cafeSlug)}/team/${slug(memberId)}/password`, { password }, true),
+      roles: (cafeSlug: string) => call<RolesDTO>("GET", `/staff/${slug(cafeSlug)}/roles`, undefined, true),
+      saveRoles: (cafeSlug: string, input: SaveRolesInput) => call<RolesDTO>("POST", `/staff/${slug(cafeSlug)}/roles`, input, true),
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>
         call<{ balancePeni: number }>("POST", `/staff/${slug(cafeSlug)}/askida/till`, input, true),

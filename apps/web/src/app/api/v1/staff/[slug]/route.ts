@@ -1,3 +1,6 @@
 import { route, segment } from "@/server/http";
 
-export const GET = route(async ({ app, req }) => app.staffDashboard(segment(req, -1)), { auth: "staff" });
+/** The café's peni and askı numbers. */
+export const GET = route(async ({ app, req, staffToken }) =>
+  app.staffDashboard(await app.staff.at(staffToken, segment(req, -1), "peni.view")),
+);

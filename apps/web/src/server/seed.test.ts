@@ -16,7 +16,7 @@ const times = [
 describe.each(times)("seed at %s", (iso) => {
   it("holds the demo's promises", async () => {
     const now = new Date(iso);
-    const app = new PeniApp({ demo: true, staffKey: "k", clock: () => now });
+    const app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now });
     await seed(app);
     const people = new Map((await app.identity.getCustomers(Object.values(DEMO_CUSTOMERS).map((x) => x.id))).map((x) => [x.id, x]));
     const c = (id: string) => people.get(id)!;

@@ -1,6 +1,6 @@
 /**
- * Cafés, customers, their sessions and staff grants: who is who. Plan piece 2
- * (staff and roles) and piece 3 (sign-in) grow this module.
+ * Cafés, customers and their sessions: who is who. Staff live in staff.ts;
+ * plan piece 3 (sign-in) grows this module.
  */
 
 export interface Cafe {
@@ -25,14 +25,6 @@ export interface Customer {
   profileVisible: boolean;
 }
 
-export type StaffRole = "owner" | "manager" | "barista";
-
-export interface StaffGrant {
-  cafeId: string;
-  customerId: string;
-  role: StaffRole;
-}
-
 export interface IdentityStore {
   listCafes(): Promise<Cafe[]>;
   getCafe(id: string): Promise<Cafe | null>;
@@ -50,10 +42,6 @@ export interface IdentityStore {
   customerIdForSession(tokenHash: string, now: Date): Promise<string | null>;
   revokeSession(tokenHash: string, at: Date): Promise<void>;
 
-  /** One role per café; granting again replaces it. */
-  grantStaff(grant: StaffGrant): Promise<void>;
-  staffGrantsFor(customerId: string): Promise<StaffGrant[]>;
-
   /** A membership's Peni kodu. Codes are unique across all cafés. */
   memberCodeOf(membershipId: string): Promise<string | null>;
   /** Saves the code, or returns false when another membership already has it. */
@@ -69,7 +57,6 @@ export class InMemoryIdentityStore implements IdentityStore {
   private readonly cafes = new Map<string, Cafe>();
   private readonly customers = new Map<string, Customer>();
   private readonly sessions = new Map<string, { customerId: string; expiresAt: Date; revokedAt: Date | null }>();
-  private readonly staff = new Map<string, StaffGrant[]>(); // customer id to grants
   private readonly codes = new Map<string, string>(); // membership id to code
   private readonly byCode = new Map<string, string>(); // code to membership id
   private readonly lookups = new Map<string, Date[]>();
@@ -125,15 +112,6 @@ export class InMemoryIdentityStore implements IdentityStore {
   async revokeSession(tokenHash: string, at: Date) {
     const s = this.sessions.get(tokenHash);
     if (s && !s.revokedAt) s.revokedAt = at;
-  }
-
-  async grantStaff(grant: StaffGrant) {
-    const others = (this.staff.get(grant.customerId) ?? []).filter((g) => g.cafeId !== grant.cafeId);
-    this.staff.set(grant.customerId, [...others, { ...grant }]);
-  }
-
-  async staffGrantsFor(customerId: string) {
-    return (this.staff.get(customerId) ?? []).map((g) => ({ ...g }));
   }
 
   async memberCodeOf(membershipId: string) {

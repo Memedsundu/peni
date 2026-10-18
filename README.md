@@ -20,6 +20,7 @@ The code is being rebuilt piece by piece. Today it holds:
 | Peni rules: earn, spend, gifts, askı, matching, refunds, reports | **Done, tested** (`packages/core`) |
 | Ledger on Postgres: append-only, balanced and non-negative, enforced by the database | **Done, tested on Postgres 16** (`packages/db`) |
 | `/api/v1` for wallets, gifts, askı, the café feed and the staff report | **Done, end-to-end tested** on Postgres and in memory |
+| Staff sign-in, the team, and roles (owner, manager, chef, barista) with per-café permissions | **Done, end-to-end tested** ([staff and roles](docs/staff-and-roles.md)) |
 | Web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
@@ -47,7 +48,7 @@ pnpm dev:web            # http://localhost:3000, demo data in memory, nothing to
 
 To keep data in Postgres, set `DATABASE_URL` in `apps/web/.env` and apply the migrations once with `DATABASE_URL=… pnpm --filter @peni/db migrate:deploy`. An empty database gets the demo cafés on first start.
 
-The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. The staff key for `/api/v1/staff/moda` is `demo-staff`.
+The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista).
 
 ## Checks
 
@@ -63,4 +64,4 @@ TEST_DATABASE_URL=postgresql://… pnpm --filter @peni/db test
 pnpm --filter @peni/web start & node apps/web/scripts/smoke.mjs
 ```
 
-Read next: [plan](docs/plan.md) · [architecture](docs/architecture.md) · [peni & askı rules](docs/peni-and-askida.md) · [vision](docs/vision.md)
+Read next: [plan](docs/plan.md) · [architecture](docs/architecture.md) · [staff and roles](docs/staff-and-roles.md) · [peni & askı rules](docs/peni-and-askida.md) · [vision](docs/vision.md)

@@ -1,5 +1,5 @@
 import { defaultSettings, startOfLocalDay } from "@peni/core";
-import type { Post } from "@peni/core";
+import type { Cafe, Post, StaffMember, StaffRole } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -21,6 +21,16 @@ export const DEMO_NEIGHBOURS = {
   kerem: { id: "cus_kerem", phone: "+905320000019", displayName: "Kerem Aksoy", profileVisible: false },
   nermin: { id: "cus_nermin", phone: "+905320000020", displayName: "Nermin Arıkan", profileVisible: true },
 } as const;
+
+/** Demo café staff, one of each role, all with the same password. Leyla also manages Kuzguncuk. */
+export const DEMO_STAFF_PASSWORD = process.env.PENI_DEMO_STAFF_PASSWORD ?? "demo-staff";
+export const DEMO_STAFF = {
+  leyla: { name: "Leyla Kara", email: "leyla@moda.test", roles: { moda: "owner", kuzguncuk: "manager" } },
+  murat: { name: "Murat Aksu", email: "murat@moda.test", roles: { moda: "manager" } },
+  hakan: { name: "Hakan Usta", email: "hakan@moda.test", roles: { moda: "chef" } },
+  ece: { name: "Ece Tan", email: "ece@moda.test", roles: { moda: "barista" } },
+  tarik: { name: "Tarık Ersoy", email: "tarik@kuzguncuk.test", roles: { kuzguncuk: "owner" } },
+} as const satisfies Record<string, { name: string; email: string; roles: Partial<Record<"moda" | "kuzguncuk", StaffRole>> }>;
 
 type Who = keyof typeof DEMO_CUSTOMERS | keyof typeof DEMO_NEIGHBOURS;
 type Slug = "moda" | "kuzguncuk";
@@ -103,6 +113,19 @@ export async function seed(app: PeniApp): Promise<void> {
     askidaMinMembershipDays: 7,
   });
 
+  // ─────────────────────────────────────────── staff
+
+  const tillStaff = {} as Record<Slug, { cafe: Cafe; member: StaffMember }>;
+  for (const s of Object.values(DEMO_STAFF)) {
+    const account = await app.staff.ensureAccount({ name: s.name, email: s.email, password: DEMO_STAFF_PASSWORD });
+    for (const [slug, role] of Object.entries(s.roles) as [Slug, StaffRole][]) {
+      const member = await app.at(daysAgo(90), () => app.staff.join(account.id, CAFE_ID[slug], role));
+      if (role === "barista" || (role === "owner" && !tillStaff[slug])) {
+        tillStaff[slug] = { cafe: (await app.identity.getCafe(CAFE_ID[slug]))!, member };
+      }
+    }
+  }
+
   // ─────────────────────────────────────────── people and memberships
 
   const people = new Map<string, CustomerRecord>();
@@ -177,7 +200,7 @@ export async function seed(app: PeniApp): Promise<void> {
   const donate = (who: Who, slug: Slug, at: Date, peni: number, showName: boolean) =>
     plan(at, () => app.at(at, () => app.donateToAskida(customer(who), { cafeSlug: slug, peni, showName, idempotencyKey: `seed_d_${++n}` })));
   const till = (slug: Slug, at: Date, peni: number) =>
-    plan(at, () => app.at(at, () => app.tillDonation(slug, { peni, idempotencyKey: `seed_t_${++n}` })));
+    plan(at, () => app.at(at, () => app.tillDonation(tillStaff[slug], { peni, idempotencyKey: `seed_t_${++n}` })));
 
   // Two months of walk-in visits: what most of the peni in circulation comes from.
   const regulars: [Who, Slug, number, number, number][] = [

@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 
 const BASE = process.argv[2] ?? "http://localhost:3000";
-const STAFF = { "x-peni-staff-key": process.env.PENI_DEMO_STAFF_KEY ?? "demo-staff" };
+const STAFF_PASSWORD = process.env.PENI_DEMO_STAFF_PASSWORD ?? "demo-staff";
 const key = () => crypto.randomUUID();
 
 async function call(method, path, { body, token, headers = {} } = {}) {
@@ -34,6 +34,13 @@ async function signIn(customerId) {
   return token;
 }
 
+/** Staff sign-in: the token goes in x-peni-staff-token, as the Expo app sends it. */
+async function staffSignIn(email, password = STAFF_PASSWORD) {
+  const res = await call("POST", "/staff-session", { body: { email, password } });
+  assert.equal(res.status, 200, `staff sign-in failed for ${email}`);
+  return { "x-peni-staff-token": res.json.token };
+}
+
 const step = (name) => console.log(`✓ ${name}`);
 const modaBalance = async (token) =>
   (await call("GET", "/me/wallet", { token })).json.cafes.find((c) => c.cafeSlug === "moda").balancePeni;
@@ -43,6 +50,7 @@ const modaBalance = async (token) =>
 const deniz = await signIn("cus_deniz");
 const ayse = await signIn("cus_ayse");
 const mehmet = await signIn("cus_mehmet");
+const STAFF = await staffSignIn("leyla@moda.test");
 const dash0 = (await call("GET", "/staff/moda", { headers: STAFF })).json;
 const wallets0 = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
 
@@ -54,9 +62,9 @@ assert.ok(cafe.askida.itemsAvailable > 0);
 assert.deepEqual(cafe.askida.myEligibility, { status: "ok" });
 assert.equal((await call("GET", "/cafes/moda")).json.askida.myEligibility.status, "not_member");
 assert.ok(cafe.askida.wall.every((e) => e.type !== "claim"), "claims are never listed");
-const forbidden = await call("GET", "/staff/moda");
-assert.equal(forbidden.status, 403);
-step(`Deniz signs in; the askı holds ${askiBefore} peni and she may take from it; the staff view needs the key`);
+assert.equal((await call("GET", "/staff/moda")).status, 401);
+assert.equal((await call("GET", "/staff/moda", { token: deniz })).status, 401, "a customer session is not a staff session");
+step(`Deniz signs in; the askı holds ${askiBefore} peni and she may take from it; the café view needs a staff sign-in`);
 
 // 2. Ayşe treats Mehmet, then leaves coffee on the askı.
 const lookup = await call("POST", "/cafes/moda/members/lookup", { token: ayse, body: { phone: "+905320000002" } });
@@ -91,7 +99,34 @@ const donation = (await call("POST", "/askida/donate", { token: ayse, body: { ca
 assert.equal(donation.matchedPeni, 30, "Moda matches 50 %");
 step("Ayşe leaves 60 peni on the askı; the café adds 30");
 
-// 3. Profile, calendar.
+// 3. Staff: roles decide who sees what; the owner runs the team and the roles.
+assert.equal((await call("POST", "/staff-session", { body: { email: "leyla@moda.test", password: "wrong-password" } })).json.error.code, "SIGN_IN_FAILED");
+const ece = await staffSignIn("ece@moda.test");
+const till = await call("POST", "/staff/moda/askida/till", { headers: ece, body: { peni: 20, idempotencyKey: key() } });
+assert.equal(till.status, 200, "a barista records askı cash");
+const eceDash = await call("GET", "/staff/moda", { headers: ece });
+assert.equal(eceDash.status, 403, "a barista doesn't see the peni report");
+assert.equal(eceDash.json.error.code, "FORBIDDEN");
+assert.equal((await call("GET", "/staff/kuzguncuk", { headers: ece })).json.error.code, "NOT_STAFF");
+const staffMe = (await call("GET", "/staff-session", { headers: STAFF })).json;
+assert.deepEqual(staffMe.cafes.map((c) => `${c.slug}:${c.role}`), ["moda:owner", "kuzguncuk:manager"]);
+const email = `ali.${key().slice(0, 8)}@moda.test`;
+const team = (await call("POST", "/staff/moda/team", { headers: STAFF, body: { name: "Ali Vural", email, role: "barista", password: "ali-first-day" } })).json;
+const ali = team.members.find((m) => m.email === email);
+assert.equal(ali.role, "barista");
+const aliHeaders = await staffSignIn(email, "ali-first-day");
+assert.equal((await call("GET", "/staff/moda/team", { headers: aliHeaders })).status, 403, "baristas don't see the team");
+const roles = (await call("POST", "/staff/moda/roles", { headers: STAFF, body: { roles: { barista: { "team.view": true } } } })).json;
+assert.equal(roles.sections.flatMap((s) => s.permissions).find((p) => p.key === "team.view").roles.barista, true);
+assert.equal((await call("GET", "/staff/moda/team", { headers: aliHeaders })).status, 200, "the owner let baristas see the team");
+await call("POST", "/staff/moda/roles", { headers: STAFF, body: { roles: {} } });
+assert.equal((await call("POST", `/staff/moda/team/${ali.id}`, { headers: STAFF, body: { removed: true } })).status, 200);
+assert.equal((await call("GET", "/staff/moda", { headers: aliHeaders })).json.error.code, "NOT_STAFF");
+await call("POST", "/staff-session/sign-out", { headers: ece });
+assert.equal((await call("GET", "/staff-session", { headers: ece })).status, 401);
+step("Staff sign in by email; Ece records askı cash but can't see the report; Leyla adds Ali, lets baristas see the team, then removes him");
+
+// 4. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
 assert.deepEqual(me.staffCafes, []);
@@ -104,7 +139,7 @@ assert.match(ics.headers.get("content-type") ?? "", /^text\/calendar/);
 assert.match(await ics.text(), /BEGIN:VEVENT\r\n[\s\S]*SUMMARY:Mahalleye bir takas kütüphanesi kursak\?/);
 step("Profil loads and saves; the Peni masası downloads as text/calendar");
 
-// 4. The café report adds up: every change in what is owed is a change in wallets or the askı.
+// 5. The café report adds up: every change in what is owed is a change in wallets or the askı.
 const dash = (await call("GET", "/staff/moda", { headers: STAFF })).json;
 const wallets = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
 const delta = (xs, ys) => ys.reduce((a, b) => a + b, 0) - xs.reduce((a, b) => a + b, 0);
