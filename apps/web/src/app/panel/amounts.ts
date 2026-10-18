@@ -103,3 +103,10 @@ export function addDaysTo(day: string, days: number): string {
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }
+
+/** "1–18 Eki", "18 Eki", "1 Eyl – 15 Eki". */
+export function rangeLabel(r: { from: string; through: string }, lang: Lang): string {
+  if (r.from === r.through) return formatDay(r.from, lang, { year: r.from.slice(0, 4) !== new Date().toISOString().slice(0, 4) });
+  if (r.from.slice(0, 7) === r.through.slice(0, 7)) return `${Number(r.from.slice(8))}–${formatDay(r.through, lang)}`;
+  return `${formatDay(r.from, lang)} – ${formatDay(r.through, lang)}`;
+}

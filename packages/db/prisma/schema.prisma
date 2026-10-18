@@ -170,6 +170,8 @@ model Cafe {
   drafts         AiDraft[]
   jobs           Job[]
   aiEvents       AiEvent[]
+  aiChats        AiChat[]
+  savedReports   SavedReport[]
   inbox          CafeInbox?
   inboundEmails  InboundEmail[]
   memberships    Membership[]
@@ -1564,4 +1566,34 @@ model AiEvent {
 
   @@index([cafeId, at])
   @@index([cafeId, kind, at])
+}
+
+/// One person's conversation with the assistant at one café (piece 29). Messages are kept
+/// as they were said, with any report's numbers as they were then.
+model AiChat {
+  id        String   @id
+  cafeId    String
+  memberId  String
+  messages  Json
+  createdAt DateTime
+  updatedAt DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, memberId, createdAt])
+}
+
+/// A report asked for in words and kept on Raporlar (piece 29): what to add up, not its numbers.
+model SavedReport {
+  id        String   @id
+  cafeId    String
+  memberId  String
+  spec      Json
+  key       String
+  createdAt DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, key])
+  @@index([cafeId, createdAt])
 }

@@ -48,6 +48,8 @@ import type {
   DraftsDTO,
   UploadDTO,
   HeardDTO,
+  ChatDTO,
+  SavedReportsDTO,
   UploadsDTO,
   InboxDTO,
   TodayDTO,
@@ -124,6 +126,8 @@ import type {
   CheckDraftInput,
   CheckSampleInput,
   QuickEntryInput,
+  ChatAskInput,
+  SaveReportInput,
   CopyWeekInput,
   PayoutInput,
   PublishWeekInput,
@@ -442,6 +446,22 @@ export function createPeniClient(options: PeniClientOptions) {
             undefined,
             true,
           ),
+        /** Reports kept on Raporlar (piece 29), run for today. */
+        saved: (cafeSlug: string) => call<SavedReportsDTO>("GET", `/staff/${slug(cafeSlug)}/reports/saved`, undefined, true),
+        /** Keeps a report drawn in the chat; the same key twice keeps it once. */
+        save: (cafeSlug: string, input: SaveReportInput) => call<SavedReportsDTO>("POST", `/staff/${slug(cafeSlug)}/reports/saved`, input, true),
+        remove: (cafeSlug: string, reportId: string) => call<SavedReportsDTO>("POST", `/staff/${slug(cafeSlug)}/reports/saved/${slug(reportId)}/remove`, {}, true),
+      },
+      /**
+       * The assistant's chat (piece 29): questions about the café's numbers, read only.
+       * Needs "assistant.use"; what it can look at follows the asker's own permissions.
+       */
+      chat: {
+        get: (cafeSlug: string) => call<ChatDTO>("GET", `/staff/${slug(cafeSlug)}/chat`, undefined, true),
+        /** Answers before it returns. The same key twice asks once. */
+        ask: (cafeSlug: string, input: ChatAskInput) => call<ChatDTO>("POST", `/staff/${slug(cafeSlug)}/chat`, input, true),
+        /** "Yeni sohbet": the next question starts a new conversation. */
+        fresh: (cafeSlug: string) => call<ChatDTO>("POST", `/staff/${slug(cafeSlug)}/chat/new`, {}, true),
       },
       /**
        * Taslaklar (piece 24): what the assistant prepared, to confirm or dismiss. Needs

@@ -4,6 +4,7 @@ import { type StaffCafeAccessDTO, type StaffMeDTO } from "@peni/api";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../kasa/api";
 import { Button, Notice } from "../kasa/ui";
+import { AskButton, AssistantProvider } from "./assistant";
 import { errorText, text, type Lang, type T, type TextKey } from "./text";
 
 export const field = "w-full rounded-2xl border border-line bg-paper px-4 py-3 text-base text-ink outline-none focus:border-ink";
@@ -122,44 +123,49 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
   useEffect(() => {
     document.querySelector<HTMLElement>('nav a[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
   }, [nav.length]);
+  // The assistant opens from every page, for those who may use it here (piece 29).
+  const assistantCafe = cafe && has(cafe, "assistant.use") ? cafe : null;
   return (
-    <main className={`mx-auto flex min-h-dvh w-full flex-col gap-8 px-4 pt-5 pb-16 sm:px-6 ${wide ? "max-w-4xl" : "max-w-2xl"}`}>
-      <header className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <span className="flex items-baseline gap-3">
-            <a href="/" className="font-serif text-2xl">
-              peni
-            </a>
-            <span className="text-sm text-muted">{t("panel")}</span>
-          </span>
-          <span className="flex items-center gap-1">
-            {me && me !== "signed-out" && (
-              <Button kind="bare" size="sm" onClick={() => void signOut()}>
-                {t("signOut")}
-              </Button>
-            )}
-            <Button kind="bare" size="sm" onClick={toggleLang} aria-label={lang === "tr" ? "English" : "Türkçe"}>
-              {lang === "tr" ? "EN" : "TR"}
-            </Button>
-          </span>
-        </div>
-        {nav.length > 1 && (
-          <nav aria-label={t("panel")} className="-mx-1 flex gap-1 overflow-x-auto">
-            {nav.map((p) => (
-              <a
-                key={p.key}
-                href={`${p.href}?kafe=${encodeURIComponent(cafe!.slug)}`}
-                aria-current={p.key === page ? "page" : undefined}
-                className={`flex min-h-11 shrink-0 items-center rounded-full px-4 text-sm font-semibold whitespace-nowrap ${p.key === page ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}
-              >
-                {t(p.label)}
+    <AssistantProvider cafe={assistantCafe} t={t} lang={lang} signedOut={() => setMe("signed-out")}>
+      <main className={`mx-auto flex min-h-dvh w-full flex-col gap-8 px-4 pt-5 pb-16 sm:px-6 ${wide ? "max-w-4xl" : "max-w-2xl"}`}>
+        <header className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-baseline gap-3">
+              <a href="/" className="font-serif text-2xl">
+                peni
               </a>
-            ))}
-          </nav>
-        )}
-      </header>
-      {body}
-    </main>
+              <span className="text-sm text-muted">{t("panel")}</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <AskButton t={t} />
+              {me && me !== "signed-out" && (
+                <Button kind="bare" size="sm" onClick={() => void signOut()}>
+                  {t("signOut")}
+                </Button>
+              )}
+              <Button kind="bare" size="sm" onClick={toggleLang} aria-label={lang === "tr" ? "English" : "Türkçe"}>
+                {lang === "tr" ? "EN" : "TR"}
+              </Button>
+            </span>
+          </div>
+          {nav.length > 1 && (
+            <nav aria-label={t("panel")} className="-mx-1 flex gap-1 overflow-x-auto">
+              {nav.map((p) => (
+                <a
+                  key={p.key}
+                  href={`${p.href}?kafe=${encodeURIComponent(cafe!.slug)}`}
+                  aria-current={p.key === page ? "page" : undefined}
+                  className={`flex min-h-11 shrink-0 items-center rounded-full px-4 text-sm font-semibold whitespace-nowrap ${p.key === page ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}
+                >
+                  {t(p.label)}
+                </a>
+              ))}
+            </nav>
+          )}
+        </header>
+        {body}
+      </main>
+    </AssistantProvider>
   );
 }
 

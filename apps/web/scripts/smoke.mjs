@@ -778,6 +778,36 @@ const eceMine = (await call("GET", "/staff/moda/documents/mine", { headers: eceP
 assert.ok(eceMine.canSpeak && eceMine.uploads.some((u) => u.source === "note" && u.documentName === heard.text));
 step("Quick entry: a typed line becomes a ₺450 repair draft that says it was paid in cash, sent once and confirmed paid; Ece says one at the till and sees it in what she sent");
 
+// 5w. The assistant (piece 29): Murat asks for this month's coffee sales by hour; the demo
+//     draws it as a report against last month and links Raporlar. A retry asks once. He keeps
+//     it on Raporlar, where Leyla sees it with today's numbers, explains it and removes it.
+//     "Açıkla" on Raporlar' hours answers from the numbers on screen. Ece can't ask.
+const chatAsk = { key: `smoke-chat-${Date.now()}`, text: "Bu ay saat saat kahve satışı" };
+const chatted = (await call("POST", "/staff/moda/chat", { headers: MURAT, body: chatAsk })).json;
+const chatAnswer = chatted.messages.at(-1);
+assert.deepEqual([chatted.ai, chatAnswer.role, chatAnswer.failed, chatAnswer.report.spec.by, chatAnswer.report.spec.period], ["demo", "assistant", false, "hour", "thisMonth"]);
+assert.ok(chatAnswer.report.result.matched.some((n) => /Kahve/.test(n)) && chatAnswer.report.result.rows.length > 0);
+assert.deepEqual(chatAnswer.sources.map((x) => x.kind), ["page"]);
+assert.equal((await call("POST", "/staff/moda/chat", { headers: MURAT, body: chatAsk })).json.messages.length, chatted.messages.length);
+const keptReports = (await call("POST", "/staff/moda/reports/saved", { headers: MURAT, body: { key: chatAnswer.id, spec: chatAnswer.report.spec } })).json;
+const kept = keptReports.reports.find((r) => r.spec.title === chatAnswer.report.spec.title);
+assert.ok(kept && kept.result.total === chatAnswer.report.result.total);
+const leylaSees = (await call("GET", "/staff/moda/reports/saved", { headers: STAFF })).json;
+assert.ok(leylaSees.canAsk && leylaSees.reports.some((r) => r.id === kept.id && r.by));
+const explainedSaved = (await call("POST", "/staff/moda/chat", { headers: STAFF, body: { key: `smoke-xs-${Date.now()}`, text: "Açıkla", subject: { kind: "saved", reportId: kept.id } } })).json;
+assert.equal(explainedSaved.messages.at(-1).failed, false);
+const chatToday = chatAnswer.report.result.through;
+const explained = (await call("POST", "/staff/moda/chat", {
+  headers: STAFF,
+  body: { key: `smoke-xp-${Date.now()}`, text: "Açıkla: saatler", subject: { kind: "report", section: "hours", from: `${chatToday.slice(0, 7)}-01`, through: chatToday } },
+})).json;
+assert.match(explained.messages.at(-1).text, /En yüksek|satış/);
+assert.equal((await call("POST", `/staff/moda/reports/saved/${kept.id}/remove`, { headers: STAFF, body: {} })).json.reports.some((r) => r.id === kept.id), false);
+assert.equal((await call("POST", "/staff/moda/chat/new", { headers: MURAT, body: {} })).json.messages.length, 0);
+const eceAsks = await call("POST", "/staff/moda/chat", { headers: ecePassword, body: { key: `smoke-ece-${Date.now()}`, text: "Bugün ne sattık?" } });
+assert.equal(eceAsks.json.error.code, "FORBIDDEN");
+step("Assistant: Murat's question draws this month's coffee sales by hour against last month, asked once; kept on Raporlar for Leyla with today's numbers, explained and removed; Açıkla reads the hours; Ece can't ask");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

@@ -1880,3 +1880,100 @@ export interface InboxDTO {
   canSendSample: boolean;
   emails: InboundEmailDTO[];
 }
+
+// ─────────────────────────────────────────────── the chat and reports on request (plan piece 29)
+
+export type AskedMeasureDTO = "sales" | "orders" | "quantity" | "expenses" | "profit";
+export type AskedGroupDTO = "none" | "hour" | "weekday" | "day" | "week" | "month" | "product" | "category" | "payment" | "expenseKind" | "supplier";
+export type AskedPeriodDTO = "today" | "yesterday" | "thisWeek" | "lastWeek" | "thisMonth" | "lastMonth" | "last7" | "last30" | "last90" | "thisYear" | "custom";
+
+/** A report asked for in words: what to add up, split how, over which days. */
+export interface AskedReportDTO {
+  title: string;
+  measure: AskedMeasureDTO;
+  by: AskedGroupDTO;
+  period: AskedPeriodDTO;
+  /** Only for "custom". */
+  from: string | null;
+  through: string | null;
+  compare: "none" | "previous" | "lastYear";
+  /** Only these products or menu categories, by name; empty for all. */
+  products: string[];
+  categories: string[];
+  chart: "bar" | "line" | "table";
+}
+
+/** A report's numbers. Money is in kuruş; orders and items are counts. */
+export interface AskedResultDTO {
+  from: string;
+  through: string;
+  /** What it's compared with; null without a comparison. */
+  compareFrom: string | null;
+  compareThrough: string | null;
+  unit: "kurus" | "count";
+  /**
+   * In order for hours ("08"), weekdays ("1" is Monday), days, weeks (their Monday) and
+   * months ("2026-10"); largest first for the rest. `label` names a product, category or
+   * supplier; payment ways ("cash") and expense kinds ("rent") are keys to translate.
+   */
+  rows: { key: string; label: string | null; value: number; previous: number | null }[];
+  total: number;
+  previousTotal: number | null;
+  /** Past the largest rows shown, the rest added together. */
+  rest: { rows: number; value: number; previous: number | null } | null;
+  /** Products and categories the names asked for matched. */
+  matched: string[];
+  /**
+   * "orders": sales split by product or category come from the orders, after discounts and
+   * however they were paid, so they can differ from the cash-and-card total on Raporlar.
+   * "noCost": products with no recipe cost aren't in the profit. "noMatch": no product or
+   * category has that name.
+   */
+  notes: ("orders" | "noCost" | "noMatch")[];
+  noCost: number;
+}
+
+/** What "Açıkla" was about: part of Raporlar for some days, or a saved report. */
+export type ChatSubjectDTO =
+  | { kind: "report"; section: "headline" | "sales" | "hours" | "weekdays" | "months" | "spending" | "paidWith" | "products"; from: string; through: string }
+  | { kind: "saved"; reportId: string };
+
+export interface ChatMessageDTO {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
+  at: string;
+  subject: ChatSubjectDTO | null;
+  /** Records the answer leans on, to open and check; a page's `label` is its key ("borclar", "raporlar"). */
+  sources: { kind: "bill" | "page"; label: string; href: string }[];
+  /** A report drawn with the answer, with its numbers as they were then. */
+  report: { spec: AskedReportDTO; result: AskedResultDTO } | null;
+  /** The assistant couldn't answer; ask again. */
+  failed: boolean;
+}
+
+/** `GET /staff/:slug/chat`: the person's conversation with the assistant ("assistant.use"). */
+export interface ChatDTO {
+  chatId: string | null;
+  messages: ChatMessageDTO[];
+  ai: "on" | "demo" | "off";
+  /** Questions left today. */
+  left: number;
+  /** Can keep a report on Raporlar ("reports.view"). */
+  canSaveReports: boolean;
+}
+
+/** `GET /staff/:slug/reports/saved`: reports kept on Raporlar, run for today ("reports.view"). */
+export interface SavedReportsDTO {
+  reports: {
+    id: string;
+    spec: AskedReportDTO;
+    by: string | null;
+    createdAt: string;
+    /** Null when it can't run any more (a product it named is gone, say). */
+    result: AskedResultDTO | null;
+    problem: string | null;
+  }[];
+  /** "assistant.use": asking for a new one happens in the chat. */
+  canAsk: boolean;
+}

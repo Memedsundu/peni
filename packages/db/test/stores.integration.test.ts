@@ -792,4 +792,26 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.assistant.listInboundEmails(cafeId, { limit: 10, since: new Date(at.getTime() + 500) })).toHaveLength(1);
     expect(await stores.assistant.findInboundEmail(cafeId, email.providerId)).toEqual(done);
   });
+
+  it("keeps each person's chats with the assistant and the café's saved reports", async () => {
+    const report = { title: "Saat saat satış", measure: "sales" as const, by: "hour" as const, period: "thisMonth" as const, from: null, through: null, compare: "previous" as const, products: ["latte"], categories: [], chart: "bar" as const };
+    const asked = { id: `msg_q_${run}`, role: "user" as const, text: "Bu ay saat saat?", at, key: `k_${run}`, subject: { kind: "report" as const, section: "hours" as const, from: "2026-10-01", through: "2026-10-18" }, sources: [], report: null, failed: false };
+    const answer = { ...asked, id: `msg_a_${run}`, role: "assistant" as const, text: "En yoğun saat 09:00.", key: null, subject: null, sources: [{ kind: "page" as const, label: "raporlar", href: "/panel/raporlar" }], report: { spec: report, result: { total: 1 } } };
+    const chat = { id: `cht_${run}`, cafeId, memberId: "stf_a", messages: [asked, answer], createdAt: at, updatedAt: at };
+    await stores.chat.saveChat(chat);
+    await stores.chat.saveChat({ ...chat, id: `cht2_${run}`, messages: [], createdAt: new Date(at.getTime() + 1000) });
+    expect(await stores.chat.getChat(cafeId, chat.id)).toEqual(chat);
+    expect(await stores.chat.getChat("other", chat.id)).toBeNull();
+    expect((await stores.chat.latestChat(cafeId, "stf_a"))?.id).toBe(`cht2_${run}`);
+    expect(await stores.chat.questionsSince(cafeId, "stf_a", at)).toBe(1);
+    expect(await stores.chat.questionsSince(cafeId, "stf_a", new Date(at.getTime() + 1))).toBe(0);
+
+    const saved = { id: `rep_${run}`, cafeId, memberId: "stf_a", spec: report, createdAt: at, key: `rk_${run}` };
+    expect(await stores.chat.addSavedReport(saved)).toEqual(saved);
+    // The same key again keeps the first.
+    expect((await stores.chat.addSavedReport({ ...saved, id: `rep2_${run}` })).id).toBe(saved.id);
+    expect(await stores.chat.listSavedReports(cafeId)).toEqual([saved]);
+    await stores.chat.deleteSavedReport(cafeId, saved.id);
+    expect(await stores.chat.listSavedReports(cafeId)).toEqual([]);
+  });
 });

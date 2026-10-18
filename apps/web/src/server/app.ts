@@ -36,7 +36,9 @@ import {
   InMemoryShiftStore,
   InMemoryTaskStore,
   InMemoryAssistantStore,
+  InMemoryChatStore,
   type AssistantStore,
+  type ChatStore,
   type BillStore,
   type BooksStore,
   type Shift,
@@ -98,7 +100,9 @@ import { PayService } from "./pay";
 import { TaskService } from "./tasks";
 import { AlertService } from "./alerts";
 import { SalesReportService } from "./sales-report";
+import { AskedReportService } from "./asked-reports";
 import { AssistantService, demoModel, demoTranscriber, type AiMode } from "./assistant";
+import { ChatService } from "./chat";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
@@ -152,6 +156,7 @@ export interface PeniStores {
   shifts: ShiftStore;
   tasks: TaskStore;
   assistant: AssistantStore;
+  chat: ChatStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -176,6 +181,7 @@ export function inMemoryStores(): PeniStores {
     shifts: new InMemoryShiftStore(),
     tasks: new InMemoryTaskStore(),
     assistant: new InMemoryAssistantStore(),
+    chat: new InMemoryChatStore(),
   };
 }
 
@@ -255,6 +261,10 @@ export class PeniApp {
   readonly assistant: AssistantService;
   /** Each café's address for bills (piece 26). */
   readonly inbox: InboxService;
+  /** Reports asked for in words (piece 29). */
+  readonly askedReports: AskedReportService;
+  /** The assistant's chat, "Açıkla" and saved reports (piece 29). */
+  readonly chat: ChatService;
   /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
   readonly orderStore: OrderStore;
   readonly paymentStore: PaymentStore;
@@ -339,6 +349,21 @@ export class PeniApp {
         : { model: null, mode: "off" as const });
     const checks = new ChecksService(stores.assistant, this.money, stores.payments, stores.bills, stores.debts, this.directory, () => this.now());
     this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, checks, ai, () => this.now());
+    this.askedReports = new AskedReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
+    this.chat = new ChatService(
+      stores.chat,
+      stores.assistant,
+      this.askedReports,
+      this.salesReports,
+      stores.bills,
+      this.debts,
+      this.stock,
+      this.money,
+      this.directory,
+      (ids) => this.staffNames(ids),
+      ai,
+      () => this.now(),
+    );
     this.inbox = new InboxService(
       stores.assistant,
       this.assistant,
@@ -995,6 +1020,17 @@ export class PeniApp {
     if (!postId) throw new AppError("COMMENT_NOT_FOUND", "No such comment", 404);
     await this.feed.report(cafe.id, customer.id, { ...input, postId });
     return { ok: true };
+  }
+
+  /** Staff members' names, for who saved a report (piece 29). */
+  private async staffNames(memberIds: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    for (const id of new Set(memberIds)) {
+      const member = await this.staffStore.getMember(id);
+      const account = member && (await this.staffStore.getAccount(member.accountId));
+      if (account) out.set(id, account.name);
+    }
+    return out;
   }
 
   private async publicNames(customerIds: string[]): Promise<Map<string, string>> {

@@ -61,6 +61,7 @@ import {
 import { formatTL, trLower } from "@peni/brand/format";
 import { createHash, randomUUID } from "node:crypto";
 import type { BillInput, BillService } from "./bills";
+import { demoChat } from "./chat-demo";
 import { outcomeDto, type ChecksService } from "./checks";
 import { AppError } from "./errors";
 import type { JobHandler, JobOutcome, JobRunner } from "./jobs";
@@ -1044,6 +1045,7 @@ function friendlyError(error: string | null, source: "document" | "note" = "docu
 export function demoModel(today: () => string): AiModel {
   return new ScriptedModel((request) => {
     if (request.purpose === NOTE) return demoQuick(request.parts.map((p) => (p.type === "text" ? p.text : "")));
+    if (request.purpose === "chat.answer") return demoChat(request.parts.map((p) => (p.type === "text" ? p.text : "")));
     if (request.purpose !== READ) return {};
     const list = request.parts.find((p) => p.type === "text")?.text ?? "";
     // The file's name says what a sample is (piece 27): "z-raporu-….pdf", "banka-ekstresi-….pdf".
