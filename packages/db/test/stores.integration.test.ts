@@ -263,7 +263,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     const orderId = `ord_c_${run}`; // made by the claims test above
     const payment = {
       id: `pay_${run}`, cafeId, orderId, kind: "sale" as const, method: "card" as const, status: "pending" as const, amountKurus: 3_000,
-      tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, key: `pk_${run}`, reason: null,
+      tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, cashSessionId: null, key: `pk_${run}`, reason: null,
       startedAt: at, startedByMemberId: "sm_x", settledAt: null, settledByMemberId: null, reference: null, receiptNo: null, failure: null,
     };
     expect(await stores.payments.savePayment(payment)).toBe(true);
@@ -276,5 +276,38 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.payments.savePayment(later);
     expect(await stores.payments.listPayments(cafeId, [orderId, "ord_none"])).toEqual([approved, later]);
     expect(await stores.payments.getPayment("cafe_other", payment.id)).toBeNull();
+  });
+
+  it("keeps one open drawer per café, its counts and moves, and the payments taken in it", async () => {
+    const count = (countKurus: number, over = {}) => ({
+      expectedKurus: null, countKurus, differenceKurus: 0, counts: null, note: null, at, byMemberId: "sm_x", ...over,
+    });
+    const first = { id: `cash_1_${run}`, cafeId, opening: count(50_000, { counts: { "20000": 2, "10000": 1 } }), closing: null, openKey: `ok1_${run}`, closeKey: null };
+    expect(await stores.cash.saveSession(first)).toBe(true);
+    // A second till opening at the same moment is refused by the database.
+    expect(await stores.cash.saveSession({ ...first, id: `cash_2_${run}`, openKey: `ok2_${run}` })).toBe(false);
+    expect(await stores.cash.openSession(cafeId)).toEqual(first);
+
+    const move = { id: `cmv_${run}`, cafeId, sessionId: first.id, kind: "out" as const, amountKurus: 4_500, reason: "Süt", at, byMemberId: "sm_x", key: `mk_${run}` };
+    expect(await stores.cash.saveMove(move)).toBe(true);
+    expect(await stores.cash.saveMove({ ...move, id: `cmv_dup_${run}` })).toBe(false);
+    expect(await stores.cash.listMoves(cafeId, first.id)).toEqual([move]);
+    const payment = {
+      id: `pay_cash_${run}`, cafeId, orderId: `ord_c_${run}`, kind: "sale" as const, method: "cash" as const, status: "approved" as const, amountKurus: 3_000,
+      tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, cashSessionId: first.id, key: `pkcash_${run}`, reason: null,
+      startedAt: at, startedByMemberId: "sm_x", settledAt: at, settledByMemberId: "sm_x", reference: null, receiptNo: null, failure: null,
+    };
+    await stores.payments.savePayment(payment);
+    expect(await stores.payments.listCashSessionPayments(cafeId, first.id)).toEqual([payment]);
+
+    const later = new Date(at.getTime() + 8 * 3_600_000);
+    const closed = { ...first, closing: count(47_000, { expectedKurus: 48_500, differenceKurus: -1_500, note: "Bozuk para eksik", at: later }), closeKey: `ck_${run}` };
+    expect(await stores.cash.saveSession(closed)).toBe(true);
+    expect(await stores.cash.openSession(cafeId)).toBeNull();
+    expect(await stores.cash.lastClosed(cafeId)).toEqual(closed);
+    expect((await stores.cash.findByKey(cafeId, `ck_${run}`))!.id).toBe(first.id);
+    // Once closed, the next one can open.
+    expect(await stores.cash.saveSession({ ...first, id: `cash_3_${run}`, openKey: `ok3_${run}` })).toBe(true);
+    expect((await stores.cash.listSessions(cafeId, 5)).map((s) => s.id)).toContain(first.id);
   });
 });

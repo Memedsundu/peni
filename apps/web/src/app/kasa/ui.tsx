@@ -28,7 +28,7 @@ export function Button({
 }
 
 /** A panel over the screen, for payment and corrections. Escape or the backdrop closes it. */
-export function Sheet({ title, onClose, children, labelClose }: { title: string; onClose: () => void; children: ReactNode; labelClose: string }) {
+export function Sheet({ title, onClose, children, labelClose, wide = false }: { title: string; onClose: () => void; children: ReactNode; labelClose: string; wide?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -43,7 +43,7 @@ export function Sheet({ title, onClose, children, labelClose }: { title: string;
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-full w-full max-w-md flex-col gap-5 overflow-auto rounded-3xl bg-paper p-6 shadow-xl"
+        className={`flex max-h-full w-full flex-col gap-5 overflow-auto rounded-3xl bg-paper p-6 shadow-xl ${wide ? "max-w-2xl" : "max-w-md"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-4">

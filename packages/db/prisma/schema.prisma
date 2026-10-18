@@ -137,6 +137,8 @@ model Cafe {
   orderCounters  OrderCounter[]
   claims         PeniClaim[]
   payments       Payment[]
+  cashSessions   CashSession[]
+  cashMoves      CashMove[]
   memberships    Membership[]
   posts          CafePost[]
 }
@@ -430,6 +432,8 @@ model Payment {
   /// "manual" until the till bridge drives the Ingenico.
   terminal          String
   deviceId          String?
+  /// The drawer session it was taken in, when one was open.
+  cashSessionId     String?
   /// The client's key; a retry finds the same payment.
   key               String
   reason            String?
@@ -441,11 +445,73 @@ model Payment {
   receiptNo         String?
   failure           String?
 
-  cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  cafe        Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  cashSession CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
 
   @@unique([cafeId, key])
   @@index([cafeId, orderId])
+  @@index([cashSessionId])
+}
+
+// ─────────────────────────────────────────────────────────── cash sessions (plan piece 9)
+
+/// The drawer from its opening count to its closing count. Amounts in kuruş.
+model CashSession {
+  id                     String    @id
+  cafeId                 String
+  /// Set to the café's id while open and cleared at closing: one open drawer per café.
+  openCafeId             String?   @unique
+  openedAt               DateTime
+  openedByMemberId       String
+  openingExpectedKurus   Int?
+  openingCountKurus      Int
+  openingDifferenceKurus Int
+  /// Pieces per note or coin, keyed by value in kuruş.
+  openingCounts          Json?
+  openingNote            String?
+  openKey                String
+  closedAt               DateTime?
+  closedByMemberId       String?
+  closingExpectedKurus   Int?
+  closingCountKurus      Int?
+  closingDifferenceKurus Int?
+  closingCounts          Json?
+  closingNote            String?
+  closeKey               String?
+
+  cafe     Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  moves    CashMove[]
+  payments Payment[]
+
+  @@unique([cafeId, openKey])
+  @@unique([cafeId, closeKey])
+  @@index([cafeId, openedAt])
+  @@index([cafeId, closedAt])
+}
+
+enum CashMoveKind {
+  in
+  out
+}
+
+/// Cash put into or taken out of the drawer by hand, with a reason.
+model CashMove {
+  id          String       @id
+  cafeId      String
+  sessionId   String
+  kind        CashMoveKind
+  amountKurus Int
+  reason      String
+  at          DateTime
+  byMemberId  String
+  key         String
+
+  cafe    Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  session CashSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, key])
+  @@index([sessionId, at])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni

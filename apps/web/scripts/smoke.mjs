@@ -209,6 +209,9 @@ const order = (await call("POST", "/staff/moda/orders", { headers: ecePos, body:
 assert.equal(order.totalKurus, 24_100, "2 latte with 10% off and a simit");
 assert.equal((await call("POST", "/staff/moda/orders", { headers: ecePos, body: sale })).json.id, order.id, "a retried tap makes no second order");
 const payBody = { method: "cash", payKey: key(), tenderedKurus: 30_000 };
+assert.equal((await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: { ...payBody, payKey: key() } })).json.error.code, "CASH_CLOSED", "no cash with the drawer closed");
+const drawer = (await call("POST", "/staff/moda/cash/open", { headers: ecePos, body: { key: key(), counts: { "20000": 2, "1000": 10 } } })).json;
+assert.equal(drawer.open.opening.countKurus, 50_000, "Ece counts ₺500 into the drawer by notes");
 // 5e. Payments (piece 8): a card waits for Ece's "approved" tap, as Peni can't drive the
 //     terminal yet; she backs out when the customer pays cash instead, which goes through at once.
 const card = (await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: { method: "card", payKey: key() } })).json;
@@ -234,8 +237,17 @@ assert.deepEqual(refundedOrder.payments.at(-1), { ...refundedOrder.payments.at(-
 const day = (await call("GET", "/staff/moda/orders", { headers: ecePos })).json;
 assert.deepEqual(day.orders.slice(0, 2).map((o) => o.status), ["voided", "refunded"]);
 assert.equal(day.summary.refundedKurus >= 24_100, true);
+
+// 5f. Kasa (piece 9): Ece takes ₺45 out for milk and closes the drawer ₺5 short, with a reason.
+await call("POST", "/staff/moda/cash/moves", { headers: ecePos, body: { key: key(), kind: "out", amountKurus: 4_500, reason: "Süt" } });
+const beforeClose = (await call("GET", "/staff/moda/cash", { headers: ecePos })).json.open;
+assert.equal(beforeClose.totals.expectedKurus, 50_000 + 24_100 - 24_100 - 4_500, "opening + cash sale − cash refund − milk");
+const noReason = await call("POST", "/staff/moda/cash/close", { headers: ecePos, body: { key: key(), sessionId: beforeClose.id, countKurus: 45_000 } });
+assert.equal(noReason.json.error.code, "DIFFERENCE_REASON_REQUIRED");
+const closedDrawer = (await call("POST", "/staff/moda/cash/close", { headers: ecePos, body: { key: key(), sessionId: beforeClose.id, countKurus: 45_000, note: "Bozuk para eksik" } })).json;
+assert.deepEqual([closedDrawer.open, closedDrawer.last.closing.differenceKurus], [null, -500]);
 await call("POST", `/staff/moda/devices/${till2.device.id}/revoke`, { headers: STAFF });
-step("Ece sells 2 latte and a simit at the till (one order despite a retry), starts a card payment and backs out of it, takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen; Leyla voids an unpaid order and refunds the paid one, recorded as a refund payment");
+step("No cash until the drawer is opened; Ece opens it with ₺500 counted by notes, sells 2 latte and a simit (one order despite a retry), starts a card payment and backs out of it, takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen; Leyla voids an unpaid order and refunds the paid one, recorded as a refund payment; Ece takes ₺45 out for milk and closes the drawer ₺5 short with a reason");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;

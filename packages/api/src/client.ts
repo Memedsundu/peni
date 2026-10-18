@@ -11,6 +11,7 @@ import type {
   OrderDTO,
   OrderListDTO,
   PaymentAnswerDTO,
+  CashStateDTO,
   TillMenuDTO,
   RolesDTO,
   SessionDTO,
@@ -38,6 +39,9 @@ import type {
   OrderListQuery,
   PayOrderInput,
   CancelPaymentInput,
+  OpenCashInput,
+  CloseCashInput,
+  CashMoveInput,
   UpdateOrderInput,
   MenuCategoryInput,
   MenuOrderInput,
@@ -254,6 +258,14 @@ export function createPeniClient(options: PeniClientOptions) {
           call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/refund`, { reason }, true),
         remove: (cafeSlug: string, orderId: string, reason: string) =>
           call<{ ok: true }>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/delete`, { reason }, true),
+      },
+      /** Kasa: the drawer's sessions. Every call answers with the drawer's state. Needs "cash.drawer". */
+      cash: {
+        get: (cafeSlug: string) => call<CashStateDTO>("GET", `/staff/${slug(cafeSlug)}/cash`, undefined, true),
+        open: (cafeSlug: string, input: OpenCashInput) => call<CashStateDTO>("POST", `/staff/${slug(cafeSlug)}/cash/open`, input, true),
+        close: (cafeSlug: string, input: CloseCashInput) => call<CashStateDTO>("POST", `/staff/${slug(cafeSlug)}/cash/close`, input, true),
+        /** Cash put in or taken out by hand, with a reason. */
+        move: (cafeSlug: string, input: CashMoveInput) => call<CashStateDTO>("POST", `/staff/${slug(cafeSlug)}/cash/moves`, input, true),
       },
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>

@@ -1,8 +1,9 @@
 "use client";
 
-import { PeniApiError, type StaffMeDTO, type TillDTO } from "@peni/api";
+import { PeniApiError, type CashStateDTO, type StaffMeDTO, type TillDTO } from "@peni/api";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import { Cash } from "./cash";
 import { Sales } from "./sales";
 import { Sell } from "./sell";
 import { Setup } from "./setup";
@@ -28,7 +29,9 @@ export function Till() {
   const [lang, setLang] = useState<Lang>("tr");
   const [dark, setDark] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
-  const [view, setView] = useState<"sell" | "sales">("sell");
+  const [view, setView] = useState<"sell" | "sales" | "cash">("sell");
+  /** The drawer, for the "closed" note on the till and the Kasa view. */
+  const [cash, setCash] = useState<CashStateDTO | null>(null);
   const t = text(lang);
 
   useEffect(() => {
@@ -95,6 +98,22 @@ export function Till() {
 
   const cafeName = stage.kind === "signIn" || stage.kind === "open" ? stage.till.cafe.name : null;
   const access = stage.kind === "open" ? stage.me.cafes[0] : undefined;
+  const slug = stage.kind === "open" ? stage.till.cafe.slug : null;
+  const canDrawer = !!access?.permissions.includes("cash.drawer");
+
+  const loadCash = useCallback(async () => {
+    if (!slug || !canDrawer) return setCash(null);
+    try {
+      setCash(await api.staff.cash.get(slug));
+    } catch {
+      // The till still sells; the note about the drawer just doesn't show.
+    }
+  }, [slug, canDrawer]);
+  useEffect(() => {
+    void loadCash();
+  }, [loadCash]);
+
+  const title = view === "sales" && stage.kind === "open" ? t("sales") : view === "cash" && stage.kind === "open" ? t("drawer") : t("title");
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-paper text-ink">
@@ -103,7 +122,7 @@ export function Till() {
           <span className="font-serif text-[26px] leading-none">peni</span>
           <span className="truncate text-[15px] text-muted">
             {cafeName ? `${cafeName} · ` : ""}
-            {view === "sales" && stage.kind === "open" ? t("sales") : t("title")}
+            {title}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-2 text-sm text-muted">
@@ -115,9 +134,19 @@ export function Till() {
               <Button size="sm" onClick={() => window.open("/kasa/ekran", "peni-customer-screen", "popup=yes,width=1024,height=600")}>
                 {t("openScreen")}
               </Button>
-              {access.permissions.includes("till.history") && (
-                <Button size="sm" onClick={() => setView(view === "sell" ? "sales" : "sell")}>
-                  {view === "sell" ? t("sales") : t("backToTill")}
+              {view !== "sell" && (
+                <Button size="sm" onClick={() => setView("sell")}>
+                  {t("backToTill")}
+                </Button>
+              )}
+              {view !== "sales" && access.permissions.includes("till.history") && (
+                <Button size="sm" onClick={() => setView("sales")}>
+                  {t("sales")}
+                </Button>
+              )}
+              {view !== "cash" && canDrawer && (
+                <Button size="sm" onClick={() => setView("cash")}>
+                  {t("drawer")}
                 </Button>
               )}
               <Button size="sm" onClick={() => void lock()}>
@@ -148,8 +177,23 @@ export function Till() {
         )}
         {stage.kind === "setup" && <Setup t={t} lang={lang} onDone={() => void load()} />}
         {stage.kind === "signIn" && <SignIn t={t} lang={lang} till={stage.till} onSignedIn={(me) => setStage({ kind: "open", till: stage.till, me })} />}
-        {stage.kind === "open" && view === "sell" && <Sell t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} deviceId={stage.till.device.id} />}
+        {/* Kept mounted behind the other views, so the order on screen survives a look at Kasa or Satışlar. */}
+        {stage.kind === "open" && (
+          <div className={view === "sell" ? "contents" : "hidden"}>
+            <Sell
+              t={t}
+              slug={stage.till.cafe.slug}
+              onError={onError}
+              lang={lang}
+              deviceId={stage.till.device.id}
+              drawerClosed={cash !== null && cash.open === null}
+              onOpenDrawer={() => setView("cash")}
+              onDrawerChanged={() => void loadCash()}
+            />
+          </div>
+        )}
         {stage.kind === "open" && view === "sales" && <Sales t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
+        {stage.kind === "open" && view === "cash" && <Cash t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} state={cash} onChanged={setCash} />}
       </main>
     </div>
   );

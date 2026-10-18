@@ -24,6 +24,7 @@ import {
 } from "@peni/core";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { AppError } from "./errors";
+import type { CashService } from "./cash";
 import type { PaymentActor, PaymentService } from "./payments";
 import type { StaffContext } from "./staff";
 
@@ -45,6 +46,7 @@ export class OrderService {
     private readonly staff: StaffStore,
     private readonly directory: PeniDirectory,
     private readonly payments: PaymentService,
+    private readonly cash: CashService,
     private readonly now: () => Date,
   ) {
     // However a payment gets approved, by the barista or later by the terminal, its order moves on.
@@ -167,6 +169,7 @@ export class OrderService {
       changeKurus,
       key: input.payKey,
       reason: null,
+      cashSessionId: await this.drawer(ctx, input.method),
     });
     return this.answer(ctx, payment);
   }
@@ -225,6 +228,17 @@ export class OrderService {
     // with the refund once claiming exists (piece 10).
     const claim = await this.claims.getClaimByOrder(order.cafeId, order.id);
     if (claim && claimIsOpen(claim, this.now())) await this.claims.saveClaim({ ...claim, cancelledAt: this.now() });
+  }
+
+  /**
+   * The open drawer session a payment belongs to (piece 9). Cash goes in or out of the
+   * drawer, so it needs one open; a card is stamped too when one is, for the day's check
+   * against the terminal's own total.
+   */
+  private async drawer(ctx: StaffContext, method: PaymentMethod): Promise<string | null> {
+    const session = await this.cash.current(ctx.cafe.id);
+    if (!session && method === "cash") throw new AppError("CASH_CLOSED", "Open the drawer before taking cash", 409);
+    return session?.id ?? null;
   }
 
   private async paymentOf(ctx: StaffContext, orderId: string, paymentId: string): Promise<Payment> {
@@ -313,16 +327,19 @@ export class OrderService {
     const order = await this.find(ctx, id);
     if (order.status !== "paid") throw new AppError("ORDER_NOT_PAID", "Only a paid order can be refunded", 409);
     const why = reason(input.reason);
+    const method = order.paymentMethod ?? "cash";
+    const cashSessionId = await this.drawer(ctx, method);
     await this.payments.clearPending(actor(ctx), order.id);
     await this.payments.start(actor(ctx), {
       orderId: order.id,
       kind: "refund",
-      method: order.paymentMethod ?? "cash",
+      method,
       amountKurus: order.totalKurus,
       tenderedKurus: null,
       changeKurus: null,
       key: `refund:${randomUUID()}`,
       reason: why,
+      cashSessionId,
     });
     return this.dto(ctx, await this.find(ctx, id));
   }

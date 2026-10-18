@@ -28,6 +28,7 @@ import {
   InMemoryMenuStore,
   InMemoryClaimStore,
   InMemoryPaymentStore,
+  InMemoryCashStore,
   manualTerminals,
   InMemoryOrderStore,
   InMemoryStaffStore,
@@ -51,6 +52,7 @@ import {
   type MenuStore,
   type ClaimStore,
   type PaymentStore,
+  type CashStore,
   type PaymentTerminals,
   type OrderStore,
   type PeniDirectory,
@@ -66,6 +68,7 @@ import { buildIcs } from "./ics";
 import { MenuService } from "./menu";
 import { OrderService } from "./orders";
 import { PaymentService } from "./payments";
+import { CashService } from "./cash";
 import { StaffService, type StaffContext } from "./staff";
 
 /**
@@ -90,6 +93,7 @@ export interface PeniStores {
   orders: OrderStore;
   claims: ClaimStore;
   payments: PaymentStore;
+  cash: CashStore;
   staff: StaffStore;
 }
 
@@ -103,6 +107,7 @@ export function inMemoryStores(): PeniStores {
     orders: new InMemoryOrderStore(),
     claims: new InMemoryClaimStore(),
     payments: new InMemoryPaymentStore(),
+    cash: new InMemoryCashStore(),
     staff: new InMemoryStaffStore(),
   };
 }
@@ -141,6 +146,8 @@ export class PeniApp {
   readonly till: OrderService;
   /** Every payment and refund, through the till's terminal (plan piece 8). */
   readonly payments: PaymentService;
+  /** Kasa: the drawer's sessions, counts and cash moves (plan piece 9). */
+  readonly cash: CashService;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   /** Customer sign-in with Google, Apple or an email code. */
@@ -165,7 +172,8 @@ export class PeniApp {
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
     this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
-    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, () => this.now());
+    this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
+    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, this.cash, () => this.now());
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */

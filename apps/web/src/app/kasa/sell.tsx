@@ -36,7 +36,23 @@ const signature = (lines: { productId: string; quantity: number; discountPercent
  * right. Totals are worked out here with the same rule as the server, for speed; the server's
  * numbers are the ones that count, and a mismatch stops the payment for a second look.
  */
-export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: string }) {
+export function Sell({
+  t,
+  slug,
+  onError,
+  deviceId,
+  drawerClosed,
+  onOpenDrawer,
+  onDrawerChanged,
+}: TillProps & {
+  deviceId: string;
+  /** Cash can't be taken until the drawer is opened (piece 9). */
+  drawerClosed: boolean;
+  /** Goes to Kasa; the order on screen stays as it is. */
+  onOpenDrawer: () => void;
+  /** Cash went in, or the drawer turned out closed: look at it again. */
+  onDrawerChanged: () => void;
+}) {
   const [menu, setMenu] = useState<TillMenuDTO | null>(null);
   const [tab, setTab] = useState<string | null>(null);
   const [cart, setCart] = useState<Cart>(emptyCart);
@@ -155,6 +171,7 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
       settled(await api.staff.till.pay(slug, order.id, { method, payKey, tenderedKurus }), tenderedKurus);
     } catch (e) {
       if (e instanceof PeniApiError && e.code === "PRODUCT_UNAVAILABLE") void loadMenu();
+      if (e instanceof PeniApiError && e.code === "CASH_CLOSED") onDrawerChanged();
       setError(onError(e));
       setPanel(null);
     } finally {
@@ -168,6 +185,7 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
    */
   const settled = (answer: PaymentAnswerDTO, tenderedKurus?: number) => {
     if (answer.payment.status === "approved") {
+      if (answer.payment.method === "cash") onDrawerChanged();
       setPanel(null);
       setPaid(answer.order);
       setCart(emptyCart());
@@ -287,6 +305,13 @@ export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: str
             </div>
 
             <div className="flex flex-col gap-3 border-t border-line px-6 py-4">
+              {drawerClosed && (
+                <button type="button" onClick={onOpenDrawer} className="cursor-pointer text-left">
+                  <Notice>
+                    {t("drawerClosedSell")} <span className="font-semibold text-ink underline underline-offset-4">{t("openDrawer")}</span>
+                  </Notice>
+                </button>
+              )}
               {error && <Notice tone="red">{error}</Notice>}
               <div className="flex flex-col gap-1.5 text-[15px]">
                 <div className="flex justify-between text-muted">
