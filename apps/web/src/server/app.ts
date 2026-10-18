@@ -26,6 +26,7 @@ import {
   InMemoryIdentityStore,
   InMemoryLedgerStore,
   InMemoryMenuStore,
+  InMemoryOrderStore,
   InMemoryStaffStore,
   Ledger,
   PeniError,
@@ -45,6 +46,7 @@ import {
   type Membership,
   type MenuItem,
   type MenuStore,
+  type OrderStore,
   type PeniDirectory,
   type Post,
   type PostWithActivity,
@@ -56,6 +58,7 @@ import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifi
 import { AppError } from "./errors";
 import { buildIcs } from "./ics";
 import { MenuService } from "./menu";
+import { OrderService } from "./orders";
 import { StaffService, type StaffContext } from "./staff";
 
 /**
@@ -77,6 +80,7 @@ export interface PeniStores {
   identity: IdentityStore;
   community: CommunityStore;
   menu: MenuStore;
+  orders: OrderStore;
   staff: StaffStore;
 }
 
@@ -87,6 +91,7 @@ export function inMemoryStores(): PeniStores {
     identity: new InMemoryIdentityStore(),
     community: new InMemoryCommunityStore(),
     menu: new InMemoryMenuStore(),
+    orders: new InMemoryOrderStore(),
     staff: new InMemoryStaffStore(),
   };
 }
@@ -117,9 +122,11 @@ export class PeniApp {
   readonly identity: IdentityStore;
   readonly community: CommunityStore;
   readonly menu: MenuStore;
-  /** Staff sign-in, the team and roles. */
   /** Menü in the café panel (plan piece 5). */
   readonly menuEditor: MenuService;
+  /** Satış ekranı's orders (plan piece 6). */
+  readonly till: OrderService;
+  /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   /** Customer sign-in with Google, Apple or an email code. */
   readonly auth: CustomerAuth;
@@ -142,6 +149,7 @@ export class PeniApp {
     });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
+    this.till = new OrderService(stores.orders, this.menu, stores.staff, this.directory, () => this.now());
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */

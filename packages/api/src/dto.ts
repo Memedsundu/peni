@@ -96,6 +96,74 @@ export interface StaffMenuDTO {
   removed: StaffMenuProductDTO[];
 }
 
+// ─────────────────────────────────────────────── till: Satış ekranı (plan piece 6)
+
+/** `GET /staff/:slug/till-menu`: the till's tabs and tiles, only what can be sold now. */
+export interface TillMenuDTO {
+  categories: {
+    id: string;
+    name: string;
+    products: { productId: string; name: string; priceKurus: number; imageUrl: string | null }[];
+  }[];
+}
+
+export type OrderStatusDTO = "open" | "paid" | "voided" | "refunded";
+export type PaymentMethodDTO = "cash" | "card";
+
+export interface OrderLineDTO {
+  productId: string;
+  name: string;
+  unitPriceKurus: number;
+  quantity: number;
+  discountPercent: number;
+  /** After the line's discount. */
+  totalKurus: number;
+}
+
+export interface OrderDTO {
+  id: string;
+  /** Per café, from 1 each local day. */
+  number: number;
+  businessDay: string;
+  status: OrderStatusDTO;
+  lines: OrderLineDTO[];
+  /** Whole-order discount, after line discounts. */
+  discountPercent: number;
+  subtotalKurus: number;
+  discountKurus: number;
+  totalKurus: number;
+  itemCount: number;
+  createdAt: string;
+  takenBy: string;
+  paidAt: string | null;
+  paymentMethod: PaymentMethodDTO | null;
+  tenderedKurus: number | null;
+  changeKurus: number | null;
+  voided: { at: string; by: string; reason: string } | null;
+  refunded: { at: string; by: string; reason: string; amountKurus: number } | null;
+  /** What the viewer may do with it now. */
+  canVoid: boolean;
+  canRefund: boolean;
+  canDelete: boolean;
+}
+
+/** `GET /staff/:slug/orders`: one day's orders, newest first, and the day's sums. */
+export interface OrderListDTO {
+  businessDay: string;
+  orders: OrderDTO[];
+  summary: {
+    paidCount: number;
+    /** Paid and not refunded. */
+    salesKurus: number;
+    cashKurus: number;
+    cardKurus: number;
+    refundedCount: number;
+    refundedKurus: number;
+    voidedCount: number;
+    openCount: number;
+  };
+}
+
 export interface AskidaDTO {
   enabled: boolean;
   balancePeni: number;

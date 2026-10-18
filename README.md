@@ -23,7 +23,8 @@ The code is being rebuilt piece by piece. Today it holds:
 | Staff sign-in, the team, and roles (owner, manager, chef, barista) with per-café permissions | **Done, end-to-end tested** ([staff and roles](docs/staff-and-roles.md)) |
 | Customer sign-in with Google, Apple or an email code | **Done, end-to-end tested** (email; Google and Apple need their client ids) |
 | Menü: categories, products, prices, on/off, removing and bringing back, order; edited by roles with "menu.edit" | **Done, end-to-end tested** (API; screens come with the new design) |
-| Web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
+| Satış ekranı at `/kasa`: set a computer up as a till, PIN sign-in, tabs and photo tiles, line and order discounts, cash with change or card, Satışlar with void, refund and delete | **Done, end-to-end tested** (API, and the screen in a browser, Turkish and English, light and dark) |
+| Other web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
 
@@ -32,7 +33,7 @@ apps/
   web/       Next.js 16: the HTTP API (/api/v1) used by every client, and the web pages
   mobile/    Expo SDK 58 (iOS + Android)
 packages/
-  core/      Domain logic, no framework: peni ledger, gifts, askı, member codes, menu
+  core/      Domain logic, no framework: peni ledger, gifts, askı, member codes, menu, orders
   db/        Prisma 7 schema + migrations (Postgres/Neon), Postgres ledger store
   api/       HTTP contract shared by web and mobile: zod schemas, DTOs, typed client, Turkish copy
   brand/     Turkish text and number helpers
@@ -50,7 +51,7 @@ pnpm dev:web            # http://localhost:3000, demo data in memory, nothing to
 
 To keep data in Postgres, set `DATABASE_URL` in `apps/web/.env` and apply the migrations once with `DATABASE_URL=… pnpm --filter @peni/db migrate:deploy`. An empty database gets the demo cafés on first start.
 
-The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista). Ece's till PIN is 2580 once an owner has set a computer up as a till. Email sign-in works in the demo without an email service: `POST /api/v1/auth/email/start` with any address, then read the code from `GET /api/v1/auth/demo/outbox?email=…`.
+The API runs with demo data: sign in with `POST /api/v1/auth/demo` and `{"customerId": "cus_ayse"}`. Staff sign in with `POST /api/v1/staff-session` and `{"email": "leyla@moda.test", "password": "demo-staff"}` (Leyla owns Moda; Murat, Hakan and Ece are its manager, chef and barista). Ece's till PIN is 2580 once an owner has set a computer up as a till: open http://localhost:3000/kasa and sign in there as Leyla once. Email sign-in works in the demo without an email service: `POST /api/v1/auth/email/start` with any address, then read the code from `GET /api/v1/auth/demo/outbox?email=…`.
 
 ## Checks
 

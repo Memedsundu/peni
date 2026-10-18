@@ -97,6 +97,43 @@ export const menuOrderSchema = z
   .object({ categoryIds: z.array(z.string().min(1)).max(100).optional(), productIds: z.array(z.string().min(1)).max(500).optional() })
   .refine((o) => o.categoryIds || o.productIds, "Sıralama yok");
 
+// ─────────────────────────────────────────────── till orders (plan piece 6)
+
+/** A key the till makes once per action, so a retry never makes a second order or payment. */
+const actionKey = z.string().trim().min(8).max(100);
+const percent = z.number().int("Tam sayı yüzde yaz").min(0).max(100, "İndirim en çok %100 olabilir");
+const orderLine = z.object({
+  productId: z.string().min(1).max(100),
+  quantity: z.number().int().min(1).max(99, "Bir üründen en çok 99 adet"),
+  discountPercent: percent.optional(),
+});
+
+export const createOrderSchema = z.object({
+  createKey: actionKey,
+  lines: z.array(orderLine).min(1, "Sipariş boş").max(100),
+  discountPercent: percent.optional(),
+});
+
+export const updateOrderSchema = z.object({
+  lines: z.array(orderLine).min(1, "Sipariş boş").max(100),
+  discountPercent: percent.optional(),
+});
+
+export const payOrderSchema = z.object({
+  method: z.enum(["cash", "card"]),
+  payKey: actionKey,
+  /** Cash handed over, in kuruş; optional. */
+  tenderedKurus: z.number().int().min(0).max(100_000_000).optional(),
+});
+
+export const orderReasonSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
+
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const orderListQuerySchema = z.object({
+  day: isoDay.optional(),
+  status: z.enum(["open", "paid", "voided", "refunded"]).optional(),
+});
+
 // ─────────────────────────────────────────────── staff (plan piece 2)
 
 export const staffRoleSchema = z.enum(["owner", "manager", "chef", "barista"]);
@@ -173,6 +210,10 @@ export type MenuCategoryInput = z.input<typeof menuCategorySchema>;
 export type AddProductInput = z.input<typeof addProductSchema>;
 export type UpdateProductInput = z.input<typeof updateProductSchema>;
 export type MenuOrderInput = z.input<typeof menuOrderSchema>;
+export type CreateOrderInput = z.input<typeof createOrderSchema>;
+export type UpdateOrderInput = z.input<typeof updateOrderSchema>;
+export type PayOrderInput = z.input<typeof payOrderSchema>;
+export type OrderListQuery = z.input<typeof orderListQuerySchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
 
 export type StaffSignInInput = z.input<typeof staffSignInSchema>;

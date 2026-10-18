@@ -103,7 +103,10 @@ export const PERMISSIONS = {
   "till.delete": {
     section: "till",
     label: { tr: "Sipariş siler", en: "Deletes orders" },
-    hint: { tr: "Siparişi kayıtlardan tamamen kaldırır. İptal çoğu zaman yeterli.", en: "Removes an order from the records entirely. A void is usually enough." },
+    hint: {
+      tr: "Siparişi satışlardan ve raporlardan kaldırır; kim, ne zaman ve neden sildiği saklanır. İptal çoğu zaman yeterli.",
+      en: "Takes an order out of sales and reports; who deleted it, when and why is kept. A void is usually enough.",
+    },
     roles: OWNER,
   },
   "menu.edit": {

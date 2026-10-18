@@ -8,6 +8,9 @@ import type {
   GiftPreviewDTO,
   MeDTO,
   MemberLookupDTO,
+  OrderDTO,
+  OrderListDTO,
+  TillMenuDTO,
   RolesDTO,
   SessionDTO,
   StaffDashboardDTO,
@@ -30,6 +33,10 @@ import type {
   PinSignInInput,
   SaveRolesInput,
   AddProductInput,
+  CreateOrderInput,
+  OrderListQuery,
+  PayOrderInput,
+  UpdateOrderInput,
   MenuCategoryInput,
   MenuOrderInput,
   UpdateProductInput,
@@ -44,7 +51,8 @@ export class PeniApiError extends Error {
   constructor(
     readonly code: string,
     readonly status: number,
-    serverMessage: string,
+    /** The server's English message; `message` is the Turkish copy. */
+    readonly serverMessage: string,
   ) {
     super(errorMessageTr(code, serverMessage));
     this.name = "PeniApiError";
@@ -209,6 +217,29 @@ export function createPeniClient(options: PeniClientOptions) {
           call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products/${slug(productId)}`, input, true),
         reorder: (cafeSlug: string, input: MenuOrderInput) =>
           call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/order`, input, true),
+      },
+      /** Satış ekranı: prices and totals always come from the server. */
+      till: {
+        menu: (cafeSlug: string) => call<TillMenuDTO>("GET", `/staff/${slug(cafeSlug)}/till-menu`, undefined, true),
+        orders: (cafeSlug: string, query: OrderListQuery = {}) => {
+          const qs = new URLSearchParams(Object.entries(query).filter(([, v]) => v) as [string, string][]).toString();
+          return call<OrderListDTO>("GET", `/staff/${slug(cafeSlug)}/orders${qs ? `?${qs}` : ""}`, undefined, true);
+        },
+        order: (cafeSlug: string, orderId: string) =>
+          call<OrderDTO>("GET", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}`, undefined, true),
+        /** The same `createKey` again returns the same order. */
+        create: (cafeSlug: string, input: CreateOrderInput) => call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders`, input, true),
+        update: (cafeSlug: string, orderId: string, input: UpdateOrderInput) =>
+          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}`, input, true),
+        /** The same `payKey` again returns the same result. */
+        pay: (cafeSlug: string, orderId: string, input: PayOrderInput) =>
+          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/pay`, input, true),
+        void: (cafeSlug: string, orderId: string, reason: string) =>
+          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/void`, { reason }, true),
+        refund: (cafeSlug: string, orderId: string, reason: string) =>
+          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/refund`, { reason }, true),
+        remove: (cafeSlug: string, orderId: string, reason: string) =>
+          call<{ ok: true }>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/delete`, { reason }, true),
       },
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>

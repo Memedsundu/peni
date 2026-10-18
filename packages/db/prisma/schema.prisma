@@ -133,6 +133,8 @@ model Cafe {
   staffSessions StaffSession[]
   menu          MenuItem[]
   menuCategories MenuCategory[]
+  orders        Order[]
+  orderCounters OrderCounter[]
   memberships   Membership[]
   posts         CafePost[]
 }
@@ -314,6 +316,87 @@ model MenuItem {
 
   @@unique([cafeId, productId])
   @@index([cafeId, categoryId, sortOrder])
+}
+
+// ─────────────────────────────────────────────────────────── orders (plan piece 6)
+
+enum OrderStatus {
+  open
+  paid
+  voided
+  refunded
+}
+
+enum PaymentMethod {
+  cash
+  card
+}
+
+/// What the till sold. Amounts in kuruş.
+model Order {
+  id                 String         @id
+  cafeId             String
+  /// Per café, from 1 each local day.
+  number             Int
+  /// The café's local date, YYYY-MM-DD.
+  businessDay        String
+  status             OrderStatus
+  discountPercent    Int            @default(0)
+  subtotalKurus      Int
+  discountKurus      Int
+  totalKurus         Int
+  createdAt          DateTime
+  createdByMemberId  String
+  createKey          String
+  paidAt             DateTime?
+  paidByMemberId     String?
+  paymentMethod      PaymentMethod?
+  tenderedKurus      Int?
+  changeKurus        Int?
+  payKey             String?
+  voidedAt           DateTime?
+  voidedByMemberId   String?
+  voidReason         String?
+  refundedAt         DateTime?
+  refundedByMemberId String?
+  refundReason       String?
+  refundKurus        Int?
+  deletedAt          DateTime?
+  deletedByMemberId  String?
+  deleteReason       String?
+
+  cafe  Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  lines OrderLine[]
+
+  @@unique([cafeId, businessDay, number])
+  @@unique([cafeId, createKey])
+  @@index([cafeId, createdAt])
+}
+
+model OrderLine {
+  id              String @id @default(cuid())
+  orderId         String
+  position        Int
+  productId       String
+  name            String
+  unitPriceKurus  Int
+  quantity        Int
+  discountPercent Int    @default(0)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, position])
+}
+
+/// The last order number given out per café and day.
+model OrderCounter {
+  cafeId      String
+  businessDay String
+  last        Int
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, businessDay])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni
