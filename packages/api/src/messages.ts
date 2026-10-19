@@ -71,6 +71,12 @@ export const errorMessagesTr: Record<string, string> = {
   REASON_REQUIRED: "Bir sebep yaz.",
   REASON_TOO_LONG: "Sebep en çok 200 karakter olabilir.",
   CLAIM_CODE_BUSY: "Şu an peni kodu verilemedi. Ödemeyi tekrar kaydet.",
+  PAYMENT_NOT_FOUND: "Bu ödeme bulunamadı.",
+  PAYMENT_NOT_PENDING: "Bu ödeme zaten sonuçlanmış.",
+  PAYMENT_APPROVED: "Bu ödeme onaylanmış. Geri vermek için siparişi iade et.",
+  PAYMENT_IN_PROGRESS: "Kart cihazı bu siparişte bir ödeme alıyor. Önce onu bitir ya da cihazdan iptal et.",
+  CONFIRMED_BY_TERMINAL: "Bu ödemeyi kart cihazı kendisi onaylıyor.",
+  PAY_KEY_REUSED: "Bu ödeme başka bir siparişe ait. Sayfayı yenile.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

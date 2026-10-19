@@ -1,5 +1,6 @@
-import type { OrderDTO, OrderListDTO, TillMenuDTO } from "@peni/api";
+import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDTO, TillMenuDTO } from "@peni/api";
 import {
+  amountPaid,
   calculateEarn,
   claimIsOpen,
   localDateKey,
@@ -15,6 +16,7 @@ import {
   type OrderLine,
   type OrderStatus,
   type OrderStore,
+  type Payment,
   type PaymentMethod,
   type PeniDirectory,
   type Permission,
@@ -22,6 +24,7 @@ import {
 } from "@peni/core";
 import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { AppError } from "./errors";
+import type { PaymentActor, PaymentService } from "./payments";
 import type { StaffContext } from "./staff";
 
 export const REASON_MAX = 200;
@@ -41,8 +44,12 @@ export class OrderService {
     private readonly menu: MenuStore,
     private readonly staff: StaffStore,
     private readonly directory: PeniDirectory,
+    private readonly payments: PaymentService,
     private readonly now: () => Date,
-  ) {}
+  ) {
+    // However a payment gets approved, by the barista or later by the terminal, its order moves on.
+    payments.onApproved = (payment) => this.applyPayment(payment);
+  }
 
   /** The till's tabs and tiles: categories in order, with what can be sold right now. */
   async tillMenu(ctx: StaffContext): Promise<TillMenuDTO> {
@@ -88,7 +95,6 @@ export class OrderService {
       paymentMethod: null,
       tenderedKurus: null,
       changeKurus: null,
-      payKey: null,
       voidedAt: null,
       voidedByMemberId: null,
       voidReason: null,
@@ -119,41 +125,126 @@ export class OrderService {
     const lines = await this.priced(ctx, input.lines);
     const discountPercent = input.discountPercent ?? order.discountPercent;
     this.check(lines, discountPercent);
+    // A payment still waiting was for the old total.
+    await this.payments.clearPending(actor(ctx), order.id);
     const next = { ...order, lines, discountPercent, ...orderTotals(lines, discountPercent) };
     await this.orders.saveOrder(next);
     return this.dto(ctx, next);
   }
 
   /**
-   * Records the payment. Peni can't drive the card terminal yet (D24), so the barista
-   * runs it and taps "Kart" once it's approved. For cash, what was handed over is
-   * optional; when given, the change is worked out. A retry with the same `payKey`
-   * answers as the first time.
+   * "Nakit" or "Kart": starts a payment for what's left to pay, through the till's
+   * terminal (piece 8). With the manual terminal (D24), cash is approved at once and a
+   * card waits for the barista's tap once the terminal approves it. For cash, what was
+   * handed over is optional; when given, the change is worked out. The same `payKey`
+   * again answers with the same payment.
    */
-  async pay(ctx: StaffContext, id: string, input: { method: PaymentMethod; payKey: string; tenderedKurus?: number }): Promise<OrderDTO> {
+  async pay(ctx: StaffContext, id: string, input: { method: PaymentMethod; payKey: string; tenderedKurus?: number }): Promise<PaymentAnswerDTO> {
     this.require(ctx, "till.use");
     const order = await this.find(ctx, id);
-    if (order.status === "paid" && order.payKey === input.payKey) return this.withClaim(ctx, order, await this.issueClaim(order));
+    const again = await this.payments.findByKey(ctx.cafe.id, input.payKey);
+    if (again) {
+      if (again.orderId !== order.id) throw new AppError("PAY_KEY_REUSED", "This payment belongs to another order", 409);
+      return this.answer(ctx, again);
+    }
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
+    // Tapping "Nakit" after backing out of "Kart" moves on from the card.
+    await this.payments.clearPending(actor(ctx), order.id);
+    const due = order.totalKurus - amountPaid(await this.payments.list(ctx.cafe.id, [order.id]));
     let tenderedKurus: number | null = null;
     let changeKurus: number | null = null;
     if (input.method === "cash" && input.tenderedKurus !== undefined) {
-      if (input.tenderedKurus < order.totalKurus) throw new AppError("TENDERED_TOO_LOW", "Less than the total was handed over", 400);
+      if (input.tenderedKurus < due) throw new AppError("TENDERED_TOO_LOW", "Less than the total was handed over", 400);
       tenderedKurus = input.tenderedKurus;
-      changeKurus = input.tenderedKurus - order.totalKurus;
+      changeKurus = input.tenderedKurus - due;
     }
-    const paid: Order = {
-      ...order,
-      status: "paid",
-      paidAt: this.now(),
-      paidByMemberId: ctx.member.id,
-      paymentMethod: input.method,
+    const payment = await this.payments.start(actor(ctx), {
+      orderId: order.id,
+      kind: "sale",
+      method: input.method,
+      amountKurus: due,
       tenderedKurus,
       changeKurus,
-      payKey: input.payKey,
-    };
-    await this.orders.saveOrder(paid);
-    return this.withClaim(ctx, paid, await this.issueClaim(paid));
+      key: input.payKey,
+      reason: null,
+    });
+    return this.answer(ctx, payment);
+  }
+
+  /** Where a payment stands, for a till waiting on the terminal. */
+  async payment(ctx: StaffContext, orderId: string, paymentId: string): Promise<PaymentAnswerDTO> {
+    this.require(ctx, "till.use");
+    return this.answer(ctx, await this.paymentOf(ctx, orderId, paymentId));
+  }
+
+  /** "Onaylandı": the barista saw the terminal approve the card. */
+  async confirmPayment(ctx: StaffContext, orderId: string, paymentId: string): Promise<PaymentAnswerDTO> {
+    this.require(ctx, "till.use");
+    const payment = await this.paymentOf(ctx, orderId, paymentId);
+    return this.answer(ctx, await this.payments.confirm(actor(ctx), payment.id));
+  }
+
+  /** Closing the card sheet, or "Reddedildi" when the terminal said no. The order stays open. */
+  async cancelPayment(ctx: StaffContext, orderId: string, paymentId: string, input: { declined?: boolean } = {}): Promise<PaymentAnswerDTO> {
+    this.require(ctx, "till.use");
+    const payment = await this.paymentOf(ctx, orderId, paymentId);
+    return this.answer(ctx, await this.payments.cancel(actor(ctx), payment.id, input));
+  }
+
+  /**
+   * Moves an order on once one of its payments is approved, whoever approved it: paid
+   * when the sales cover the total, refunded when the refund goes through.
+   */
+  private async applyPayment(payment: Payment): Promise<void> {
+    const order = await this.orders.getOrder(payment.cafeId, payment.orderId);
+    if (!order) return;
+    if (payment.kind === "sale") {
+      if (order.status !== "open") return;
+      if (amountPaid(await this.payments.list(order.cafeId, [order.id])) < order.totalKurus) return;
+      await this.orders.saveOrder({
+        ...order,
+        status: "paid",
+        paidAt: payment.settledAt,
+        paidByMemberId: payment.startedByMemberId,
+        paymentMethod: payment.method,
+        tenderedKurus: payment.tenderedKurus,
+        changeKurus: payment.changeKurus,
+      });
+      return;
+    }
+    if (order.status !== "paid") return;
+    await this.orders.saveOrder({
+      ...order,
+      status: "refunded",
+      refundedAt: payment.settledAt,
+      refundedByMemberId: payment.startedByMemberId,
+      refundReason: payment.reason,
+      refundKurus: payment.amountKurus,
+    });
+    // A claim nobody took yet goes with the money. Peni already claimed is taken back
+    // with the refund once claiming exists (piece 10).
+    const claim = await this.claims.getClaimByOrder(order.cafeId, order.id);
+    if (claim && claimIsOpen(claim, this.now())) await this.claims.saveClaim({ ...claim, cancelledAt: this.now() });
+  }
+
+  private async paymentOf(ctx: StaffContext, orderId: string, paymentId: string): Promise<Payment> {
+    const payment = await this.payments.get(ctx.cafe.id, paymentId);
+    if (payment.orderId !== orderId) throw new AppError("PAYMENT_NOT_FOUND", "No such payment", 404);
+    return payment;
+  }
+
+  /** A payment and its order, with the peni claim once a sale has gone through. */
+  private async answer(ctx: StaffContext, payment: Payment): Promise<PaymentAnswerDTO> {
+    let order = await this.find(ctx, payment.orderId);
+    const behind = payment.status === "approved" && (payment.kind === "sale" ? order.status === "open" : order.status === "paid");
+    if (behind) {
+      // The payment was saved but its order wasn't moved on (a crash between the two): catch up.
+      await this.applyPayment(payment);
+      order = await this.find(ctx, payment.orderId);
+    }
+    const claim = payment.kind === "sale" && order.status === "paid" ? await this.issueClaim(order) : null;
+    const dto = await this.withClaim(ctx, order, claim);
+    return { payment: dto.payments.find((p) => p.id === payment.id)!, order: dto };
   }
 
   /**
@@ -206,30 +297,34 @@ export class OrderService {
     this.require(ctx, "till.correct");
     const order = await this.find(ctx, id);
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "Only an unpaid order can be voided; refund a paid one", 409);
+    await this.payments.clearPending(actor(ctx), order.id);
     const next: Order = { ...order, status: "voided", voidedAt: this.now(), voidedByMemberId: ctx.member.id, voidReason: reason(input.reason) };
     await this.orders.saveOrder(next);
     return this.dto(ctx, next);
   }
 
-  /** "İade": all of a paid order's money goes back, the way it was paid. Needs a reason. */
+  /**
+   * "İade": all of a paid order's money goes back, the way it was paid, through the same
+   * terminal interface as the sale. Needs a reason. With the manual terminal the barista
+   * hands the cash back or refunds the card on the terminal, and it's recorded at once.
+   */
   async refund(ctx: StaffContext, id: string, input: { reason: string }): Promise<OrderDTO> {
     this.require(ctx, "till.correct");
     const order = await this.find(ctx, id);
     if (order.status !== "paid") throw new AppError("ORDER_NOT_PAID", "Only a paid order can be refunded", 409);
-    const next: Order = {
-      ...order,
-      status: "refunded",
-      refundedAt: this.now(),
-      refundedByMemberId: ctx.member.id,
-      refundReason: reason(input.reason),
-      refundKurus: order.totalKurus,
-    };
-    await this.orders.saveOrder(next);
-    // A claim nobody took yet goes with the money. Peni already claimed is taken back
-    // with the refund once claiming exists (piece 10).
-    const claim = await this.claims.getClaimByOrder(ctx.cafe.id, order.id);
-    if (claim && claimIsOpen(claim, this.now())) await this.claims.saveClaim({ ...claim, cancelledAt: this.now() });
-    return this.dto(ctx, next);
+    const why = reason(input.reason);
+    await this.payments.clearPending(actor(ctx), order.id);
+    await this.payments.start(actor(ctx), {
+      orderId: order.id,
+      kind: "refund",
+      method: order.paymentMethod ?? "cash",
+      amountKurus: order.totalKurus,
+      tenderedKurus: null,
+      changeKurus: null,
+      key: `refund:${randomUUID()}`,
+      reason: why,
+    });
+    return this.dto(ctx, await this.find(ctx, id));
   }
 
   /** "Sil": the order leaves the lists and reports but stays on record, with who and why. */
@@ -252,12 +347,11 @@ export class OrderService {
     this.require(ctx, "till.history");
     const businessDay = filter.businessDay ?? (await this.today(ctx, this.now()));
     const all = await this.orders.listOrders(ctx.cafe.id, { businessDay, limit: 1000 });
-    const names = await this.names(all);
     const paid = all.filter((o) => o.status === "paid" || o.status === "refunded");
     const sum = (os: Order[]) => os.reduce((s, o) => s + o.totalKurus, 0);
     return {
       businessDay,
-      orders: all.filter((o) => !filter.status || o.status === filter.status).map((o) => this.toDTO(ctx, o, names)),
+      orders: await this.dtos(ctx, all.filter((o) => !filter.status || o.status === filter.status)),
       summary: {
         paidCount: all.filter((o) => o.status === "paid").length,
         salesKurus: sum(all.filter((o) => o.status === "paid")),
@@ -298,11 +392,24 @@ export class OrderService {
   }
 
   private async dto(ctx: StaffContext, order: Order): Promise<OrderDTO> {
-    return this.toDTO(ctx, order, await this.names([order]));
+    return (await this.dtos(ctx, [order]))[0]!;
   }
 
-  private toDTO(ctx: StaffContext, o: Order, names: Map<string, string>): OrderDTO {
+  /** Orders as the till shows them, with their payments and everyone's names. */
+  private async dtos(ctx: StaffContext, orders: Order[]): Promise<OrderDTO[]> {
+    const payments = await this.payments.list(ctx.cafe.id, orders.map((o) => o.id));
+    const names = await this.names(orders, payments);
+    const confirmBy = new Map<string, PaymentDTO["confirmBy"]>();
+    for (const p of payments.filter((x) => x.status === "pending")) {
+      const how = await this.payments.confirmation(p);
+      confirmBy.set(p.id, how === "terminal" ? "terminal" : "staff");
+    }
+    return orders.map((o) => this.toDTO(ctx, o, payments.filter((p) => p.orderId === o.id), names, confirmBy));
+  }
+
+  private toDTO(ctx: StaffContext, o: Order, payments: Payment[], names: Map<string, string>, confirmBy: Map<string, PaymentDTO["confirmBy"]>): OrderDTO {
     const name = (id: string | null) => (id ? (names.get(id) ?? "Eski ekip üyesi") : null);
+    const refundWaiting = payments.some((p) => p.kind === "refund" && p.status === "pending");
     return {
       id: o.id,
       number: o.number,
@@ -325,8 +432,27 @@ export class OrderService {
         ? { at: o.refundedAt.toISOString(), by: name(o.refundedByMemberId)!, reason: o.refundReason ?? "", amountKurus: o.refundKurus ?? 0 }
         : null,
       canVoid: o.status === "open" && ctx.permissions.has("till.correct"),
-      canRefund: o.status === "paid" && ctx.permissions.has("till.correct"),
+      canRefund: o.status === "paid" && !refundWaiting && ctx.permissions.has("till.correct"),
       canDelete: ctx.permissions.has("till.delete"),
+      payments: payments.map((p) => ({
+        id: p.id,
+        kind: p.kind,
+        method: p.method,
+        status: p.status,
+        amountKurus: p.amountKurus,
+        tenderedKurus: p.tenderedKurus,
+        changeKurus: p.changeKurus,
+        terminal: p.terminal,
+        confirmBy: confirmBy.get(p.id) ?? null,
+        startedAt: p.startedAt.toISOString(),
+        startedBy: name(p.startedByMemberId)!,
+        settledAt: p.settledAt?.toISOString() ?? null,
+        settledBy: name(p.settledByMemberId),
+        reference: p.reference,
+        receiptNo: p.receiptNo,
+        failure: p.failure,
+        reason: p.reason,
+      })),
       claim: null,
     };
   }
@@ -337,9 +463,12 @@ export class OrderService {
   }
 
   /** Names of everyone who touched these orders, people who have left the team included. */
-  private async names(orders: Order[]): Promise<Map<string, string>> {
+  private async names(orders: Order[], payments: Payment[]): Promise<Map<string, string>> {
     const ids = new Set(
-      orders.flatMap((o) => [o.createdByMemberId, o.paidByMemberId, o.voidedByMemberId, o.refundedByMemberId]).filter((x): x is string => !!x),
+      [
+        ...orders.flatMap((o) => [o.createdByMemberId, o.paidByMemberId, o.voidedByMemberId, o.refundedByMemberId]),
+        ...payments.flatMap((p) => [p.startedByMemberId, p.settledByMemberId]),
+      ].filter((x): x is string => !!x),
     );
     const out = new Map<string, string>();
     for (const id of ids) {
@@ -355,6 +484,10 @@ export class OrderService {
     if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
     throw new AppError("FORBIDDEN", "Your role can't do this", 403);
   }
+}
+
+function actor(ctx: StaffContext): PaymentActor {
+  return { cafeId: ctx.cafe.id, memberId: ctx.member.id, deviceId: ctx.deviceId };
 }
 
 function reason(raw: string): string {

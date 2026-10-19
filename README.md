@@ -25,6 +25,7 @@ The code is being rebuilt piece by piece. Today it holds:
 | Menü: categories, products, prices, on/off, removing and bringing back, order; edited by roles with "menu.edit" | **Done, end-to-end tested** (API; screens come with the new design) |
 | Satış ekranı at `/kasa`: set a computer up as a till, PIN sign-in, tabs and photo tiles, line and order discounts, cash with change or card, Satışlar with void, refund and delete | **Done, end-to-end tested** (API, and the screen in a browser, Turkish and English, light and dark) |
 | Müşteri ekranı at `/kasa/ekran`: the order as it's entered, then thanks with the peni QR and 4-digit code; idle, the café, its posts and events, and how to get Peni | **Done, tested in a browser** (claiming the peni in the app is piece 10) |
+| Payments: every sale and refund goes through one terminal interface and leaves a record, declined and cancelled tries included. Manual for now (D24): cash counts at once, a card when the barista taps that the terminal approved it. A terminal that answers itself (the Ingenico through the till bridge) plugs in without changing the till | **Done, tested** (manual in a browser; a terminal that answers itself with a stand-in in tests; the bridge waits for the protocol documents) |
 | Other web and mobile screens | **Placeholders.** The new design replaces the v0.1 screens |
 
 ## Repository
@@ -34,7 +35,7 @@ apps/
   web/       Next.js 16: the HTTP API (/api/v1) used by every client, and the web pages
   mobile/    Expo SDK 58 (iOS + Android)
 packages/
-  core/      Domain logic, no framework: peni ledger, gifts, askı, member codes, menu, orders
+  core/      Domain logic, no framework: peni ledger, gifts, askı, member codes, menu, orders, payments
   db/        Prisma 7 schema + migrations (Postgres/Neon), Postgres ledger store
   api/       HTTP contract shared by web and mobile: zod schemas, DTOs, typed client, Turkish copy
   brand/     Turkish text and number helpers

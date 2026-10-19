@@ -145,11 +145,52 @@ export interface OrderDTO {
   canVoid: boolean;
   canRefund: boolean;
   canDelete: boolean;
+  /** Every payment and refund tried on it, oldest first, declined and cancelled ones included. */
+  payments: PaymentDTO[];
   /**
-   * Only in the answer to "pay": the peni the customer can take, for the customer screen.
-   * Null when the café has peni off or the order earns nothing.
+   * Only in the answers about a payment: the peni the customer can take, for the customer
+   * screen. Null when the café has peni off or the order earns nothing.
    */
   claim: OrderClaimDTO | null;
+}
+
+export type PaymentKindDTO = "sale" | "refund";
+export type PaymentStatusDTO = "pending" | "approved" | "declined" | "cancelled";
+
+export interface PaymentDTO {
+  id: string;
+  kind: PaymentKindDTO;
+  method: PaymentMethodDTO;
+  status: PaymentStatusDTO;
+  amountKurus: number;
+  tenderedKurus: number | null;
+  changeKurus: number | null;
+  /** "manual" until the till bridge drives the Ingenico. */
+  terminal: string;
+  /**
+   * While pending, who says it's done: the barista taps "approved" ("staff"), or the
+   * till waits for the terminal's own answer ("terminal"). Null once settled.
+   */
+  confirmBy: "staff" | "terminal" | null;
+  startedAt: string;
+  startedBy: string;
+  settledAt: string | null;
+  /** Null when the terminal answered on its own. */
+  settledBy: string | null;
+  /** The terminal's approval code and fiscal receipt number, when it sends them. */
+  reference: string | null;
+  receiptNo: string | null;
+  /** The terminal's reason for a decline; "TERMINAL_UNREACHABLE" when it couldn't be reached. */
+  failure: string | null;
+  /** A refund's reason. */
+  reason: string | null;
+}
+
+/** The answer to starting, confirming, cancelling or checking a payment. */
+export interface PaymentAnswerDTO {
+  payment: PaymentDTO;
+  /** Paid once a sale is approved, with `claim` for the customer screen. */
+  order: OrderDTO;
 }
 
 export interface OrderClaimDTO {

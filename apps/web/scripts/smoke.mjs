@@ -209,22 +209,33 @@ const order = (await call("POST", "/staff/moda/orders", { headers: ecePos, body:
 assert.equal(order.totalKurus, 24_100, "2 latte with 10% off and a simit");
 assert.equal((await call("POST", "/staff/moda/orders", { headers: ecePos, body: sale })).json.id, order.id, "a retried tap makes no second order");
 const payBody = { method: "cash", payKey: key(), tenderedKurus: 30_000 };
-const paidOrder = (await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: payBody })).json;
+// 5e. Payments (piece 8): a card waits for Ece's "approved" tap, as Peni can't drive the
+//     terminal yet; she backs out when the customer pays cash instead, which goes through at once.
+const card = (await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: { method: "card", payKey: key() } })).json;
+assert.deepEqual([card.payment.status, card.payment.confirmBy, card.order.status], ["pending", "staff", "open"]);
+const backedOut = (await call("POST", `/staff/moda/orders/${order.id}/payments/${card.payment.id}/cancel`, { headers: ecePos, body: {} })).json;
+assert.equal(backedOut.payment.status, "cancelled");
+const paidAnswer = (await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: payBody })).json;
+assert.equal(paidAnswer.payment.status, "approved");
+const paidOrder = paidAnswer.order;
 assert.equal(paidOrder.changeKurus, 5_900);
+assert.deepEqual(paidOrder.payments.map((p) => `${p.method} ${p.status}`), ["card cancelled", "cash approved"]);
 assert.match(paidOrder.claim.code, /^\d{4}$/, "the customer screen gets a 4-digit peni code");
 assert.equal(paidOrder.claim.peni, 12, "₺241 at Moda's 5 % is 12 peni");
-assert.equal((await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: payBody })).json.paidAt, paidOrder.paidAt);
+assert.equal((await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: payBody })).json.order.paidAt, paidOrder.paidAt);
 const second = (await call("POST", "/staff/moda/orders", { headers: ecePos, body: { createKey: key(), lines: [{ productId: "cay", quantity: 1 }] } })).json;
 assert.equal(second.number, order.number + 1);
 assert.equal((await call("POST", `/staff/moda/orders/${second.id}/void`, { headers: ecePos, body: { reason: "Vazgeçti" } })).json.error.code, "FORBIDDEN");
 assert.equal((await call("POST", `/staff/moda/orders/${second.id}/void`, { headers: STAFF, body: { reason: "Müşteri vazgeçti" } })).json.status, "voided");
 assert.equal((await call("POST", `/staff/moda/orders/${order.id}/refund`, { headers: STAFF, body: { reason: "" } })).status, 400);
-assert.equal((await call("POST", `/staff/moda/orders/${order.id}/refund`, { headers: STAFF, body: { reason: "Latte soğuktu" } })).json.refunded.amountKurus, 24_100);
+const refundedOrder = (await call("POST", `/staff/moda/orders/${order.id}/refund`, { headers: STAFF, body: { reason: "Latte soğuktu" } })).json;
+assert.equal(refundedOrder.refunded.amountKurus, 24_100);
+assert.deepEqual(refundedOrder.payments.at(-1), { ...refundedOrder.payments.at(-1), kind: "refund", method: "cash", status: "approved", reason: "Latte soğuktu" });
 const day = (await call("GET", "/staff/moda/orders", { headers: ecePos })).json;
 assert.deepEqual(day.orders.slice(0, 2).map((o) => o.status), ["voided", "refunded"]);
 assert.equal(day.summary.refundedKurus >= 24_100, true);
 await call("POST", `/staff/moda/devices/${till2.device.id}/revoke`, { headers: STAFF });
-step("Ece sells 2 latte and a simit at the till (one order despite a retry), takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen; Leyla voids an unpaid order and refunds the paid one");
+step("Ece sells 2 latte and a simit at the till (one order despite a retry), starts a card payment and backs out of it, takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen; Leyla voids an unpaid order and refunds the paid one, recorded as a refund payment");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;

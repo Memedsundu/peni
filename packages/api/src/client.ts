@@ -10,6 +10,7 @@ import type {
   MemberLookupDTO,
   OrderDTO,
   OrderListDTO,
+  PaymentAnswerDTO,
   TillMenuDTO,
   RolesDTO,
   SessionDTO,
@@ -36,6 +37,7 @@ import type {
   CreateOrderInput,
   OrderListQuery,
   PayOrderInput,
+  CancelPaymentInput,
   UpdateOrderInput,
   MenuCategoryInput,
   MenuOrderInput,
@@ -231,9 +233,21 @@ export function createPeniClient(options: PeniClientOptions) {
         create: (cafeSlug: string, input: CreateOrderInput) => call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders`, input, true),
         update: (cafeSlug: string, orderId: string, input: UpdateOrderInput) =>
           call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}`, input, true),
-        /** The same `payKey` again returns the same result. */
+        /**
+         * Starts a payment through the till's terminal. It may be approved at once (cash), or
+         * wait for the barista (`confirmPayment`) or the terminal (poll `payment`). The same
+         * `payKey` again returns the same payment.
+         */
         pay: (cafeSlug: string, orderId: string, input: PayOrderInput) =>
-          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/pay`, input, true),
+          call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/pay`, input, true),
+        payment: (cafeSlug: string, orderId: string, paymentId: string) =>
+          call<PaymentAnswerDTO>("GET", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/payments/${slug(paymentId)}`, undefined, true),
+        /** "The terminal approved it": only for payments with `confirmBy: "staff"`. */
+        confirmPayment: (cafeSlug: string, orderId: string, paymentId: string) =>
+          call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/payments/${slug(paymentId)}/confirm`, {}, true),
+        /** Backs out of a waiting payment; `declined` records that the terminal said no. */
+        cancelPayment: (cafeSlug: string, orderId: string, paymentId: string, input: CancelPaymentInput = {}) =>
+          call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/payments/${slug(paymentId)}/cancel`, input, true),
         void: (cafeSlug: string, orderId: string, reason: string) =>
           call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/void`, { reason }, true),
         refund: (cafeSlug: string, orderId: string, reason: string) =>

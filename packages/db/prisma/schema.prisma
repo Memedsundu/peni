@@ -126,18 +126,19 @@ model Cafe {
   hue                 String?
   createdAt           DateTime @default(now())
 
-  settings      CafeSettings?
-  staff         StaffMember[]
-  roleChanges   RolePermission[]
-  tillDevices   TillDevice[]
-  staffSessions StaffSession[]
-  menu          MenuItem[]
+  settings       CafeSettings?
+  staff          StaffMember[]
+  roleChanges    RolePermission[]
+  tillDevices    TillDevice[]
+  staffSessions  StaffSession[]
+  menu           MenuItem[]
   menuCategories MenuCategory[]
-  orders        Order[]
-  orderCounters OrderCounter[]
-  claims        PeniClaim[]
-  memberships   Membership[]
-  posts         CafePost[]
+  orders         Order[]
+  orderCounters  OrderCounter[]
+  claims         PeniClaim[]
+  payments       Payment[]
+  memberships    Membership[]
+  posts          CafePost[]
 }
 
 /// Mirrors CafePeniSettings in @peni/core.
@@ -354,7 +355,6 @@ model Order {
   paymentMethod      PaymentMethod?
   tenderedKurus      Int?
   changeKurus        Int?
-  payKey             String?
   voidedAt           DateTime?
   voidedByMemberId   String?
   voidReason         String?
@@ -366,9 +366,10 @@ model Order {
   deletedByMemberId  String?
   deleteReason       String?
 
-  cafe  Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  lines OrderLine[]
-  claim PeniClaim?
+  cafe     Cafe        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  lines    OrderLine[]
+  claim    PeniClaim?
+  payments Payment[]
 
   @@unique([cafeId, businessDay, number])
   @@unique([cafeId, createKey])
@@ -399,6 +400,52 @@ model OrderCounter {
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@id([cafeId, businessDay])
+}
+
+// ─────────────────────────────────────────────────────────── payments (plan piece 8)
+
+enum PaymentKind {
+  sale
+  refund
+}
+
+enum PaymentStatus {
+  pending
+  approved
+  declined
+  cancelled
+}
+
+/// Every sale and refund taken through a till's terminal, declined and cancelled tries included.
+model Payment {
+  id                String        @id
+  cafeId            String
+  orderId           String
+  kind              PaymentKind
+  method            PaymentMethod
+  status            PaymentStatus
+  amountKurus       Int
+  tenderedKurus     Int?
+  changeKurus       Int?
+  /// "manual" until the till bridge drives the Ingenico.
+  terminal          String
+  deviceId          String?
+  /// The client's key; a retry finds the same payment.
+  key               String
+  reason            String?
+  startedAt         DateTime
+  startedByMemberId String
+  settledAt         DateTime?
+  settledByMemberId String?
+  reference         String?
+  receiptNo         String?
+  failure           String?
+
+  cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, key])
+  @@index([cafeId, orderId])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni

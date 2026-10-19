@@ -1,6 +1,6 @@
 "use client";
 
-import type { OrderDTO, OrderListDTO, OrderStatusDTO } from "@peni/api";
+import type { OrderDTO, OrderListDTO, OrderStatusDTO, PaymentDTO } from "@peni/api";
 import { formatLongDate, formatPercent, formatTL, formatTime } from "@peni/brand/format";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
@@ -235,6 +235,8 @@ function OrderSheet({
           </div>
         )}
       </div>
+      {order.payments.length > 0 && <Payments t={t} payments={order.payments} />}
+      {order.payments.some((p) => p.kind === "refund" && p.status === "pending") && <Notice>{t("refundWaiting")}</Notice>}
       {order.voided && (
         <Notice>
           {t("voidedBy")}: {order.voided.by}, {formatTime(order.voided.at)}. {order.voided.reason}
@@ -289,5 +291,37 @@ function OrderSheet({
         )
       )}
     </Sheet>
+  );
+}
+
+/** Every try at taking or giving back the money, so a declined card or a refund is never a mystery. */
+function Payments({ t, payments }: Pick<TillProps, "t"> & { payments: PaymentDTO[] }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h3 className="text-sm text-muted">{t("payments")}</h3>
+      <ul className="flex flex-col">
+        {payments.map((p) => {
+          const over = p.status === "declined" || p.status === "cancelled";
+          const details = [
+            p.reference && `${t("approvalCode")} ${p.reference}`,
+            p.receiptNo && `${t("receiptNo")} ${p.receiptNo}`,
+          ].filter(Boolean);
+          return (
+            <li key={p.id} className={`flex items-baseline justify-between gap-4 border-b border-line-soft py-2 text-[15px] ${over ? "text-muted" : ""}`}>
+              <span>
+                {p.kind === "refund" ? `${t("refundLine")} · ` : ""}
+                {p.method === "cash" ? t("cash") : t("card")} · {t(`pay_${p.status}`)}
+                <span className="text-muted">
+                  {" "}
+                  · {formatTime(p.settledAt ?? p.startedAt)} · {p.settledBy ?? p.startedBy}
+                  {details.length > 0 && ` · ${details.join(" · ")}`}
+                </span>
+              </span>
+              <span className={`tabular ${over ? "line-through" : ""}`}>{formatTL(p.kind === "refund" ? -p.amountKurus : p.amountKurus)}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }

@@ -16,6 +16,11 @@ let keys = 0;
 const key = () => `key-${String(++keys).padStart(6, "0")}`;
 const order = (ctx: StaffContext, lines: { productId: string; quantity: number; discountPercent?: number }[], discountPercent?: number) =>
   app.till.create(ctx, { createKey: key(), lines, discountPercent });
+/** "Kart", then "Onaylandı" once the terminal approves, as with the manual terminal. */
+async function payByCard(ctx: StaffContext, orderId: string) {
+  const started = await app.till.pay(ctx, orderId, { method: "card", payKey: key() });
+  return app.till.confirmPayment(ctx, orderId, started.payment.id);
+}
 
 /** Ece at the till computer, signed in with her PIN. */
 async function eceAtTill(): Promise<StaffContext> {
@@ -79,9 +84,9 @@ describe("the till's orders (plan piece 6)", () => {
     expect(o.totalKurus).toBe(8_500);
     expect(await code(app.till.pay(ece, o.id, { method: "cash", payKey: key(), tenderedKurus: 5_000 }))).toBe("TENDERED_TOO_LOW");
     const payKey = key();
-    const paid = await app.till.pay(ece, o.id, { method: "cash", payKey, tenderedKurus: 10_000 });
+    const paid = (await app.till.pay(ece, o.id, { method: "cash", payKey, tenderedKurus: 10_000 })).order;
     expect(paid).toMatchObject({ status: "paid", paymentMethod: "cash", tenderedKurus: 10_000, changeKurus: 1_500 });
-    expect((await app.till.pay(ece, o.id, { method: "cash", payKey, tenderedKurus: 10_000 })).paidAt).toBe(paid.paidAt);
+    expect((await app.till.pay(ece, o.id, { method: "cash", payKey, tenderedKurus: 10_000 })).order.paidAt).toBe(paid.paidAt);
     expect(await code(app.till.pay(ece, o.id, { method: "card", payKey: key() }))).toBe("ORDER_NOT_OPEN");
     expect(await code(app.till.update(ece, o.id, { lines: [{ productId: "cay", quantity: 1 }] }))).toBe("ORDER_NOT_OPEN");
   });
@@ -90,7 +95,7 @@ describe("the till's orders (plan piece 6)", () => {
     const murat = await at("murat");
     const open = await order(ece, [{ productId: "latte", quantity: 1 }]);
     const paid = await order(ece, [{ productId: "turk", quantity: 1 }]);
-    await app.till.pay(ece, paid.id, { method: "card", payKey: key() });
+    await payByCard(ece, paid.id);
     expect(open.canVoid).toBe(false);
     expect(await code(app.till.void(ece, open.id, { reason: "Müşteri vazgeçti" }))).toBe("FORBIDDEN");
     expect(await code(app.till.void(murat, open.id, { reason: "  " }))).toBe("REASON_REQUIRED");
@@ -106,7 +111,7 @@ describe("the till's orders (plan piece 6)", () => {
     const b = await order(ece, [{ productId: "cay", quantity: 2 }]);
     const c = await order(ece, [{ productId: "simit", quantity: 1 }]);
     await order(ece, [{ productId: "turk", quantity: 1 }]);
-    await app.till.pay(ece, a.id, { method: "card", payKey: key() });
+    await payByCard(ece, a.id);
     await app.till.pay(ece, b.id, { method: "cash", payKey: key() });
     await app.till.pay(ece, c.id, { method: "cash", payKey: key() });
     await app.till.refund(leyla, c.id, { reason: "Bayattı" });
@@ -152,14 +157,17 @@ describe("the till's orders (plan piece 6)", () => {
   describe("peni for the customer screen (plan piece 7)", () => {
     it("makes a one-time claim when an order is paid: a 4-digit code, a QR token and the peni at the café's rate", async () => {
       const o = await order(ece, [{ productId: "latte", quantity: 2, discountPercent: 10 }, { productId: "simit", quantity: 1 }]);
-      const payKey = key();
-      const paid = await app.till.pay(ece, o.id, { method: "card", payKey });
+      const started = await app.till.pay(ece, o.id, { method: "card", payKey: key() });
+      // Nothing to claim while the card is still on the terminal.
+      expect(started.order.claim).toBeNull();
+      const paid = (await app.till.confirmPayment(ece, o.id, started.payment.id)).order;
       // ₺241 at 5 % is ₺12,05: 12 peni, rounded down.
       expect(paid.claim).toMatchObject({ peni: 12, expiresAt: "2026-10-16T21:00:00.000Z" }); // midnight in Istanbul
       expect(paid.claim!.code).toMatch(/^\d{4}$/);
       expect(paid.claim!.token).toMatch(/^[\w-]{22}$/);
       // A retried payment shows the same claim; other views never carry it.
-      expect((await app.till.pay(ece, o.id, { method: "card", payKey })).claim).toEqual(paid.claim);
+      expect((await app.till.confirmPayment(ece, o.id, started.payment.id)).order.claim).toEqual(paid.claim);
+      expect((await app.till.payment(ece, o.id, started.payment.id)).order.claim).toEqual(paid.claim);
       expect((await app.till.get(ece, o.id)).claim).toBeNull();
       expect((await app.till.list(ece)).orders[0]!.claim).toBeNull();
     });
@@ -168,22 +176,22 @@ describe("the till's orders (plan piece 6)", () => {
       const codes = new Set<string>();
       for (let i = 0; i < 40; i++) {
         const o = await order(ece, [{ productId: "cay", quantity: 1 }]);
-        codes.add((await app.till.pay(ece, o.id, { method: "cash", payKey: key() })).claim!.code);
+        codes.add((await app.till.pay(ece, o.id, { method: "cash", payKey: key() })).order.claim!.code);
       }
       expect(codes.size).toBe(40);
     });
 
     it("makes no claim when the order earns nothing or the café has peni off", async () => {
       const cheap = await order(ece, [{ productId: "cay", quantity: 1 }], 100);
-      expect((await app.till.pay(ece, cheap.id, { method: "cash", payKey: key() })).claim).toBeNull();
+      expect((await app.till.pay(ece, cheap.id, { method: "cash", payKey: key() })).order.claim).toBeNull();
       await app.directory.saveSettings({ ...(await app.directory.getSettings("cafe_moda")), peniEnabled: false });
       const o = await order(ece, [{ productId: "latte", quantity: 1 }]);
-      expect((await app.till.pay(ece, o.id, { method: "cash", payKey: key() })).claim).toBeNull();
+      expect((await app.till.pay(ece, o.id, { method: "cash", payKey: key() })).order.claim).toBeNull();
     });
 
     it("cancels a claim nobody took when the order is refunded", async () => {
       const o = await order(ece, [{ productId: "latte", quantity: 1 }]);
-      await app.till.pay(ece, o.id, { method: "card", payKey: key() });
+      await payByCard(ece, o.id);
       await app.till.refund(await at("murat"), o.id, { reason: "Soğuk geldi" });
       expect((await stores.claims.getClaimByOrder("cafe_moda", o.id))!.cancelledAt).toEqual(now);
     });

@@ -27,6 +27,8 @@ import {
   InMemoryLedgerStore,
   InMemoryMenuStore,
   InMemoryClaimStore,
+  InMemoryPaymentStore,
+  manualTerminals,
   InMemoryOrderStore,
   InMemoryStaffStore,
   Ledger,
@@ -48,6 +50,8 @@ import {
   type MenuItem,
   type MenuStore,
   type ClaimStore,
+  type PaymentStore,
+  type PaymentTerminals,
   type OrderStore,
   type PeniDirectory,
   type Post,
@@ -61,6 +65,7 @@ import { AppError } from "./errors";
 import { buildIcs } from "./ics";
 import { MenuService } from "./menu";
 import { OrderService } from "./orders";
+import { PaymentService } from "./payments";
 import { StaffService, type StaffContext } from "./staff";
 
 /**
@@ -84,6 +89,7 @@ export interface PeniStores {
   menu: MenuStore;
   orders: OrderStore;
   claims: ClaimStore;
+  payments: PaymentStore;
   staff: StaffStore;
 }
 
@@ -96,6 +102,7 @@ export function inMemoryStores(): PeniStores {
     menu: new InMemoryMenuStore(),
     orders: new InMemoryOrderStore(),
     claims: new InMemoryClaimStore(),
+    payments: new InMemoryPaymentStore(),
     staff: new InMemoryStaffStore(),
   };
 }
@@ -108,6 +115,8 @@ export interface PeniAppOptions {
   auth?: { verifier?: IdTokenVerifier; email?: EmailSender | null };
   /** Defaults to the system clock. Tests move it to check day boundaries. */
   clock?: () => Date;
+  /** Which terminal each till pays with. Manual everywhere until the till bridge (D24). */
+  terminals?: PaymentTerminals;
 }
 
 const HOUR_MS = 3_600_000;
@@ -130,6 +139,8 @@ export class PeniApp {
   readonly menuEditor: MenuService;
   /** Satış ekranı's orders (plan piece 6). */
   readonly till: OrderService;
+  /** Every payment and refund, through the till's terminal (plan piece 8). */
+  readonly payments: PaymentService;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   /** Customer sign-in with Google, Apple or an email code. */
@@ -153,7 +164,8 @@ export class PeniApp {
     });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
-    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, () => this.now());
+    this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
+    this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, () => this.now());
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
