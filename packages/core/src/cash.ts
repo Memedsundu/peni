@@ -117,6 +117,8 @@ export interface CashStore {
   findMoveByKey(cafeId: string, key: string): Promise<CashMove | null>;
   /** Oldest first. */
   listMoves(cafeId: string, sessionId: string): Promise<CashMove[]>;
+  /** A move a bill payment or a transfer made, when that is undone while the drawer is still open (piece 20). */
+  removeMove(cafeId: string, id: string): Promise<void>;
 }
 
 export class InMemoryCashStore implements CashStore {
@@ -175,6 +177,11 @@ export class InMemoryCashStore implements CashStore {
       .filter((m) => m.cafeId === cafeId && m.sessionId === sessionId)
       .sort((a, b) => a.at.getTime() - b.at.getTime())
       .map((m) => ({ ...m }));
+  }
+
+  async removeMove(cafeId: string, id: string) {
+    const m = this.moves.get(id);
+    if (m && m.cafeId === cafeId) this.moves.delete(id);
   }
 }
 

@@ -470,6 +470,39 @@ assert.equal((await call("GET", "/staff/moda/debts", { headers: ecePos3 })).json
 assert.deepEqual((await call("GET", "/staff/moda", { headers: STAFF })).json.debts, debts1.totals);
 step("Leyla pays a ₺1.000 repair with a check (once) and Murat's money; Borçlar owes them instead; a cashed check's payment stays; Murat is paid back; the card takes ₺100; Ece can't see Borçlar");
 
+// 5o. Nakit ve banka (piece 20): with the drawer closed, the oat milk bill and Murat's ₺400
+//     came out of the reserve, and the cashed check out of the bank. Leyla moves ₺1.000 from
+//     the reserve to the bank (once despite a retry) and takes it back; the bank is corrected
+//     to its statement. She closes last month, after which a bill dated in it is refused, and
+//     reopens it with a reason. Ece can't see the money.
+let money = (await call("GET", "/staff/moda/money", { headers: STAFF })).json;
+assert.ok(money.started && !money.drawer.open, "the demo café keeps its money in Peni; the drawer was closed in 5f");
+const lineFor = (kind, label) => money.lines.find((l) => l.kind === kind && l.label === label);
+assert.deepEqual([lineFor("bill", supplierName)?.account, lineFor("bill", supplierName)?.amountKurus], ["reserve", -45_000], "the oat milk bill came out of the reserve");
+assert.deepEqual([lineFor("repayment", "Murat Aksu")?.account, lineFor("check", checkPay.check.number)?.account], ["reserve", "bank"]);
+const transferIn = { key: key(), kind: "transfer", account: "reserve", to: "bank", amountKurus: 100_000, note: "Smoke" };
+await call("POST", "/staff/moda/money/moves", { headers: STAFF, body: transferIn });
+const moved = (await call("POST", "/staff/moda/money/moves", { headers: STAFF, body: transferIn })).json;
+assert.deepEqual([money.reserveKurus - moved.reserveKurus, moved.bankKurus - money.bankKurus], [100_000, 100_000], "a retried transfer moves once");
+money = (await call("POST", `/staff/moda/money/moves/${moved.lines.find((l) => l.kind === "transfer" && l.note === "Smoke").undoId}/remove`, { headers: STAFF, body: {} })).json;
+assert.equal(money.bankKurus, moved.bankKurus - 100_000);
+const statement = money.bankKurus - 1_250;
+money = (await call("POST", "/staff/moda/money/moves", { headers: STAFF, body: { key: key(), kind: "correction", account: "bank", amountKurus: statement, note: "Ekstre" } })).json;
+assert.deepEqual([money.bankKurus, money.lines[0].kind, money.lines[0].amountKurus], [statement, "correction", -1_250]);
+assert.equal((await call("GET", "/staff/moda/money", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
+let months = (await call("GET", "/staff/moda/money/months", { headers: STAFF })).json;
+const lastMonth = months.next.month;
+months = (await call("POST", "/staff/moda/money/months", { headers: STAFF, body: { month: lastMonth, note: "Smoke" } })).json;
+assert.equal(months.closedThrough, `${lastMonth}-${months.closes[0].summary.to.slice(8)}`);
+const lateBill = await call("POST", "/staff/moda/bills", {
+  headers: STAFF,
+  body: { key: key(), supplierId: null, date: `${lastMonth}-15`, lines: [{ itemId: null, name: "Unutulan fiş", category: "other", totalKurus: 5_000 }] },
+});
+assert.deepEqual([lateBill.status, lateBill.json.error.code], [409, "PERIOD_CLOSED"]);
+months = (await call("POST", `/staff/moda/money/months/${months.closes[0].id}/reopen`, { headers: STAFF, body: { reason: "Smoke" } })).json;
+assert.deepEqual([months.closedThrough, months.next.month, months.closes[0].reopenReason], [null, lastMonth, "Smoke"]);
+step("Cash bills and repayments came out of the reserve and the cashed check out of the bank; Leyla moves ₺1.000 (once) and back, corrects the bank, closes last month (a bill in it is refused) and reopens it; Ece can't see the money");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

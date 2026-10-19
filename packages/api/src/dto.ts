@@ -193,6 +193,19 @@ export type BillCategoryDTO = "ingredients" | "supplies" | "rent" | "utilities" 
 export type BillPayMethodDTO = "cash" | "card" | "bank" | "credit" | "check" | "loan";
 /** How a debt is paid back. */
 export type MoneyMethodDTO = "cash" | "card" | "bank";
+/** Where the café's money is (piece 20): the till's drawer, cash kept aside, the bank. */
+export type MoneyAccountDTO = "drawer" | "reserve" | "bank";
+
+/**
+ * Where cash for a payment can come from, once the café keeps its money in Peni. Null
+ * before that: cash isn't followed yet, so nothing to pick.
+ */
+export interface CashFromDTO {
+  /** The drawer is open, so it can pay. */
+  drawerOpen: boolean;
+  /** The viewer may take it from the reserve ("cash.manage"). */
+  reserve: boolean;
+}
 /** Overdue: unpaid and past its due date in the café's time zone. */
 export type BillStateDTO = "unpaid" | "overdue" | "paid" | "voided";
 
@@ -244,6 +257,8 @@ export interface BillDTO extends BillSummaryDTO {
   canManage: boolean;
   /** What the viewer can pay the rest with; null when nothing is left or they can't pay. */
   payWith: PayOptionsDTO | null;
+  /** The bill's month is closed (piece 20): it can't be corrected, voided or paid on that month any more. */
+  closed: boolean;
 }
 
 export interface BillPaymentDTO {
@@ -258,7 +273,9 @@ export interface BillPaymentDTO {
   lender: string | null;
   /** Why "Geri al" can't undo it: the check was cashed, or the debt paid back. Null when it can. */
   locked: "CHECK_CASHED" | "LOAN_REPAID" | null;
-  /** The viewer may undo it (bills.manage, plus debts.card or debts.edit for those methods). */
+  /** Where the money came from; null for credit, checks and loans, or when it wasn't followed. */
+  account: MoneyAccountDTO | null;
+  /** The viewer may undo it (bills.manage, plus debts.card or debts.edit for those methods), and its month isn't closed. */
   canRemove: boolean;
 }
 
@@ -275,6 +292,9 @@ export interface PayOptionsDTO {
   /** Who can be the lender: the team, and people named on earlier loans. */
   team: { memberId: string; name: string }[];
   lenderNames: string[];
+  cashFrom: CashFromDTO | null;
+  /** Payments can't be dated on or before this day: its month is closed. */
+  closedThrough: string | null;
 }
 
 /** `GET /staff/:slug/bills?month=2026-10` or `?show=owed`: Faturalar. Needs "bills.view". */
@@ -967,7 +987,7 @@ export interface LenderDTO {
     removable: boolean;
   }[];
   /** Newest first. */
-  repayments: { id: string; amountKurus: number; method: MoneyMethodDTO; paidOn: string; by: string | null }[];
+  repayments: { id: string; amountKurus: number; method: MoneyMethodDTO; paidOn: string; by: string | null; account: MoneyAccountDTO | null }[];
 }
 
 export interface CardDTO {
@@ -990,7 +1010,7 @@ export interface CardDTO {
   /** Bills paid with it, newest first (the last 30). */
   charges: { paymentId: string; billId: string; name: string; amountKurus: number; paidOn: string }[];
   /** Newest first. */
-  payments: { id: string; amountKurus: number; method: "cash" | "bank"; paidOn: string; by: string | null }[];
+  payments: { id: string; amountKurus: number; method: "cash" | "bank"; paidOn: string; by: string | null; account: MoneyAccountDTO | null }[];
 }
 
 /** `GET /staff/:slug/debts`: Borçlar. Needs "debts.view"; the card needs "debts.card". */
@@ -1013,6 +1033,111 @@ export interface DebtsDTO {
   canEdit: boolean;
   canCard: boolean;
   canPayBills: boolean;
+  cashFrom: CashFromDTO | null;
+  /** Nothing dated on or before this day can change: its month is closed. */
+  closedThrough: string | null;
+}
+
+// ─────────────────────────────────────────────── money and month close (plan piece 20)
+
+/**
+ * One line on Nakit ve banka. The reserve's and the bank's lines are their movements; the
+ * bank also gets each day's card sales, and the drawer each day's cash sales, the cash put
+ * in or taken out at Kasa, and count differences.
+ */
+export type MoneyLineKindDTO =
+  | "opening"
+  | "transfer"
+  | "deposit"
+  | "withdraw"
+  | "correction"
+  | "bill"
+  | "check"
+  | "repayment"
+  | "card"
+  | "sales"
+  /** Cash put in or taken out at Kasa, with its reason as the label. */
+  | "drawer"
+  /** A count that didn't match, with why as the label. */
+  | "difference";
+
+export interface MoneyLineDTO {
+  id: string;
+  day: string;
+  at: string;
+  account: MoneyAccountDTO;
+  kind: MoneyLineKindDTO;
+  /** In is positive, out negative. */
+  amountKurus: number;
+  /** The other account of a transfer. */
+  counterpart: MoneyAccountDTO | null;
+  /** Who or what: the supplier, the check's number, the lender, the card, the reason. */
+  label: string | null;
+  note: string | null;
+  by: string | null;
+  /** Put back because the payment was undone after its drawer day was closed. */
+  reversal: boolean;
+  /** The bill a payment was for. */
+  billId: string | null;
+  /** "Geri al": made here, in an open month, and its drawer day (if any) still open. Send `undoId`. */
+  undoId: string | null;
+}
+
+/** `GET /staff/:slug/money`: Nakit ve banka. Needs "cash.manage". */
+export interface MoneyDTO {
+  today: string;
+  /** Null until the café starts with what the reserve and the bank hold. */
+  started: { on: string; by: string | null } | null;
+  drawer: {
+    /** The open drawer's expected cash, or the last closing count; null before the first count. */
+    balanceKurus: number | null;
+    open: boolean;
+    sessionId: string | null;
+  };
+  reserveKurus: number | null;
+  bankKurus: number | null;
+  totalKurus: number | null;
+  /** The last 60 days since the start, newest first. */
+  lines: MoneyLineDTO[];
+  closedThrough: string | null;
+  canManage: boolean;
+  /** "cash.periods": closing and reopening months (the owner). */
+  canClose: boolean;
+}
+
+export interface MonthSummaryDTO {
+  month: string;
+  from: string;
+  to: string;
+  sales: { cashKurus: number; cardKurus: number; totalKurus: number };
+  bills: { count: number; totalKurus: number; paidKurus: Record<string, number> };
+  money: { drawerKurus: number | null; reserveKurus: number | null; bankKurus: number | null };
+  owed: { billsKurus: number; checksKurus: number; loansKurus: number; cardKurus: number; totalKurus: number };
+}
+
+export interface MonthCloseDTO {
+  id: string;
+  month: string;
+  closedAt: string;
+  by: string | null;
+  note: string | null;
+  summary: MonthSummaryDTO;
+  reopenedAt: string | null;
+  reopenedBy: string | null;
+  reopenReason: string | null;
+  /** The latest close still standing, and the viewer may reopen it. */
+  canReopen: boolean;
+}
+
+/** `GET /staff/:slug/money/months`: Ay kapanışı. Needs "cash.manage"; closing needs "cash.periods". */
+export interface MonthsDTO {
+  today: string;
+  closedThrough: string | null;
+  /** The month that can be closed now, with its numbers so far; null when the next one isn't over yet. */
+  next: { month: string; summary: MonthSummaryDTO } | null;
+  /** Newest first, reopened ones too. */
+  closes: MonthCloseDTO[];
+  canClose: boolean;
 }
 
 // ─────────────────────────────────────────────── staff (plan piece 2)

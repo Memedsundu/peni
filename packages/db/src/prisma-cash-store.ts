@@ -118,4 +118,8 @@ export class PrismaCashStore implements CashStore {
   async listMoves(cafeId: string, sessionId: string): Promise<CashMove[]> {
     return this.db().cashMove.findMany({ where: { cafeId, sessionId }, orderBy: [{ at: "asc" }, { id: "asc" }] });
   }
+
+  async removeMove(cafeId: string, id: string): Promise<void> {
+    await this.db().cashMove.deleteMany({ where: { id, cafeId } });
+  }
 }

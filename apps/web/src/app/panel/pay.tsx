@@ -1,11 +1,11 @@
 "use client";
 
-import { newIdempotencyKey, type BillDTO, type BillPaymentDTO, type BillPayMethodDTO } from "@peni/api";
+import { newIdempotencyKey, type BillDTO, type BillPaymentDTO, type BillPayMethodDTO, type CashFromDTO, type MoneyAccountDTO } from "@peni/api";
 import { formatTL } from "@peni/brand/format";
 import { useRef, useState } from "react";
 import { api } from "../kasa/api";
 import { Button, Notice } from "../kasa/ui";
-import { formatDay, parseTL, tlInput } from "./amounts";
+import { addDaysTo, formatDay, parseTL, tlInput } from "./amounts";
 import { Field, Segmented, useSave } from "./controls";
 import { field } from "./shell";
 import { fill, type Lang, type T, type TextKey } from "./text";
@@ -18,6 +18,47 @@ export const METHOD: Record<BillPayMethodDTO, TextKey> = {
   check: "payCheck",
   loan: "payLoan",
 };
+
+export const FROM_WORD: Record<MoneyAccountDTO, TextKey> = { drawer: "fromDrawer", reserve: "fromReserve", bank: "fromBank" };
+
+/** "Nereden?" for cash: the open drawer, or the reserve for those who may. */
+export function CashFrom({
+  t,
+  cashFrom,
+  value,
+  onChange,
+}: {
+  t: T;
+  cashFrom: CashFromDTO;
+  value: "drawer" | "reserve";
+  onChange: (v: "drawer" | "reserve") => void;
+}) {
+  const options = [
+    ...(cashFrom.drawerOpen ? [{ value: "drawer" as const, label: t("payFromDrawer") }] : []),
+    ...(cashFrom.reserve ? [{ value: "reserve" as const, label: t("payFromReserve") }] : []),
+  ];
+  if (!options.length) return <Notice tone="red">{t("payFromDrawerClosed")}</Notice>;
+  return <Segmented label={t("payFrom")} value={value} onChange={onChange} options={options} />;
+}
+
+/** Where cash comes from unless the payer picks: the drawer when it's open. */
+export function defaultFrom(cashFrom: CashFromDTO | null): "drawer" | "reserve" {
+  return cashFrom && !cashFrom.drawerOpen && cashFrom.reserve ? "reserve" : "drawer";
+}
+
+/** Whether the cash can come from somewhere: always, before the café keeps its money in Peni. */
+export function cashReady(cashFrom: CashFromDTO | null): boolean {
+  return !cashFrom || cashFrom.drawerOpen || cashFrom.reserve;
+}
+
+/** The first day a payment can be dated on: after the bill, and after the last closed month. */
+export function firstDay(closedThrough: string | null, after?: string): string | undefined {
+  const open = closedThrough ? addDaysTo(closedThrough, 1) : undefined;
+  return [after, open]
+    .filter((d): d is string => !!d)
+    .sort()
+    .at(-1);
+}
 
 /**
  * "Öde" on a bill (plan piece 19), on Faturalar and on Borçlar: all of what is left or
@@ -50,6 +91,7 @@ export function PayForm({
   const [lender, setLender] = useState("");
   const [lenderName, setLenderName] = useState("");
   const [loanDue, setLoanDue] = useState("");
+  const [from, setFrom] = useState<"drawer" | "reserve">(defaultFrom(options.cashFrom));
   const save = useSave<BillDTO>(lang, (b) => {
     key.current = newIdempotencyKey();
     if (b.payWith) setAmount(tlInput(b.payWith.leftKurus));
@@ -66,6 +108,7 @@ export function PayForm({
   const ready =
     amountOk &&
     !!paidOn &&
+    (method !== "cash" || cashReady(options.cashFrom)) &&
     (method !== "check" || (checkNumber.trim() && checkDue && checkDue >= paidOn)) &&
     (method !== "loan" || ((lender.startsWith("member:") || named) && (!loanDue || loanDue >= paidOn)));
 
@@ -76,6 +119,7 @@ export function PayForm({
         method,
         amountKurus: amountKurus!,
         paidOn,
+        ...(method === "cash" && options.cashFrom ? { from } : {}),
         ...(method === "check" ? { check: { number: checkNumber.trim(), bankName: checkBank.trim() || null, dueDate: checkDue } } : {}),
         ...(method === "loan" ? { lender: lender.startsWith("member:") ? { memberId: lender.slice(7) } : { name: named }, loanDueDate: loanDue || null } : {}),
       }),
@@ -94,6 +138,7 @@ export function PayForm({
       <Segmented label={t("payWhat")} value={method} onChange={setMethod} options={methods.map((m) => ({ value: m, label: t(METHOD[m]) }))} />
       {help && <p className="-mt-1 text-sm leading-normal text-muted">{help}</p>}
       {options.creditNotSet && method === "cash" && <p className="-mt-1 text-xs text-muted">{t("creditNotSet")}</p>}
+      {method === "cash" && options.cashFrom && <CashFrom t={t} cashFrom={options.cashFrom} value={from} onChange={setFrom} />}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label={t("payAmount")}
@@ -105,7 +150,14 @@ export function PayForm({
         />
         <label className="flex flex-col gap-2 text-sm text-muted">
           {t("paidOn")}
-          <input type="date" className={`${field} min-h-12`} value={paidOn} min={bill.date} max={today} onChange={(e) => setPaidOn(e.target.value)} />
+          <input
+            type="date"
+            className={`${field} min-h-12`}
+            value={paidOn}
+            min={firstDay(options.closedThrough, bill.date)}
+            max={today}
+            onChange={(e) => setPaidOn(e.target.value)}
+          />
         </label>
       </div>
       {method === "check" && (
@@ -171,6 +223,7 @@ export function PaymentLine({ t, lang, payment: p, busy, onUndo }: { t: T; lang:
         <span>
           <span className="font-semibold tabular">{formatTL(p.amountKurus)}</span> ·{" "}
           {fill(t(p.method === "loan" ? "paidByLoan" : "paidBy"), { method: methodName, day: formatDay(p.paidOn, lang), by: p.by ? ` · ${p.by}` : "" })}
+          {p.account && p.method === "cash" && ` · ${t(FROM_WORD[p.account])}`}
         </span>
         {detail && <span className="text-ink">{detail}</span>}
         {p.locked && onUndo && <span className="text-muted">{t(p.locked === "CHECK_CASHED" ? "lockedCheck" : "lockedLoan")}</span>}

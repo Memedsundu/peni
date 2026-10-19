@@ -175,8 +175,18 @@ export const PERMISSIONS = {
   "cash.manage": {
     section: "cash",
     label: { tr: "Nakit ve bankayı yönetir", en: "Manages cash and bank" },
-    hint: { tr: "Kasa, kenar, banka ve kart bakiyeleri arasında para hareketi.", en: "Moves money between the drawer, reserve, bank and card." },
+    hint: { tr: "Kasa, ayrı kasa ve banka arasında para hareketi; ayrı kasadan ödeme.", en: "Moves money between the drawer, the reserve and the bank; pays from the reserve." },
     roles: MANAGER,
+    locked: true,
+  },
+  "cash.periods": {
+    section: "cash",
+    label: { tr: "Ayı kapatır", en: "Closes the month" },
+    hint: {
+      tr: "Biten ayın rakamlarını saklar; o aya ve öncesine kayıt eklenemez, değiştirilemez. Yeniden açabilir.",
+      en: "Keeps the finished month's numbers; nothing in it or before it can be added or changed. Can reopen it.",
+    },
+    roles: OWNER,
     locked: true,
   },
   "debts.view": {

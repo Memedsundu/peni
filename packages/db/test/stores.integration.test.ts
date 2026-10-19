@@ -473,10 +473,10 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     // Entered late, dated earlier: the October 10th bill still sets the price.
     expect(await stores.bills.lastPrice(cafeId, item.id)).toEqual({ billId: oct.id, date: "2026-10-10", qtyMilli: 12_000, totalKurus: 54_000 });
 
-    await stores.bills.addPayment({ id: `bpy_${run}`, cafeId, billId: sep.id, amountKurus: 86_000, method: "cash", paidOn: "2026-09-28", memberId: "stf_x", createdAt: at });
+    await stores.bills.addPayment({ id: `bpy_${run}`, cafeId, billId: sep.id, amountKurus: 86_000, method: "cash", paidOn: "2026-09-28", account: "drawer", memberId: "stf_x", createdAt: at });
     await stores.bills.saveBill({ ...sep, paidKurus: 86_000, paidAt: at });
     expect((await stores.bills.getBill(cafeId, sep.id))!.payments).toEqual([
-      { id: `bpy_${run}`, cafeId, billId: sep.id, amountKurus: 86_000, method: "cash", paidOn: "2026-09-28", memberId: "stf_x", createdAt: at },
+      { id: `bpy_${run}`, cafeId, billId: sep.id, amountKurus: 86_000, method: "cash", paidOn: "2026-09-28", account: "drawer", memberId: "stf_x", createdAt: at },
     ]);
     await stores.bills.saveBill({ ...oct, version: 3, voidedAt: at, voidedById: "stf_x", voidReason: "İki kez" });
 
@@ -490,7 +490,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.bills.lastPrice(cafeId, item.id))!.billId).toBe(late.id);
 
     // Paid in parts; the credit card's charges are the payments by "credit".
-    const part = { cafeId, billId: late.id, method: "credit" as const, memberId: "stf_x", createdAt: at };
+    const part = { cafeId, billId: late.id, method: "credit" as const, account: null, memberId: "stf_x", createdAt: at };
     await stores.bills.addPayment({ ...part, id: `bpy_late2_${run}`, amountKurus: 15_000, paidOn: "2026-10-05" });
     await stores.bills.addPayment({ ...part, id: `bpy_late1_${run}`, amountKurus: 10_000, paidOn: "2026-10-03" });
     expect((await stores.bills.listPayments(cafeId, { method: "credit" })).map((p) => p.id)).toEqual([`bpy_late1_${run}`, `bpy_late2_${run}`]);
@@ -512,7 +512,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.stock.getItem(cafeId, item.id))!.qtyMilli).toBe(0);
   });
   it("keeps checks, loans with their repayments, and the credit card with its payments", async () => {
-    const payment = { id: `bpy_debt_${run}`, cafeId, billId: `bil_debt_${run}`, amountKurus: 450_000, method: "check" as const, paidOn: "2026-10-01", memberId: "stf_x", createdAt: at };
+    const payment = { id: `bpy_debt_${run}`, cafeId, billId: `bil_debt_${run}`, amountKurus: 450_000, method: "check" as const, paidOn: "2026-10-01", account: null, memberId: "stf_x", createdAt: at };
     await stores.bills.saveBill({
       id: payment.billId, cafeId, supplierId: null, number: null, date: "2026-10-01", dueDate: null, note: null,
       lines: [{ itemId: null, name: "Kira", category: "rent", qtyMilli: null, totalKurus: 450_000 }],
@@ -543,7 +543,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.debts.saveLoan(loan);
     await stores.debts.saveLoan({ ...loan, id: `lon0_${run}`, borrowedOn: "2026-10-02", amountKurus: 10_000 });
     expect((await stores.debts.listLoans(cafeId, { lenderKey: lender })).map((l) => l.id)).toEqual([`lon0_${run}`, loan.id]);
-    await stores.debts.addRepayment({ id: `lrp_${run}`, cafeId, lenderKey: lender, amountKurus: 20_000, method: "cash", paidOn: "2026-10-13", memberId: "stf_x", createdAt: at });
+    await stores.debts.addRepayment({ id: `lrp_${run}`, cafeId, lenderKey: lender, amountKurus: 20_000, method: "cash", paidOn: "2026-10-13", account: null, memberId: "stf_x", createdAt: at });
     expect(await stores.debts.listRepayments(cafeId, { lenderKey: lender })).toHaveLength(1);
     expect(await stores.debts.getRepayment(cafeId, `lrp_${run}`)).toMatchObject({ amountKurus: 20_000 });
     await stores.debts.removeRepayment(cafeId, `lrp_${run}`);
@@ -554,9 +554,46 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.debts.saveCard(card);
     await stores.debts.saveCard({ ...card, limitKurus: 5_000_000 });
     expect(await stores.debts.getCard(cafeId)).toMatchObject({ limitKurus: 5_000_000, statementDay: 26 });
-    await stores.debts.addCardPayment({ id: `cpy_${run}`, cafeId, amountKurus: 200_000, method: "bank", paidOn: "2026-10-12", memberId: "stf_x", createdAt: at });
-    expect(await stores.debts.listCardPayments(cafeId)).toEqual([{ id: `cpy_${run}`, cafeId, amountKurus: 200_000, method: "bank", paidOn: "2026-10-12", memberId: "stf_x", createdAt: at }]);
+    await stores.debts.addCardPayment({ id: `cpy_${run}`, cafeId, amountKurus: 200_000, method: "bank", paidOn: "2026-10-12", account: "bank", memberId: "stf_x", createdAt: at });
+    expect(await stores.debts.listCardPayments(cafeId)).toEqual([{ id: `cpy_${run}`, cafeId, amountKurus: 200_000, method: "bank", paidOn: "2026-10-12", account: "bank", memberId: "stf_x", createdAt: at }]);
     await stores.debts.removeCardPayment(cafeId, `cpy_${run}`);
     expect(await stores.debts.getCardPayment(cafeId, `cpy_${run}`)).toBeNull();
+  });
+  it("keeps the reserve's and the bank's movements and the month closes", async () => {
+    expect(await stores.books.saveStart({ cafeId, startedOn: "2026-09-28", memberId: "stf_x", createdAt: at })).toBe(true);
+    expect(await stores.books.saveStart({ cafeId, startedOn: "2026-10-01", memberId: "stf_x", createdAt: at })).toBe(false);
+    expect(await stores.books.getStart(cafeId)).toMatchObject({ startedOn: "2026-09-28" });
+    const m = { cafeId, amountKurus: 1_200_000, kind: "opening" as const, counterpart: null, source: "opening", day: "2026-09-28", note: null, memberId: "stf_x", createdAt: at };
+    await stores.books.addMovements([
+      { ...m, id: `mmv_r_${run}`, account: "reserve" },
+      { ...m, id: `mmv_b_${run}`, account: "bank", amountKurus: 8_500_000 },
+      { ...m, id: `mmv_t1_${run}`, account: "reserve", amountKurus: -500_000, kind: "transfer", counterpart: "bank", source: `manual:${run}`, day: "2026-10-07" },
+      { ...m, id: `mmv_t2_${run}`, account: "bank", amountKurus: 500_000, kind: "transfer", counterpart: "reserve", source: `manual:${run}`, day: "2026-10-07" },
+    ]);
+    // The same source and account again is left as it is.
+    await stores.books.addMovements([{ ...m, id: `mmv_again_${run}`, account: "reserve", amountKurus: 1 }]);
+    expect(await stores.books.totals(cafeId)).toEqual({ reserve: 700_000, bank: 9_000_000 });
+    expect(await stores.books.totals(cafeId, "2026-09-30")).toEqual({ reserve: 1_200_000, bank: 8_500_000 });
+    expect((await stores.books.listMovements(cafeId, { account: "bank" })).map((x) => x.amountKurus)).toEqual([500_000, 8_500_000]);
+    expect(await stores.books.listMovements(cafeId, { since: "2026-10-01" })).toHaveLength(2);
+    expect(await stores.books.listBySource(cafeId, `manual:${run}`)).toHaveLength(2);
+    await stores.books.removeBySource(cafeId, `manual:${run}`);
+    expect(await stores.books.totals(cafeId)).toEqual({ reserve: 1_200_000, bank: 8_500_000 });
+
+    const summary = {
+      month: "2026-09", from: "2026-09-01", to: "2026-09-30", sales: { cashKurus: 0, cardKurus: 0, totalKurus: 0 },
+      bills: { count: 0, totalKurus: 0, paidKurus: {} }, money: { drawerKurus: null, reserveKurus: 1_200_000, bankKurus: 8_500_000 },
+      owed: { billsKurus: 0, checksKurus: 0, loansKurus: 0, cardKurus: 0, totalKurus: 0 },
+    };
+    const close = { id: `mcl_${run}`, cafeId, month: "2026-09", closedAt: at, closedById: "stf_x", note: null, summary, reopenedAt: null, reopenedById: null, reopenReason: null };
+    expect(await stores.books.saveClose(close)).toBe(true);
+    // One standing close per month: a second one is refused until the first is reopened.
+    expect(await stores.ledger.atomically(() => stores.books.saveClose({ ...close, id: `mcl2_${run}` }))).toBe(false);
+    expect(await stores.books.saveClose({ ...close, reopenedAt: at, reopenedById: "stf_x", reopenReason: "Eksik fatura" })).toBe(true);
+    expect(await stores.books.saveClose({ ...close, id: `mcl2_${run}` })).toBe(true);
+    expect((await stores.books.listCloses(cafeId)).map((c) => [c.id, c.reopenReason])).toEqual(
+      expect.arrayContaining([[`mcl_${run}`, "Eksik fatura"], [`mcl2_${run}`, null]]),
+    );
+    expect(await stores.books.getClose(cafeId, `mcl_${run}`)).toMatchObject({ summary, reopenReason: "Eksik fatura" });
   });
 });

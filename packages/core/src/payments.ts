@@ -140,6 +140,8 @@ export interface PaymentStore {
   listPayments(cafeId: string, orderIds: string[]): Promise<Payment[]>;
   /** Everything taken during a drawer session, oldest first. */
   listCashSessionPayments(cafeId: string, cashSessionId: string): Promise<Payment[]>;
+  /** Approved payments settled from `from` until before `to`, oldest first: card sales into the bank, a month's sales (piece 20). */
+  listSettled(cafeId: string, from: Date, to: Date): Promise<Payment[]>;
 }
 
 export class InMemoryPaymentStore implements PaymentStore {
@@ -174,6 +176,13 @@ export class InMemoryPaymentStore implements PaymentStore {
     return [...this.payments.values()]
       .filter((p) => p.cafeId === cafeId && p.cashSessionId === cashSessionId)
       .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+      .map((p) => ({ ...p }));
+  }
+
+  async listSettled(cafeId: string, from: Date, to: Date) {
+    return [...this.payments.values()]
+      .filter((p) => p.cafeId === cafeId && p.status === "approved" && p.settledAt && p.settledAt >= from && p.settledAt < to)
+      .sort((a, b) => a.settledAt!.getTime() - b.settledAt!.getTime())
       .map((p) => ({ ...p }));
   }
 }

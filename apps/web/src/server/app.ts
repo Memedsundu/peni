@@ -31,7 +31,9 @@ import {
   type StockStore,
   InMemoryBillStore,
   InMemoryDebtStore,
+  InMemoryBooksStore,
   type BillStore,
+  type BooksStore,
   type DebtStore,
   type ImageStore,
   type ReportStore,
@@ -93,6 +95,7 @@ import { CashService } from "./cash";
 import { StockService } from "./stock";
 import { BillService } from "./bills";
 import { DebtService } from "./debts";
+import { MoneyService } from "./money";
 import { bare, eventCapacity, eventTime, FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 
@@ -126,6 +129,7 @@ export interface PeniStores {
   stock: StockStore;
   bills: BillStore;
   debts: DebtStore;
+  books: BooksStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -146,6 +150,7 @@ export function inMemoryStores(): PeniStores {
     stock: new InMemoryStockStore(),
     bills: new InMemoryBillStore(),
     debts: new InMemoryDebtStore(),
+    books: new InMemoryBooksStore(),
   };
 }
 
@@ -199,6 +204,8 @@ export class PeniApp {
   readonly debts: DebtService;
   /** Checks, loans and the card as stored; for the demo seed and the data move from Shelby. */
   readonly debtStore: DebtStore;
+  readonly money: MoneyService;
+  readonly books: BooksStore;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   readonly feed: FeedService;
@@ -250,8 +257,11 @@ export class PeniApp {
     this.till.stock = this.stock;
     this.billStore = stores.bills;
     this.debtStore = stores.debts;
-    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, stores.debts, (fn) => stores.ledger.atomically(fn), () => this.now());
-    this.debts = new DebtService(stores.debts, stores.bills, this.bills, this.directory, stores.staff, (fn) => stores.ledger.atomically(fn), () => this.now());
+    this.books = stores.books;
+    const atomically = <T>(fn: () => Promise<T>) => stores.ledger.atomically(fn);
+    this.money = new MoneyService(stores.books, stores.cash, stores.payments, stores.bills, stores.debts, this.directory, stores.staff, atomically, () => this.now());
+    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, stores.debts, this.money, atomically, () => this.now());
+    this.debts = new DebtService(stores.debts, stores.bills, this.bills, this.money, this.directory, stores.staff, atomically, () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
