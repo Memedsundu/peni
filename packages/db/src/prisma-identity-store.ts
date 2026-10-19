@@ -1,4 +1,4 @@
-import type { Cafe, Customer, IdentityStore, StaffGrant } from "@peni/core";
+import type { Cafe, Customer, IdentityStore } from "@peni/core";
 import type { Db } from "./db";
 import { Prisma } from "./generated/client";
 
@@ -64,20 +64,6 @@ export class PrismaIdentityStore implements IdentityStore {
 
   async revokeSession(tokenHash: string, at: Date): Promise<void> {
     await this.db().customerSession.updateMany({ where: { tokenHash, revokedAt: null }, data: { revokedAt: at } });
-  }
-
-  async grantStaff(grant: StaffGrant): Promise<void> {
-    const customer = await this.db().customer.findUniqueOrThrow({ where: { id: grant.customerId } });
-    await this.db().staffMember.upsert({
-      where: { cafeId_customerId: { cafeId: grant.cafeId, customerId: grant.customerId } },
-      create: { cafeId: grant.cafeId, customerId: grant.customerId, name: customer.displayName, role: grant.role },
-      update: { role: grant.role },
-    });
-  }
-
-  async staffGrantsFor(customerId: string): Promise<StaffGrant[]> {
-    const rows = await this.db().staffMember.findMany({ where: { customerId }, orderBy: { createdAt: "asc" } });
-    return rows.map((r) => ({ cafeId: r.cafeId, customerId, role: r.role }));
   }
 
   async memberCodeOf(membershipId: string): Promise<string | null> {

@@ -8,7 +8,7 @@ export interface CustomerDTO {
   profileVisible: boolean;
 }
 
-export type StaffRole = "owner" | "manager" | "barista";
+export type StaffRole = "owner" | "manager" | "chef" | "barista";
 
 /** A café where this customer works. Only staff see a way into the café panel. [G19] */
 export interface StaffCafeDTO {
@@ -285,6 +285,72 @@ export interface StaffDashboardDTO {
     previous: StaffReportFieldsDTO & { untilIso: string; memberCount: number };
   };
   memberCount: number;
+}
+
+// ─────────────────────────────────────────────── staff (plan piece 2)
+
+export interface TextDTO {
+  tr: string;
+  en: string;
+}
+
+export interface StaffAccountDTO {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** A café the staff member works at, and what their role lets them do there. */
+export interface StaffCafeAccessDTO {
+  slug: string;
+  name: string;
+  role: StaffRole;
+  /** Permission keys from @peni/core's PERMISSIONS, e.g. "till.use". */
+  permissions: string[];
+}
+
+/** `GET /staff/me` */
+export interface StaffMeDTO {
+  account: StaffAccountDTO;
+  cafes: StaffCafeAccessDTO[];
+}
+
+/** `POST /staff/auth/sign-in`. The web app uses the httpOnly cookie; the app keeps `token`. */
+export interface StaffSessionDTO extends StaffMeDTO {
+  token: string;
+}
+
+export interface TeamMemberDTO {
+  id: string;
+  name: string;
+  email: string;
+  role: StaffRole;
+  sinceIso: string;
+  isYou: boolean;
+  /** False until a password is set. */
+  canSignIn: boolean;
+}
+
+/** `GET /staff/:slug/team` */
+export interface TeamDTO {
+  members: TeamMemberDTO[];
+}
+
+export interface RolePermissionDTO {
+  key: string;
+  label: TextDTO;
+  hint: TextDTO;
+  /** Same for every café: money, reports, the assistant and the team. */
+  locked: boolean;
+  roles: Record<StaffRole, boolean>;
+}
+
+/** `GET /staff/:slug/roles`: what each role may do, grouped like the café panel. */
+export interface RolesDTO {
+  roles: { role: StaffRole; label: TextDTO }[];
+  sections: { section: string; label: TextDTO; permissions: RolePermissionDTO[] }[];
+  /** Whether the viewer may change it. */
+  canEdit: boolean;
 }
 
 export interface ApiErrorBody {

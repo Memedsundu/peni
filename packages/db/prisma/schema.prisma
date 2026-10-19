@@ -25,14 +25,14 @@ model Customer {
   createdAt           DateTime  @default(now())
   deletionRequestedAt DateTime?
 
-  memberships Membership[]
-  sessions    CustomerSession[]
-  devices     CustomerDevice[]
-  comments    PostComment[]
-  reactions   PostReaction[]
-  rsvps       EventRsvp[]
-  staffRoles  StaffMember[]
-  lookups     GiftLookup[]
+  memberships  Membership[]
+  sessions     CustomerSession[]
+  devices      CustomerDevice[]
+  comments     PostComment[]
+  reactions    PostReaction[]
+  rsvps        EventRsvp[]
+  staffAccount StaffAccount?
+  lookups      GiftLookup[]
 }
 
 model CustomerSession {
@@ -89,6 +89,7 @@ model Cafe {
 
   settings    CafeSettings?
   staff       StaffMember[]
+  roleChanges RolePermission[]
   menu        MenuItem[]
   memberships Membership[]
   posts       CafePost[]
@@ -119,25 +120,79 @@ model CafeSettings {
 enum StaffRole {
   owner
   manager
+  chef
   barista
 }
 
-/// A role at one café. Plan piece 2 (staff and roles) adds staff sign-in; for now a role belongs to a customer account.
+/// A person who works at one or more cafés. Signs in with email and password.
+model StaffAccount {
+  id           String    @id @default(cuid())
+  /// Lower case.
+  email        String    @unique
+  name         String
+  /// bcrypt, as in Shelby, so Shelby passwords keep working. Null until set.
+  passwordHash String?
+  /// The same person's customer profile, when linked.
+  customerId   String?   @unique
+  createdAt    DateTime  @default(now())
+  disabledAt   DateTime?
+
+  customer    Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  memberships StaffMember[]
+  sessions    StaffSession[]
+}
+
+/// One account's role at one café. Permissions per role are in @peni/core (staff.ts) and RolePermission.
 model StaffMember {
-  id         String    @id @default(cuid())
+  id        String    @id @default(cuid())
+  cafeId    String
+  accountId String
+  role      StaffRole
+  createdAt DateTime  @default(now())
+  /// Taken off the team; kept so their past posts and records still name them.
+  removedAt DateTime?
+
+  cafe    Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  account StaffAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  posts   CafePost[]
+
+  @@unique([cafeId, accountId])
+  @@index([accountId])
+}
+
+model StaffSession {
+  id        String    @id @default(cuid())
+  accountId String
+  /// SHA-256 of the token. The token itself is never stored.
+  tokenHash String    @unique
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  account StaffAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId])
+}
+
+/// Failed staff sign-ins, for the per-email limit.
+model StaffSignInFailure {
+  id    String   @id @default(cuid())
+  email String
+  at    DateTime @default(now())
+
+  @@index([email, at])
+}
+
+/// A café's change to one role's permission. Only differences from the defaults are stored.
+model RolePermission {
   cafeId     String
-  customerId String?
-  name       String
-  email      String?
   role       StaffRole
-  createdAt  DateTime  @default(now())
+  permission String
+  allowed    Boolean
 
-  cafe     Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  posts    CafePost[]
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
-  @@unique([cafeId, email])
-  @@unique([cafeId, customerId])
+  @@id([cafeId, role, permission])
 }
 
 /// What a café sells. Edited in the Menü section of the café panel.

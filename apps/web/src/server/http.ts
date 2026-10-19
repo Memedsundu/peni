@@ -5,10 +5,14 @@ import { AppError, isAppError, type CustomerRecord, type PeniApp } from "./app";
 import { getApp } from "./runtime";
 
 export const SESSION_COOKIE = "peni_session";
+/** Staff sessions, separate from the customer one: a barista can be both. */
+export const STAFF_COOKIE = "peni_staff";
+export const STAFF_HEADER = "x-peni-staff-token";
 
 const STATUS: Record<string, number> = {
   NOT_FOUND: 404,
   FORBIDDEN: 403,
+  NOT_STAFF: 403,
   MEMBERSHIP_BLOCKED: 403,
   IDEMPOTENCY_CONFLICT: 409,
   GIFT_NOT_PENDING: 409,
@@ -41,10 +45,21 @@ export function tokenFrom(req: NextRequest): string | null {
   return req.cookies.get(SESSION_COOKIE)?.value ?? null;
 }
 
-type Handler<T> = (ctx: { app: PeniApp; req: NextRequest; customer: CustomerRecord | null }) => Promise<T> | T;
+/** The Expo app sends the staff token in a header; the web panel relies on the httpOnly cookie. */
+export function staffTokenFrom(req: NextRequest): string | null {
+  return req.headers.get(STAFF_HEADER) ?? req.cookies.get(STAFF_COOKIE)?.value ?? null;
+}
+
+type Handler<T> = (ctx: {
+  app: PeniApp;
+  req: NextRequest;
+  customer: CustomerRecord | null;
+  /** The staff session token, if any. Check it with `app.staff.at(staffToken, slug, permission)`. */
+  staffToken: string | null;
+}) => Promise<T> | T;
 
 /** Wraps a route: resolves the app and the signed-in customer, maps errors to JSON. */
-export function route<T>(handler: Handler<T>, opts: { auth?: "customer" | "staff" | "optional" } = {}) {
+export function route<T>(handler: Handler<T>, opts: { auth?: "customer" | "optional" } = {}) {
   return async (req: NextRequest): Promise<NextResponse> => {
     try {
       const app = await getApp();
@@ -52,10 +67,7 @@ export function route<T>(handler: Handler<T>, opts: { auth?: "customer" | "staff
       if (opts.auth === "customer" && !customer) {
         throw new AppError("UNAUTHENTICATED", "Sign in first", 401);
       }
-      if (opts.auth === "staff" && !app.isStaffKey(req.headers.get("x-peni-staff-key") ?? req.cookies.get("peni_staff")?.value ?? null)) {
-        throw new AppError("FORBIDDEN", "Staff key required", 403);
-      }
-      const result = await handler({ app, req, customer });
+      const result = await handler({ app, req, customer, staffToken: staffTokenFrom(req) });
       return result instanceof NextResponse ? result : NextResponse.json(result);
     } catch (error) {
       return errorResponse(error);

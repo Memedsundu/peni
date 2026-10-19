@@ -24,13 +24,14 @@ const claimCay = async () => {
 
 beforeEach(async () => {
   now = new Date("2026-10-16T09:00:00Z");
-  app = new PeniApp({ demo: true, staffKey: "k", clock: () => now });
+  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now });
   await seed(app);
   const ids = [...Object.values(DEMO_CUSTOMERS), ...Object.values(DEMO_NEIGHBOURS)].map((c) => c.id);
   people = new Map((await app.identity.getCustomers(ids)).map((c) => [c.id, c]));
 });
 
 const modaFor = (c: ReturnType<typeof ayse> | null) => app.cafeDetail("moda", c);
+const at = async (slug: string) => ({ cafe: (await app.identity.getCafeBySlug(slug))! });
 
 describe("café cards and the café page (G1, G2, G9, G12)", () => {
   it("shows members their balance with goods to read it by; others get null", async () => {
@@ -84,7 +85,7 @@ describe("the askı (G3, dignity)", () => {
     const moda = await modaFor(ayse());
     expect(moda.askida.claimedLast7Days).toBeGreaterThanOrEqual(3);
     expect(moda.askida.wall.some((e) => e.type === "claim")).toBe(false);
-    expect((await app.staffDashboard("moda")).askida.wall.some((e) => e.type === "claim")).toBe(false);
+    expect((await app.staffDashboard(await at("moda"))).askida.wall.some((e) => e.type === "claim")).toBe(false);
     const history = (await app.wallet(deniz())).ledger;
     expect(history).toEqual([]);
   });
@@ -174,7 +175,8 @@ describe("sign-in and profile (G18, G19)", () => {
   });
 
   it("offers the café panel only to staff", async () => {
-    await app.grantStaff(DEMO_CUSTOMERS.mehmet.id, "moda", "barista");
+    const account = await app.staff.ensureAccount({ name: "Mehmet", email: "mehmet@moda.test", password: "x".repeat(8), customerId: DEMO_CUSTOMERS.mehmet.id });
+    await app.staff.join(account.id, "cafe_moda", "barista");
     expect((await app.me(mehmet())).staffCafes).toEqual([{ slug: "moda", name: "Moda Kahvesi", role: "barista" }]);
   });
 
@@ -268,7 +270,7 @@ describe("gifts (G6, G11, G15, G16, G17)", () => {
 
 describe("staff (G21)", () => {
   it("reports the previous 30 days next to the current ones", async () => {
-    const { report, memberCount } = await app.staffDashboard("moda");
+    const { report, memberCount } = await app.staffDashboard(await at("moda"));
     expect(report.previous.untilIso).toBe(report.sinceIso);
     expect(report.previous.issuedPeni).toBeGreaterThan(0);
     expect(report.previous.memberCount).toBeLessThan(memberCount);

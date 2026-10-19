@@ -62,7 +62,7 @@ Each piece is one PR that ends with something you can try. Order follows D19: bu
 
 ### Phase 0 · Ground
 1. **Clean the repo.** Remove what v0.1 had that we've dropped (ordering from the app, SMS login, the Shelby adapter) and move every record from memory to Postgres.
-2. **Cafés, staff and roles.** Owner, manager and barista; permissions per role, based on Shelby's.
+2. **Cafés, staff and roles.** Owner, manager, chef and barista (D26); permissions per role, based on Shelby's. Staff sign in with email and password; the barista PIN at the till follows as 2b.
 3. **Customer sign-in** with Google, Apple and email, on web and mobile.
 4. **Design decisions:** look and feel for the café side, the chart library, and making Shelby's screens friendlier. Done together with Mehmet, before the screens in Phase 1.
 

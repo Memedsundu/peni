@@ -26,6 +26,15 @@ export const errorMessagesTr: Record<string, string> = {
   ASKIDA_TOO_NEW: "Askıdan almak için üyeliğinin biraz daha eski olması gerekiyor.",
   PRODUCT_NOT_ELIGIBLE: "Bu ürün askıdan alınamıyor.",
   EVENT_FULL: "Masa doldu.",
+  STAFF_UNAUTHENTICATED: "Devam etmek için ekip hesabınla giriş yap.",
+  SIGN_IN_FAILED: "E-posta ya da şifre yanlış.",
+  SIGN_IN_LIMITED: "Çok fazla deneme oldu. Biraz sonra tekrar dene.",
+  WRONG_PASSWORD: "Şu anki şifren yanlış.",
+  NOT_STAFF: "Bu kafenin ekibinde değilsin.",
+  ALREADY_STAFF: "Bu kişi zaten ekipte.",
+  LAST_OWNER: "Kafenin en az bir sahibi olmalı.",
+  OWNER_ONLY: "Bunu yalnız kafenin sahibi yapabilir.",
+  PASSWORD_REQUIRED: "Yeni kişi için bir şifre belirle.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

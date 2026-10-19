@@ -16,7 +16,7 @@ export function getApp(): Promise<PeniApp> {
     const demo = process.env.PENI_DEMO !== "0";
     const url = process.env.DATABASE_URL;
     const stores = url ? createPrismaStores(createPrismaClient(url)) : inMemoryStores();
-    const app = new PeniApp({ demo, staffKey: process.env.PENI_DEMO_STAFF_KEY ?? "demo-staff" }, stores);
+    const app = new PeniApp({ demo }, stores);
     if (demo && (await app.identity.listCafes()).length === 0) await seed(app);
     return app;
   })();

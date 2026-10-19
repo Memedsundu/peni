@@ -58,7 +58,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.identity.getCafeBySlug(`moda-${run}`))!.referenceProductIds).toEqual(["cay"]);
   });
 
-  it("keeps memberships, member codes, sessions, staff roles and lookups", async () => {
+  it("keeps memberships, member codes, sessions and lookups", async () => {
     const joinedAt = new Date("2026-09-01T00:00:00Z");
     await stores.directory.saveMembership({ id: `m_ayse_${run}`, cafeId, customerId: ayse, joinedAt, blocked: false });
     await stores.directory.saveMembership({ id: `m_mehmet_${run}`, cafeId, customerId: mehmet, joinedAt: at, blocked: false });
@@ -76,13 +76,47 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.identity.revokeSession(`hash_${run}`, at);
     expect(await stores.identity.customerIdForSession(`hash_${run}`, at)).toBeNull();
 
-    await stores.identity.grantStaff({ cafeId, customerId: mehmet, role: "barista" });
-    await stores.identity.grantStaff({ cafeId, customerId: mehmet, role: "manager" });
-    expect(await stores.identity.staffGrantsFor(mehmet)).toEqual([{ cafeId, customerId: mehmet, role: "manager" }]);
-
     await stores.identity.recordLookup(ayse, at);
     await stores.identity.recordLookup(ayse, new Date(at.getTime() - 2 * 3_600_000));
     expect(await stores.identity.countLookups(ayse, new Date(at.getTime() - 3_600_000))).toBe(1);
+  });
+
+  it("keeps staff accounts, their cafés, sessions, sign-in failures and role changes", async () => {
+    const accountId = `acct_${run}`;
+    const email = `Selin.${run}@Moda.TEST`;
+    await stores.staff.saveAccount({ id: accountId, email, name: "Selin", passwordHash: "x", customerId: mehmet, disabledAt: null });
+    expect((await stores.staff.getAccountByEmail(email.toLowerCase()))!.id).toBe(accountId);
+    expect((await stores.staff.accountForCustomer(mehmet))!.email).toBe(email.toLowerCase());
+
+    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "chef", createdAt: at, removedAt: null });
+    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "manager", createdAt: at, removedAt: null });
+    expect((await stores.staff.memberAt(accountId, cafeId))!.role).toBe("manager");
+    expect((await stores.staff.listMembers(cafeId)).map((m) => m.id)).toEqual([`sm_${run}`]);
+    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "manager", createdAt: at, removedAt: at });
+    expect(await stores.staff.membershipsOf(accountId)).toEqual([]);
+
+    await stores.staff.createSession(accountId, `s1_${run}`, new Date(at.getTime() + 60_000));
+    await stores.staff.createSession(accountId, `s2_${run}`, new Date(at.getTime() + 60_000));
+    await stores.staff.revokeSessionsOf(accountId, at, `s2_${run}`);
+    expect((await stores.staff.sessionFor(`s1_${run}`))!.revokedAt).toEqual(at);
+    expect((await stores.staff.sessionFor(`s2_${run}`))!.revokedAt).toBeNull();
+
+    await stores.staff.recordFailedSignIn(email, at);
+    expect(await stores.staff.countFailedSignIns(email.toLowerCase(), new Date(at.getTime() - 1))).toBe(1);
+
+    await stores.staff.replaceOverrides(cafeId, [{ role: "barista", permission: "stock.view", allowed: true }]);
+    await stores.staff.replaceOverrides(cafeId, [
+      { role: "chef", permission: "menu.edit", allowed: true },
+      { role: "barista", permission: "till.history", allowed: false },
+    ]);
+    const saved = await stores.staff.listOverrides(cafeId);
+    expect(saved).toHaveLength(2);
+    expect(saved).toEqual(
+      expect.arrayContaining([
+        { role: "chef", permission: "menu.edit", allowed: true },
+        { role: "barista", permission: "till.history", allowed: false },
+      ]),
+    );
   });
 
   it("keeps the feed with reactions, RSVPs in order and comments", async () => {
