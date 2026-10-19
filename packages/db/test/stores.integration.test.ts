@@ -842,4 +842,17 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.letters.getLetter(cafeId, "2026-10-12"))!.emailedAt).toEqual(new Date(at.getTime() + 5000));
     expect(await stores.letters.getLetter("other", "2026-10-12")).toBeNull();
   });
+
+  it("remembers which Gözcü findings were seen, the first look standing", async () => {
+    const seen = { cafeId, key: `twice:a_${run}:b_${run}`, memberId: "stf_a", note: "Doğru, iki teslimat", at };
+    await Promise.all([stores.watch.dismiss(seen), stores.watch.dismiss({ ...seen, memberId: "stf_b", note: null, at: new Date(at.getTime() + 1000) })]);
+    const kept = await stores.watch.listDismissed(cafeId);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]!.key).toBe(seen.key);
+    await stores.watch.dismiss({ ...seen, key: "voids:stf_c:2026-10-12", at: new Date(at.getTime() + 2000) });
+    expect((await stores.watch.listDismissed(cafeId)).map((d) => d.key)).toEqual([seen.key, "voids:stf_c:2026-10-12"]);
+    await stores.watch.undismiss(cafeId, seen.key);
+    expect((await stores.watch.listDismissed(cafeId)).map((d) => d.key)).toEqual(["voids:stf_c:2026-10-12"]);
+    expect(await stores.watch.listDismissed("other")).toEqual([]);
+  });
 });

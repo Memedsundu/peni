@@ -733,6 +733,12 @@ export type ConfirmDraftInput = z.input<typeof confirmDraftSchema>;
 export type DismissDraftInput = z.input<typeof dismissDraftSchema>;
 export type CheckDraftInput = z.input<typeof checkDraftSchema>;
 export type QuickEntryInput = z.input<typeof quickEntrySchema>;
+/** Gözcü's "Gördüm" (piece 31). */
+export const watchSeenSchema = z.object({
+  key: z.string().trim().min(1).max(200),
+  note: z.string().trim().max(200, "En çok 200 karakter").nullable().optional(),
+});
+
 export type ChatAskInput = z.input<typeof chatAskSchema>;
 export type SaveReportInput = z.input<typeof saveReportSchema>;
 export type CheckSampleInput = z.input<typeof checkSampleSchema>;

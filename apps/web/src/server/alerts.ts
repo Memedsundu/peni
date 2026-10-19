@@ -16,6 +16,7 @@ export const DIGEST_HOUR = 8;
 const NAMES = 5;
 
 const ORDER: AlertDTO["type"][] = [
+  "cashShort",
   "cardDue",
   "debtsOverdue",
   "stockOut",
@@ -27,6 +28,7 @@ const ORDER: AlertDTO["type"][] = [
   "stockLow",
   "tasksLate",
   "stockNoCost",
+  "watch",
 ];
 
 export interface AlertDeps {
@@ -44,6 +46,11 @@ export interface AlertDeps {
   publicUrl: () => string | null;
   /** Last week's letter for Bugün (piece 30), once it's written. */
   letter?: (cafeId: string) => Promise<TodayDTO["letter"]>;
+  /** Gözcü's findings and the day money may run short (piece 31). */
+  watch?: (
+    cafeId: string,
+    permissions: ReadonlySet<Permission>,
+  ) => Promise<{ count: number; names: string[]; short: { day: string; balanceKurus: number } | null }>;
   now: () => Date;
 }
 
@@ -150,6 +157,12 @@ export class AlertService {
       const count = await this.d.drafts.countOpen(cafeId);
       if (count)
         add({ type: "draftsOpen", level: "warning", count, amountKurus: null, names: await this.d.drafts.openTitles(cafeId, NAMES), href: "/panel/taslaklar" });
+    }
+
+    if (this.d.watch && permissions.has("reports.view")) {
+      const w = await this.d.watch(cafeId, permissions);
+      if (w.short) add({ type: "cashShort", level: "critical", count: 1, amountKurus: w.short.balanceKurus, day: w.short.day, href: "/panel/gozcu#nakit" });
+      if (w.count) add({ type: "watch", level: "warning", count: w.count, amountKurus: null, names: w.names, href: "/panel/gozcu" });
     }
 
     return out.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical") || ORDER.indexOf(a.type) - ORDER.indexOf(b.type));

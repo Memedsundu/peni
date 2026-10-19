@@ -1463,7 +1463,9 @@ export type AlertTypeDTO =
   | "payClose"
   | "payLeft"
   | "tasksLate"
-  | "draftsOpen";
+  | "draftsOpen"
+  | "watch"
+  | "cashShort";
 
 /** Something that needs doing, worked out from the café's own numbers. One per kind. */
 export interface AlertDTO {
@@ -2011,4 +2013,110 @@ export interface LettersDTO {
   /** The one asked for, else the newest. */
   letter: LetterDTO | null;
   weeks: { weekStart: string; weekEnd: string; headline: string }[];
+}
+
+// ─────────────────────────────────────────────── Gözcü (plan piece 31)
+
+/** A price a bill brought (C12), and the products it changed, with a price that keeps their margin. */
+export interface WatchPriceDTO {
+  key: string;
+  itemId: string;
+  item: string;
+  unit: StockUnitDTO;
+  /** Per kg, litre or piece. */
+  beforeKurus: number;
+  nowKurus: number;
+  changePct: number;
+  billId: string;
+  date: string;
+  supplier: string | null;
+  products: {
+    productId: string;
+    name: string;
+    priceKurus: number;
+    costBeforeKurus: number;
+    costNowKurus: number;
+    marginBeforePct: number;
+    marginNowPct: number;
+    /** The menu price, rounded as cafés do, that gives the old margin back; null when the price already does. */
+    suggestedKurus: number | null;
+  }[];
+}
+
+/**
+ * Something out of the ordinary (C13). cashGap: a drawer count off by ₺50 or more. voids: one
+ * person voided or refunded more than usual. billSpike: a bill twice the supplier's usual.
+ * billTwice: two bills from one supplier for the same amount within days.
+ */
+export interface WatchUnusualDTO {
+  key: string;
+  kind: "cashGap" | "voids" | "billSpike" | "billTwice";
+  day: string;
+  /** The gap (negative is missing), the bill's total; null for voids. */
+  amountKurus: number | null;
+  /** The supplier's usual bill; a person's usual voids and refunds a week. */
+  usual: number | null;
+  /** Voids and refunds this week. */
+  count: number | null;
+  /** The person or the supplier. */
+  name: string | null;
+  /** The note written at the count. */
+  note: string | null;
+  href: string;
+}
+
+export interface ForecastEventDTO {
+  day: string;
+  kind: "bill" | "check" | "card" | "wages" | "rent" | "loan";
+  label: string;
+  /** Negative goes out. */
+  kurus: number;
+}
+
+/** The next 30 days of money (C14). Needs "cash.manage". */
+export interface ForecastDTO {
+  /** Drawer, reserve and bank today; null when the café doesn't track its money (it starts from ₺0). */
+  startKurus: number | null;
+  days: { day: string; inKurus: number; outKurus: number; balanceKurus: number }[];
+  lowest: { day: string; balanceKurus: number };
+  /** The first day the money runs out; null when it doesn't. */
+  shortfall: { day: string; balanceKurus: number } | null;
+  /** Expected sales in a usual week, and everyday buying a day. */
+  salesPerWeekKurus: number;
+  spendPerDayKurus: number;
+  events: ForecastEventDTO[];
+  /** Owed with no day to pay it on (loans), left out of the line. */
+  undated: { label: string; kurus: number }[];
+}
+
+/** What to order (C15), per supplier, with a message ready to send. Needs "stock.view". */
+export interface OrderSuggestionDTO {
+  supplierId: string | null;
+  name: string;
+  phone: string | null;
+  lines: { itemId: string; name: string; unit: StockUnitDTO; qtyMilli: number; usedPerDayMilli: number; daysLeft: number; orderMilli: number }[];
+  /** "Merhaba, Moda Kahvesi için: Süt 24 L, …" */
+  message: string;
+}
+
+/** Hours in the week's plan that look short or over-staffed (C16). Needs "shifts.view". */
+export interface StaffingDTO {
+  /** The Monday of the week it is about. */
+  week: string;
+  /** Usual orders an hour for one person; from the last four weeks' shifts, or a default. */
+  usualLoad: number;
+  fromHistory: boolean;
+  hints: { kind: "busy" | "nobody" | "quiet"; day: string; fromHour: number; toHour: number; orders: number; people: number }[];
+}
+
+/** `GET /staff/:slug/watch`: Gözcü ("reports.view"). A part the viewer can't see is null. */
+export interface WatchDTO {
+  today: string;
+  prices: WatchPriceDTO[];
+  unusual: WatchUnusualDTO[];
+  /** How many findings were looked at and let go (they stay hidden). */
+  seen: number;
+  forecast: ForecastDTO | null;
+  orders: OrderSuggestionDTO[] | null;
+  staffing: StaffingDTO | null;
 }

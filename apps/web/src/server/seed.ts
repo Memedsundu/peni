@@ -973,6 +973,21 @@ async function seedSales(app: PeniApp, p: { murat: string; ece: string; leyla: s
       await app.paymentStore.savePayment(payment("sale", at, by));
       if (refunded) await app.paymentStore.savePayment(payment("refund", order.refundedAt!, p.murat));
     }
+    // Gözcü (piece 31): Ece voided more orders than usual these last days.
+    for (let v = 0; v < (ago === 1 ? 2 : ago <= 3 ? 1 : 0); v++) {
+      const m = menu.get("latte")!;
+      const lines: OrderLine[] = [{ productId: "latte", name: m.name, unitPriceKurus: m.priceKurus, quantity: 1, discountPercent: 0 }];
+      const at = p.on(ago, 15, 10 + v * 20);
+      const id = `ord_seed_${businessDay}_v${v + 1}`;
+      await app.orderStore.saveOrder({
+        id, cafeId, number: count + v + 1, businessDay, status: "voided", lines, discountPercent: 0, ...orderTotals(lines, 0),
+        createdAt: at, createdByMemberId: p.ece, createKey: `seed:${id}`,
+        paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null,
+        voidedAt: new Date(at.getTime() + 60_000), voidedByMemberId: p.ece, voidReason: "Müşteri vazgeçti",
+        refundedAt: null, refundedByMemberId: null, refundReason: null, refundKurus: null,
+        deletedAt: null, deletedByMemberId: null, deleteReason: null,
+      });
+    }
   }
 
   // Last month's bills, all paid: rent, electricity, coffee, milk twice a week, simit.

@@ -110,5 +110,19 @@ export function alertWords(a: AlertDTO, lang: AlertLang, money: (kurus: number) 
         detail: names,
         action: tr ? "Taslaklara bak" : "Open drafts",
       };
+    case "watch":
+      return {
+        title: tr ? `Gözcü ${a.count} şey buldu` : `Watch found ${a.count} ${a.count === 1 ? "thing" : "things"}`,
+        detail: names,
+        action: tr ? "Gözcüye bak" : "Open Watch",
+      };
+    case "cashShort":
+      return {
+        title: tr ? `Para ${dayName(a.day!, lang)} gününe yetmeyebilir` : `Money may run short by ${dayName(a.day!, lang)}`,
+        detail: tr
+          ? `O gün beklenen bakiye ${amount}. Ödemelere ve satış tahminine göre.`
+          : `Expected balance that day: ${amount}, from what's owed and usual sales.`,
+        action: tr ? "Tahmine bak" : "See the forecast",
+      };
   }
 }

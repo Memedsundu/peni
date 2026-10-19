@@ -51,6 +51,7 @@ import type {
   ChatDTO,
   SavedReportsDTO,
   LettersDTO,
+  WatchDTO,
   UploadsDTO,
   InboxDTO,
   TodayDTO,
@@ -459,6 +460,14 @@ export function createPeniClient(options: PeniClientOptions) {
        */
       letters: (cafeSlug: string, week?: string) =>
         call<LettersDTO>("GET", `/staff/${slug(cafeSlug)}/letters${week ? `?hafta=${encodeURIComponent(week)}` : ""}`, undefined, true),
+      /**
+       * Gözcü (piece 31): prices to review, unusual activity, the next 30 days' money, what
+       * to order and the week's staffing. "Gördüm" hides a price or unusual finding for everyone.
+       */
+      watch: {
+        get: (cafeSlug: string) => call<WatchDTO>("GET", `/staff/${slug(cafeSlug)}/watch`, undefined, true),
+        dismiss: (cafeSlug: string, body: { key: string; note?: string }) => call<WatchDTO>("POST", `/staff/${slug(cafeSlug)}/watch/seen`, body, true),
+      },
       /** Ay kapanışı's package for the mali müşavir (piece 30): a ZIP to download, not JSON. */
       monthPackageUrl: (cafeSlug: string, month: string) => `${base}/api/v1/staff/${slug(cafeSlug)}/money/months/${encodeURIComponent(month)}/package`,
       /**
