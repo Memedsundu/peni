@@ -6,6 +6,7 @@ import { formatTL } from "@peni/brand/format";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
+import { rangeLabel } from "../amounts";
 import { axisLabel, change, Chart, compactTL, signedPercent, type ChartColors } from "../chart";
 import { useSave } from "../controls";
 import { has, PanelShell, type PanelProps } from "../shell";
@@ -68,6 +69,20 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
       {data && (
         <>
           {data.sales && <SalesToday sales={data.sales} slug={cafe.slug} t={t} lang={lang} />}
+          {data.letter && (
+            <a
+              href={withCafe(`/panel/mektup?hafta=${data.letter.weekStart}`, cafe.slug)}
+              className="flex flex-col gap-2 rounded-3xl bg-green-soft p-5 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <span className="flex flex-col gap-1">
+                <span className="text-sm text-green">
+                  {fill(t("ltCard"), { week: rangeLabel({ from: data.letter.weekStart, through: data.letter.weekEnd }, lang) })}
+                </span>
+                <span className="font-serif text-2xl leading-tight">{data.letter.headline}</span>
+              </span>
+              <span className="shrink-0 font-semibold underline underline-offset-4">{t("ltRead")}</span>
+            </a>
+          )}
           <section className="flex flex-col gap-3" aria-labelledby="attention">
             <h2 id="attention" className="text-sm text-muted">
               {t("todayAttention")}

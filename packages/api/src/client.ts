@@ -50,6 +50,7 @@ import type {
   HeardDTO,
   ChatDTO,
   SavedReportsDTO,
+  LettersDTO,
   UploadsDTO,
   InboxDTO,
   TodayDTO,
@@ -452,6 +453,14 @@ export function createPeniClient(options: PeniClientOptions) {
         save: (cafeSlug: string, input: SaveReportInput) => call<SavedReportsDTO>("POST", `/staff/${slug(cafeSlug)}/reports/saved`, input, true),
         remove: (cafeSlug: string, reportId: string) => call<SavedReportsDTO>("POST", `/staff/${slug(cafeSlug)}/reports/saved/${slug(reportId)}/remove`, {}, true),
       },
+      /**
+       * The weekly letter (piece 30): last week's, or `week` (its Monday). Opening it starts
+       * writing last week's when it isn't there yet; ask again while `state` is "writing".
+       */
+      letters: (cafeSlug: string, week?: string) =>
+        call<LettersDTO>("GET", `/staff/${slug(cafeSlug)}/letters${week ? `?hafta=${encodeURIComponent(week)}` : ""}`, undefined, true),
+      /** Ay kapanışı's package for the mali müşavir (piece 30): a ZIP to download, not JSON. */
+      monthPackageUrl: (cafeSlug: string, month: string) => `${base}/api/v1/staff/${slug(cafeSlug)}/money/months/${encodeURIComponent(month)}/package`,
       /**
        * The assistant's chat (piece 29): questions about the café's numbers, read only.
        * Needs "assistant.use"; what it can look at follows the asker's own permissions.
