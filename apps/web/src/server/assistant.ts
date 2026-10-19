@@ -1,17 +1,35 @@
-import { billReadingRequest, isAiError, readBill, ScriptedModel, type AiModel, type BillReading, type ReadBill } from "@peni/ai";
-import type { AiLogDTO, BillProposalDTO, DraftDTO, DraftsDTO, ReadingDTO, UploadDTO, UploadsDTO } from "@peni/api";
+import {
+  billReadingRequest,
+  isAiError,
+  readBill,
+  readStatement,
+  readZ,
+  ScriptedModel,
+  statementReadingRequest,
+  zReadingRequest,
+  type AiModel,
+  type AiRequest,
+  type BillReading,
+  type ReadBill,
+  type StatementReading,
+  type ZReading,
+} from "@peni/ai";
+import type { AiLogDTO, BillDraftDTO, BillProposalDTO, DraftDTO, DraftsDTO, ReadingDTO, UploadDTO, UploadsDTO } from "@peni/api";
 import {
   DOCUMENT_NAME_MAX,
   MAX_DOCUMENT_BYTES,
   billNumberKey,
+  isSheet,
   lineKey,
   localDateKey,
   sniffDocumentType,
   startOfLocalDay,
   type AiEvent,
   type AssistantStore,
+  type BillDraft,
   type BillProposal,
   type BillStore,
+  type CheckOutcome,
   type Draft,
   type DocumentType,
   type DuplicateRef,
@@ -21,15 +39,19 @@ import {
   type Permission,
   type ProposalLine,
   type StaffStore,
+  type StatementAccount,
   type StockItem,
+  type StoredDocument,
   type StockStore,
   type Supplier,
 } from "@peni/core";
 import { formatTL, trLower } from "@peni/brand/format";
 import { createHash, randomUUID } from "node:crypto";
 import type { BillInput, BillService } from "./bills";
+import { outcomeDto, type ChecksService } from "./checks";
 import { AppError } from "./errors";
-import type { JobHandler, JobRunner } from "./jobs";
+import type { JobHandler, JobOutcome, JobRunner } from "./jobs";
+import { sheetRows } from "./sheet";
 import type { StaffContext } from "./staff";
 
 /** Whether the assistant can read: with an OpenAI key, with the demo's stand-in, or not at all. */
@@ -61,6 +83,7 @@ export class AssistantService {
     private readonly stock: StockStore,
     private readonly staff: StaffStore,
     private readonly directory: PeniDirectory,
+    private readonly checks: ChecksService,
     private readonly ai: { model: AiModel | null; mode: AiMode },
     private readonly now: () => Date,
   ) {
@@ -81,7 +104,7 @@ export class AssistantService {
     if (!this.ai.model) throw new AppError("AI_OFF", "The assistant is off", 409);
     if (bytes.length > MAX_DOCUMENT_BYTES) throw new AppError("DOCUMENT_TOO_LARGE", "Documents can be at most 10 MB", 413);
     const contentType = sniffDocumentType(bytes);
-    if (!contentType) throw new AppError("DOCUMENT_TYPE", "Send a photo or a PDF", 415);
+    if (!contentType) throw new AppError("DOCUMENT_TYPE", "Send a photo, a PDF, an Excel file or a CSV", 415);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (!opts.again) {
       const duplicate = await this.sameFile(ctx.cafe.id, sha256);
@@ -93,7 +116,7 @@ export class AssistantService {
 
   /**
    * A file from an email that reached the café's address (piece 26): read like an upload,
-   * with the sender kept for the draft. Anything but a photo or PDF, anything too large,
+   * with the sender kept for the draft. Anything but a photo, PDF or statement spreadsheet, anything too large,
    * and a file the café already sent in are left, with the reason.
    */
   async fromEmail(
@@ -207,13 +230,16 @@ export class AssistantService {
       // Two copies read at the same moment (an email with both, several files at once) don't
       // see each other when they're written; here the newer one is marked.
       open: await Promise.all(
-        open.map((d, i) => this.dto(ctx, { ...d, duplicateOf: d.duplicateOf ?? sameBillAmong(d.proposal, open.slice(i + 1), d.id) }, names)),
+        open.map((d, i) =>
+          this.dto(ctx, d.kind === "bill" ? { ...d, duplicateOf: d.duplicateOf ?? sameBillAmong(d.proposal, open.slice(i + 1), d.id) } : d, names),
+        ),
       ),
       recent: await Promise.all(recent.map((d) => this.dto(ctx, d, names))),
       reading,
       ai: this.ai.mode,
       canUpload: ctx.permissions.has("bills.add") && this.ai.model !== null,
       canConfirm: ctx.permissions.has("bills.add"),
+      canCheck: ctx.permissions.has("cash.manage"),
       billForm,
     };
   }
@@ -224,10 +250,11 @@ export class AssistantService {
    * `allowDuplicate`. Each read line confirmed as a stock item (or unlinked from one) is
    * remembered for the next bill (piece 25).
    */
-  async confirm(ctx: StaffContext, draftId: string, input: BillInput & { allowDuplicate?: boolean }): Promise<DraftDTO> {
+  async confirm(ctx: StaffContext, draftId: string, input: BillInput & { allowDuplicate?: boolean }): Promise<BillDraftDTO> {
     this.require(ctx, "assistant.use");
     this.require(ctx, "bills.add");
     const draft = await this.draft(ctx, draftId);
+    if (draft.kind !== "bill") throw new AppError("DRAFT_KIND", "This draft isn't a bill", 409);
     if (draft.status === "dismissed") throw new AppError("DRAFT_DECIDED", "This draft was dismissed", 409);
     if (draft.status === "open" && !input.allowDuplicate) {
       const total = input.lines.reduce((s, l) => s + l.totalKurus, 0);
@@ -261,7 +288,7 @@ export class AssistantService {
         detail: changed.join(", ") || null,
       });
     }
-    return this.dto(ctx, draft);
+    return (await this.dto(ctx, draft)) as BillDraftDTO;
   }
 
   async dismiss(ctx: StaffContext, draftId: string, input: { reason?: string | null }): Promise<DraftDTO> {
@@ -281,6 +308,39 @@ export class AssistantService {
       });
     }
     return this.dto(ctx, draft);
+  }
+
+  /**
+   * "Kontrol edildi" on a statement or Z report (piece 27): what was seen is kept, and with
+   * `fixBalance` Peni's bank balance is set to the statement's. Saying it twice keeps the first.
+   */
+  async check(ctx: StaffContext, draftId: string, input: { note?: string | null; fixBalance?: boolean }): Promise<DraftDTO> {
+    this.require(ctx, "assistant.use");
+    const draft = await this.draft(ctx, draftId);
+    if (draft.kind === "bill") throw new AppError("DRAFT_KIND", "This draft is a bill", 409);
+    if (draft.status === "dismissed") throw new AppError("DRAFT_DECIDED", "This draft was dismissed", 409);
+    if (draft.status === "open") {
+      const outcome = await this.checks.check(ctx, draft, input);
+      Object.assign(draft, { status: "confirmed", decidedById: ctx.member.id, decidedAt: this.now(), outcome });
+      await this.store.saveDraft(draft);
+      await this.record({
+        cafeId: draft.cafeId,
+        kind: "draft.confirmed",
+        memberId: ctx.member.id,
+        draftId: draft.id,
+        documentId: draft.documentId,
+        detail: checkedDetail(draft.kind, outcome),
+      });
+    }
+    return this.dto(ctx, draft);
+  }
+
+  /** Demo only: a sample bank or card statement, or a Z report, from the demo café's numbers, read like an upload. */
+  async sample(ctx: StaffContext, kind: "bank" | "card" | "zreport"): Promise<UploadDTO> {
+    this.require(ctx, "bills.add");
+    if (this.ai.mode !== "demo") throw new AppError("CHECK_SAMPLE_DEMO", "Only the demo sends sample documents", 409);
+    const file = await this.checks.sample(ctx.cafe.id, kind);
+    return this.upload(ctx, file.bytes, file.name, { again: true });
   }
 
   /** "Kayıt": what the assistant did and what people did with it, newest first. */
@@ -359,56 +419,29 @@ export class AssistantService {
     const cafeId = job.cafeId;
     const documentId = String(job.payload.documentId);
     const by = typeof job.payload.by === "string" ? job.payload.by : null;
-    const model = this.ai.model;
-    if (!model) return { error: "AI_OFF", retry: false };
+    if (!this.ai.model) return { error: "AI_OFF", retry: false };
     const doc = await this.store.getDocument(cafeId, documentId);
     if (!doc) return { error: "DOCUMENT_NOT_FOUND", retry: false };
+
+    // A spreadsheet is a statement: bills don't come as one (piece 27).
+    if (isSheet(doc.contentType)) return this.readStatement(job, doc, by, null);
 
     const items = (await this.stock.listItems(cafeId))
       .filter((i) => !i.archivedAt)
       .sort((a, b) => a.name.localeCompare(b.name, "tr"))
       .slice(0, STOCK_SHOWN);
-    const started = Date.now();
-    let reading: BillReading;
-    try {
-      const r = await model.run(billReadingRequest(doc, items));
-      reading = r.output;
-      await this.record({
-        cafeId,
-        kind: "ai.call",
-        memberId: by,
-        purpose: READ,
-        model: r.model,
-        inputTokens: r.inputTokens,
-        outputTokens: r.outputTokens,
-        ms: r.ms,
-        documentId,
-        jobId: job.id,
-      });
-    } catch (error) {
-      const usage = isAiError(error) ? error.usage : undefined;
-      const message = error instanceof Error ? error.message : String(error);
-      await this.record({
-        cafeId,
-        kind: "ai.call",
-        memberId: by,
-        purpose: READ,
-        model: model.name,
-        ...usage,
-        ms: Date.now() - started,
-        ok: false,
-        detail: message.slice(0, 300),
-        documentId,
-        jobId: job.id,
-      });
-      return { error: isAiError(error) ? `${error.code}: ${message}` : message, retry: isAiError(error) ? error.retry : true };
-    }
-    if (!reading.isBill) return { result: { notBill: true } };
+    const asked = await this.ask(job, by, billReadingRequest(doc, items));
+    if ("error" in asked) return asked;
+    const reading: BillReading = asked.output;
+    if (reading.kind === "bankStatement" || reading.kind === "cardStatement")
+      return this.readStatement(job, doc, by, reading.kind === "cardStatement" ? "card" : "bank");
+    if (reading.kind === "zReport") return this.readZ(job, doc, by);
+    if (reading.kind !== "bill") return { result: { notBill: true } };
 
     const read = readBill(reading, items.length);
     const sender = typeof job.payload.sender === "string" ? job.payload.sender : null;
     const { proposal, doubts } = await this.propose(cafeId, read, items, sender);
-    const draft: Draft = {
+    const draft: BillDraft = {
       id: `drf_${randomUUID()}`,
       cafeId,
       kind: "bill",
@@ -425,6 +458,7 @@ export class AssistantService {
       changed: [],
       dismissReason: null,
       duplicateOf: null,
+      outcome: null,
     };
     draft.duplicateOf =
       (await this.duplicateBill(cafeId, { ...proposal, totalKurus: proposal.totalKurus ?? lineSum(proposal) }, draft.id)) ??
@@ -433,6 +467,114 @@ export class AssistantService {
     await this.record({ cafeId, kind: "draft.created", memberId: by, purpose: READ, draftId: draft.id, documentId, jobId: job.id, detail: draft.title });
     return { result: { draftId: draft.id } };
   };
+
+  /**
+   * Asks the model, and logs the call either way. Statements and Z reports in the demo are
+   * answered by `demo` instead, from the café's own numbers.
+   */
+  private async ask<T>(
+    job: Job,
+    by: string | null,
+    request: AiRequest<T>,
+    demo?: () => Promise<T>,
+  ): Promise<{ output: T } | { error: string; retry: boolean }> {
+    const model = this.ai.model;
+    if (!model) return { error: "AI_OFF", retry: false };
+    const base = {
+      cafeId: job.cafeId,
+      kind: "ai.call" as const,
+      memberId: by,
+      purpose: request.purpose,
+      documentId: String(job.payload.documentId),
+      jobId: job.id,
+    };
+    const started = Date.now();
+    try {
+      const r =
+        this.ai.mode === "demo" && demo
+          ? { output: await demo(), model: model.name, inputTokens: 0, outputTokens: 0, ms: Date.now() - started }
+          : await model.run(request);
+      await this.record({ ...base, model: r.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens, ms: r.ms });
+      return { output: r.output };
+    } catch (error) {
+      const usage = isAiError(error) ? error.usage : undefined;
+      const message = error instanceof Error ? error.message : String(error);
+      await this.record({ ...base, model: model.name, ...usage, ms: Date.now() - started, ok: false, detail: message.slice(0, 300) });
+      return { error: isAiError(error) ? `${error.code}: ${message}` : message, retry: isAiError(error) ? error.retry : true };
+    }
+  }
+
+  /** A bank or card statement (piece 27): its lines, matched against Peni whenever the draft is looked at. */
+  private async readStatement(job: Job, doc: StoredDocument, by: string | null, account: StatementAccount | null): Promise<JobOutcome> {
+    let request: AiRequest<StatementReading>;
+    if (isSheet(doc.contentType)) {
+      let rows: string[][];
+      try {
+        rows = sheetRows(doc.bytes, doc.contentType);
+      } catch (e) {
+        return { error: `SHEET_UNREADABLE: ${e instanceof Error ? e.message : String(e)}`, retry: false };
+      }
+      if (!rows.length) return { result: { notBill: true } };
+      request = statementReadingRequest({ name: doc.name, rows });
+    } else request = statementReadingRequest(doc);
+    const guess = account ?? (/kart|card|kredi/i.test(doc.name) ? "card" : "bank");
+    const asked = await this.ask(job, by, request, () => this.checks.demoStatement(job.cafeId, guess));
+    if ("error" in asked) return asked;
+    if (!asked.output.isStatement) return { result: { notBill: true } };
+    const read = readStatement(asked.output);
+    const proposal = this.checks.statementProposal(read);
+    if (!read.lines.length) read.doubts.push("Ekstrede hiç satır okunamadı.");
+    return this.saveCheckDraft(job, by, { kind: "statement", proposal, title: this.checks.statementTitle(proposal), doubts: read.doubts });
+  }
+
+  /** A Z report (piece 27), set beside the till's day whenever the draft is looked at. */
+  private async readZ(job: Job, doc: StoredDocument, by: string | null): Promise<JobOutcome> {
+    const asked = await this.ask<ZReading>(job, by, zReadingRequest(doc), () => this.checks.demoZ(job.cafeId));
+    if ("error" in asked) return asked;
+    if (!asked.output.isZReport) return { result: { notBill: true } };
+    const read = readZ(asked.output);
+    const proposal = this.checks.zProposal(read);
+    return this.saveCheckDraft(job, by, { kind: "zreport", proposal, title: this.checks.zTitle(proposal), doubts: read.doubts });
+  }
+
+  private async saveCheckDraft(
+    job: Job,
+    by: string | null,
+    d:
+      | Pick<Extract<Draft, { kind: "statement" }>, "kind" | "proposal" | "title" | "doubts">
+      | Pick<Extract<Draft, { kind: "zreport" }>, "kind" | "proposal" | "title" | "doubts">,
+  ): Promise<JobOutcome> {
+    const documentId = String(job.payload.documentId);
+    const draft = {
+      ...d,
+      id: `drf_${randomUUID()}`,
+      cafeId: job.cafeId,
+      status: "open",
+      documentId,
+      jobId: job.id,
+      createdAt: this.now(),
+      decidedById: null,
+      decidedAt: null,
+      resultId: null,
+      changed: [],
+      dismissReason: null,
+      duplicateOf: null,
+      outcome: null,
+    } as Draft;
+    draft.duplicateOf = await this.checks.duplicate(job.cafeId, d.kind, d.proposal, draft.id);
+    await this.store.saveDraft(draft);
+    await this.record({
+      cafeId: job.cafeId,
+      kind: "draft.created",
+      memberId: by,
+      purpose: READ,
+      draftId: draft.id,
+      documentId,
+      jobId: job.id,
+      detail: draft.title,
+    });
+    return { result: { draftId: draft.id } };
+  }
 
   /**
    * What was read, as a bill for this café: a known supplier when the name or tax number
@@ -559,13 +701,11 @@ export class AssistantService {
   private async dto(ctx: StaffContext, d: Draft, names?: Map<string, string>): Promise<DraftDTO> {
     const doc = d.documentId ? await this.store.getDocumentInfo(d.cafeId, d.documentId) : null;
     const who = d.decidedById ? ((names ?? (await this.names([d.decidedById]))).get(d.decidedById) ?? null) : null;
-    return {
+    const base = {
       id: d.id,
-      kind: d.kind,
       status: d.status,
       title: d.title,
       createdAt: d.createdAt.toISOString(),
-      proposal: d.proposal as BillProposalDTO,
       doubts: d.doubts,
       document: doc
         ? {
@@ -584,6 +724,17 @@ export class AssistantService {
       dismissReason: d.dismissReason,
       duplicateOf: d.duplicateOf,
     };
+    // A statement or Z report is set beside Peni as it is now, while it waits to be checked.
+    if (d.kind === "statement")
+      return {
+        ...base,
+        kind: "statement",
+        statement: d.status === "open" ? await this.checks.statement(ctx, d.proposal) : null,
+        outcome: outcomeDto(d.outcome),
+      };
+    if (d.kind === "zreport")
+      return { ...base, kind: "zreport", zreport: d.status === "open" ? await this.checks.zreport(ctx, d.proposal) : null, outcome: outcomeDto(d.outcome) };
+    return { ...base, kind: "bill", proposal: d.proposal as BillProposalDTO };
   }
 
   private async names(ids: string[]): Promise<Map<string, string>> {
@@ -621,7 +772,7 @@ function sameBillAmong(p: BillProposal, drafts: Draft[], self: string): Duplicat
   const key = billNumberKey(p.number);
   const total = p.totalKurus ?? lineSum(p);
   const same = drafts.find((d) => {
-    if (d.id === self) return false;
+    if (d.id === self || d.kind !== "bill") return false;
     const q = d.proposal;
     const sameSeller = p.supplierId ? q.supplierId === p.supplierId : !q.supplierId && q.supplierName === p.supplierName;
     if (!sameSeller) return false;
@@ -688,6 +839,14 @@ function titleOf(p: BillProposal, read: ReadBill): string {
   return [p.supplierName ?? "Fatura", total ? formatTL(total) : null].filter(Boolean).join(" · ").slice(0, 120);
 }
 
+/** "12/14 satır eşleşti" or "Z raporu: 1 fark", for the log. */
+function checkedDetail(kind: "statement" | "zreport", o: CheckOutcome): string {
+  const parts = kind === "statement" ? [`${o.matched}/${o.matched + o.unmatched} satır eşleşti`] : [o.unmatched ? `${o.unmatched} fark` : "kasayla tutuyor"];
+  if (o.correctionKurus) parts.push(`banka bakiyesi ${formatTL(o.correctionKurus)} düzeltildi`);
+  if (o.note) parts.push(`“${o.note}”`);
+  return parts.join(" · ").slice(0, 300);
+}
+
 /** Which parts of the bill the person changed before confirming, for the log. */
 function changedFields(p: BillProposal, input: BillInput): string[] {
   const out: string[] = [];
@@ -719,9 +878,31 @@ export function demoModel(today: () => string): AiModel {
   return new ScriptedModel((request) => {
     if (request.purpose !== READ) return {};
     const list = request.parts.find((p) => p.type === "text")?.text ?? "";
+    // The file's name says what a sample is (piece 27): "z-raporu-….pdf", "banka-ekstresi-….pdf".
+    const named = /^Read this document \(([^)]*)\)/.exec(list)?.[1] ?? "";
+    const kind = /z[-_ ]?rapor/i.test(named)
+      ? "zReport"
+      : /ekstre|statement/i.test(named)
+        ? /kart|card|kredi/i.test(named)
+          ? "cardStatement"
+          : "bankStatement"
+        : null;
+    if (kind)
+      return {
+        kind,
+        supplierName: null,
+        supplierTaxNumber: null,
+        number: null,
+        date: null,
+        dueDate: null,
+        total: null,
+        lines: [],
+        kdv: [],
+        doubts: [],
+      } satisfies BillReading;
     const cups = /^(\d+)\. Karton bardak/m.exec(list);
     return {
-      isBill: true,
+      kind: "bill",
       supplierName: "Ambalaj Dünyası Tic. Ltd. Şti.",
       supplierTaxNumber: null,
       number: "A-20511",

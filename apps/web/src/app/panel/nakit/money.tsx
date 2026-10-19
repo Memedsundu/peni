@@ -81,6 +81,10 @@ function MoneyPage({ cafe, t, lang, signedOut }: PanelProps) {
                 <p className="text-xs text-muted">{t("moneyTotal")}</p>
                 <p className="text-2xl font-semibold tabular">{formatTL(data.totalKurus ?? 0)}</p>
                 <p className="text-xs text-muted">{fill(t("startedOn"), { day: formatDay(data.started.on, lang), by: data.started.by ?? "" })}</p>
+                {/* Piece 27: the bank's statement is checked against these movements in Taslaklar. */}
+                <a className="text-sm font-semibold underline underline-offset-4" href={`/panel/taslaklar?kafe=${encodeURIComponent(cafe.slug)}`}>
+                  {t("ckFromMoney")}
+                </a>
               </div>
               <div className="flex flex-wrap gap-2">
                 {MOVES.map((m) => (

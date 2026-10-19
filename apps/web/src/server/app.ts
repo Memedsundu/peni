@@ -99,6 +99,7 @@ import { TaskService } from "./tasks";
 import { AlertService } from "./alerts";
 import { SalesReportService } from "./sales-report";
 import { AssistantService, demoModel, type AiMode } from "./assistant";
+import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
 import type { AiModel } from "@peni/ai";
@@ -332,7 +333,8 @@ export class PeniApp {
     this.salesReports = new SalesReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
     this.jobs = new JobRunner(stores.assistant, () => this.now());
     const ai = options.ai ?? (options.demo ? { model: demoModel(() => localDateKey(this.now(), "Europe/Istanbul")), mode: "demo" as const } : { model: null, mode: "off" as const });
-    this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, ai, () => this.now());
+    const checks = new ChecksService(stores.assistant, this.money, stores.payments, stores.bills, stores.debts, this.directory, () => this.now());
+    this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, checks, ai, () => this.now());
     this.inbox = new InboxService(
       stores.assistant,
       this.assistant,

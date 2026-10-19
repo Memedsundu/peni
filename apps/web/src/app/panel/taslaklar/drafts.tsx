@@ -7,6 +7,7 @@ import { Button, Notice } from "../../kasa/ui";
 import { Field, Segmented } from "../controls";
 import { billHref, BillForm } from "../faturalar/bills";
 import { Repeats, ScanInput, useScan } from "../scan";
+import { outcomeText, Samples, StatementCheck, ZCheck } from "./checks";
 import { Emails, InboxCard } from "./inbox";
 import { PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
@@ -87,14 +88,14 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && draft ? (
-        <Check t={t} lang={lang} slug={cafe.slug} data={data} draft={draft} onBack={() => open(null)} onDecided={decided} />
+        <Check t={t} lang={lang} slug={cafe.slug} data={data} draft={draft} onBack={() => open(null)} onDecided={decided} onRefresh={() => void load()} />
       ) : (
         data && (
           <>
             {data.ai === "demo" && <Notice>{t("drDemo")}</Notice>}
             {data.ai === "off" && <Notice>{t("drOff")}</Notice>}
             {done && <Decided t={t} slug={cafe.slug} draft={done} />}
-            {data.canUpload && <Upload t={t} lang={lang} slug={cafe.slug} onUploaded={() => void load()} />}
+            {data.canUpload && <Upload t={t} lang={lang} slug={cafe.slug} demo={data.ai === "demo"} onUploaded={() => void load()} />}
             {data.ai !== "off" && inbox && (
               <InboxCard
                 t={t}
@@ -129,8 +130,8 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
   );
 }
 
-/** The drop zone: several bills at once; one sent before says what became of it. */
-function Upload({ t, lang, slug, onUploaded }: { t: T; lang: Lang; slug: string; onUploaded: () => void }) {
+/** The drop zone: several bills or statements at once; one sent before says what became of it. */
+function Upload({ t, lang, slug, demo, onUploaded }: { t: T; lang: Lang; slug: string; demo: boolean; onUploaded: () => void }) {
   const scan = useScan(slug, lang, t, onUploaded);
   const [over, setOver] = useState(false);
 
@@ -168,6 +169,7 @@ function Upload({ t, lang, slug, onUploaded }: { t: T; lang: Lang; slug: string;
         <span className="text-lg font-medium">{scan.busy ? t("drUploading") : t("drUpload")}</span>
         <span className="text-sm text-muted">{t("drUploadHint")}</span>
       </ScanInput>
+      {demo && <Samples t={t} lang={lang} slug={slug} onSent={onUploaded} />}
       {scan.error && <Notice tone="red">{scan.error}</Notice>}
       <Repeats t={t} lang={lang} slug={slug} scan={scan} links={{ drafts: true, bills: true }} />
     </div>
@@ -221,7 +223,7 @@ function ReadingRow({ t, lang, r }: { t: T; lang: Lang; r: ReadingDTO }) {
   );
 }
 
-/** One draft beside its document: the notes, the bill to check, and "Onayla" or "Bırak". */
+/** One draft beside its document: the notes, the bill or statement or Z report to check, and "Onayla" or "Bırak". */
 function Check({
   t,
   lang,
@@ -230,6 +232,7 @@ function Check({
   draft,
   onBack,
   onDecided,
+  onRefresh,
 }: {
   t: T;
   lang: Lang;
@@ -238,6 +241,7 @@ function Check({
   draft: DraftDTO;
   onBack: () => void;
   onDecided: (d: DraftDTO) => void;
+  onRefresh: () => void;
 }) {
   const [dismissing, setDismissing] = useState(false);
   const [reason, setReason] = useState("");
@@ -271,7 +275,11 @@ function Check({
               </ul>
             </section>
           )}
-          {data.canConfirm ? (
+          {draft.kind === "statement" ? (
+            <StatementCheck t={t} lang={lang} slug={slug} draft={draft} canCheck={data.canCheck} onRefresh={onRefresh} onDecided={onDecided} />
+          ) : draft.kind === "zreport" ? (
+            <ZCheck t={t} lang={lang} slug={slug} draft={draft} canCheck={data.canCheck} onDecided={onDecided} />
+          ) : data.canConfirm ? (
             <BillForm t={t} lang={lang} slug={slug} data={data.billForm} bill={null} draft={draft} onClose={onBack} onConfirmed={onDecided} />
           ) : (
             <Notice>{t("drCantConfirm")}</Notice>
@@ -308,6 +316,18 @@ function DocumentView({ t, draft }: { t: T; draft: DraftDTO }) {
   const doc = draft.document;
   if (!doc) return <Notice>{t("drNoDocument")}</Notice>;
   const pdf = doc.contentType === "application/pdf";
+  // An Excel or CSV statement isn't shown in the page; it downloads.
+  if (!pdf && !doc.contentType.startsWith("image/"))
+    return (
+      <section className="flex flex-col gap-3 rounded-3xl border border-line bg-tile p-6 lg:sticky lg:top-6 lg:self-start" aria-label={t("drDocument")}>
+        <p className="truncate text-lg font-medium">{doc.name || t("drDocument")}</p>
+        <p className="text-sm text-muted">{t("ckSheet")}</p>
+        {doc.sender && <p className="text-sm text-muted">{fill(t("drByEmail"), { sender: doc.sender })}</p>}
+        <a href={doc.url} download={doc.name || undefined} className="text-sm font-semibold underline underline-offset-4">
+          {t("ckDownload")}
+        </a>
+      </section>
+    );
   return (
     <section className="flex flex-col gap-2 lg:sticky lg:top-6 lg:self-start" aria-label={t("drDocument")}>
       <div className="overflow-hidden rounded-3xl border border-line bg-tile">
@@ -328,7 +348,13 @@ function DocumentView({ t, draft }: { t: T; draft: DraftDTO }) {
 function Decided({ t, slug, draft }: { t: T; slug: string; draft: DraftDTO }) {
   return (
     <p role="status" className="flex flex-wrap items-center gap-3 rounded-2xl bg-panel px-4 py-3 text-sm">
-      <span>{draft.status === "confirmed" ? t("drSaved") : t("drDismissed")}</span>
+      <span>
+        {draft.status === "dismissed"
+          ? t("drDismissed")
+          : draft.kind === "bill"
+            ? t("drSaved")
+            : `${t("ckSaved")} ${outcomeText(t, draft.kind, draft.outcome)}`}
+      </span>
       {draft.resultId && (
         <a href={billHref(slug, draft.resultId)} className="font-semibold underline underline-offset-4">
           {t("drOpenBill")}
@@ -347,11 +373,13 @@ function History({ t, lang, slug, data }: { t: T; lang: Lang; slug: string; data
           <span className="flex min-w-0 flex-col gap-1">
             <span className="truncate text-lg font-medium">{d.title}</span>
             <span className="text-sm text-muted">
-              {fill(t(d.status === "confirmed" ? "drConfirmedBy" : "drDismissedBy"), {
+              {fill(t(d.status === "dismissed" ? "drDismissedBy" : d.kind === "bill" ? "drConfirmedBy" : "ckCheckedBy"), {
                 who: d.decidedBy ?? "",
                 at: d.decidedAt ? when(d.decidedAt, lang) : "",
               })}
+              {d.status === "confirmed" && d.kind !== "bill" && ` · ${outcomeText(t, d.kind, d.outcome)}`}
               {d.status === "confirmed" &&
+                d.kind === "bill" &&
                 ` · ${d.changed.length ? fill(t("drChanged"), { what: d.changed.map((c) => t(`chg_${c}` as TextKey)).join(", ") }) : t("drAsRead")}`}
               {d.dismissReason && ` · “${d.dismissReason}”`}
             </span>
@@ -366,6 +394,9 @@ function History({ t, lang, slug, data }: { t: T; lang: Lang; slug: string; data
     </ul>
   );
 }
+
+/** What a confirmed bill's log line lists; a statement's or Z report's says its own outcome. */
+const CHANGED = new Set(["supplier", "date", "number", "dueDate", "lines", "kdv"]);
 
 const EVENT: Record<AiLogDTO["events"][number]["kind"], TextKey> = {
   "document.uploaded": "ev_document_uploaded",
@@ -408,7 +439,7 @@ function Log({ t, lang, slug }: { t: T; lang: Lang; slug: string }) {
                 </span>
                 {e.detail && (
                   <span className="truncate text-sm text-muted">
-                    {e.kind === "draft.confirmed"
+                    {e.kind === "draft.confirmed" && e.detail.split(", ").every((c) => CHANGED.has(c))
                       ? fill(t("drChanged"), {
                           what: e.detail
                             .split(", ")

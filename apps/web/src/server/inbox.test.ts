@@ -1,4 +1,5 @@
 import { ScriptedModel, type BillReading } from "@peni/ai";
+import type { BillDraftDTO, DraftsDTO } from "@peni/api";
 import { createHmac } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 import { inMemoryStores, PeniApp, type PeniStores } from "./app";
@@ -51,7 +52,7 @@ const mail = (to: string[], files: MailFile[], over: Partial<Mail> = {}): Mail =
 });
 
 const reading: BillReading = {
-  isBill: true,
+  kind: "bill",
   supplierName: "ADN AMBALAJ SAN.",
   supplierTaxNumber: null,
   number: "A-20511",
@@ -93,7 +94,7 @@ describe("The forward-to-Peni inbox (plan piece 26)", () => {
     expect(big.reads).toBe(0);
     await app.assistant.runSoon();
 
-    const drafts = (await app.assistant.list(leyla)).open;
+    const drafts = billDrafts(await app.assistant.list(leyla));
     expect(drafts).toHaveLength(2);
     // The name read doesn't match a supplier; the sender's address does.
     expect(drafts.map((d) => [d.proposal.supplierId, d.document?.sender])).toEqual([
@@ -242,3 +243,8 @@ describe("Resend's inbound webhook", () => {
     expect(await f!.read()).toEqual(pdf(1));
   });
 });
+
+/** The bill drafts waiting (piece 27 adds statements and Z reports). */
+function billDrafts(list: DraftsDTO): BillDraftDTO[] {
+  return list.open.filter((d): d is BillDraftDTO => d.kind === "bill");
+}

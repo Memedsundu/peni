@@ -120,6 +120,8 @@ import type {
   ConfirmDraftInput,
   InboxSettingsInput,
   DismissDraftInput,
+  CheckDraftInput,
+  CheckSampleInput,
   CopyWeekInput,
   PayoutInput,
   PublishWeekInput,
@@ -459,6 +461,11 @@ export function createPeniClient(options: PeniClientOptions) {
           call<DraftDTO>("POST", `/staff/${slug(cafeSlug)}/drafts/${encodeURIComponent(draftId)}/confirm`, input, true),
         dismiss: (cafeSlug: string, draftId: string, input: DismissDraftInput = {}) =>
           call<DraftDTO>("POST", `/staff/${slug(cafeSlug)}/drafts/${encodeURIComponent(draftId)}/dismiss`, input, true),
+        /** "Kontrol edildi" on a statement or Z report (piece 27), which needs "cash.manage". */
+        check: (cafeSlug: string, draftId: string, input: CheckDraftInput = {}) =>
+          call<DraftDTO>("POST", `/staff/${slug(cafeSlug)}/drafts/${encodeURIComponent(draftId)}/check`, input, true),
+        /** Demo only: a sample statement or Z report from the demo café's own numbers, read like an upload. */
+        sample: (cafeSlug: string, input: CheckSampleInput) => call<UploadDTO>("POST", `/staff/${slug(cafeSlug)}/documents/sample`, input, true),
         /** The assistant's log, newest first; `before` (an ISO time from `next`) pages back. */
         log: (cafeSlug: string, before?: string) =>
           call<AiLogDTO>("GET", `/staff/${slug(cafeSlug)}/drafts/log${before ? `?before=${encodeURIComponent(before)}` : ""}`, undefined, true),

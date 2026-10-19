@@ -4,6 +4,7 @@ import type {
   AssistantStore,
   BillProposal,
   CafeInbox,
+  CheckOutcome,
   DocumentType,
   Draft,
   DraftKind,
@@ -18,13 +19,16 @@ import type {
 import type { Db } from "./db";
 import { Prisma, type AiDraft as DraftRow, type AiEvent as EventRow, type InboundEmail as EmailRow, type Job as JobRow } from "./generated/client";
 
-const toDraft = (r: DraftRow): Draft => ({
-  ...r,
-  kind: r.kind as DraftKind,
-  status: r.status as DraftStatus,
-  proposal: r.proposal as unknown as BillProposal,
-  duplicateOf: (r.duplicateOf as unknown as DuplicateRef | null) ?? null,
-});
+const toDraft = (r: DraftRow): Draft =>
+  ({
+    ...r,
+    kind: r.kind as DraftKind,
+    status: r.status as DraftStatus,
+    // A bill, a statement or a Z report (piece 27), by its kind.
+    proposal: r.proposal as unknown as BillProposal,
+    duplicateOf: (r.duplicateOf as unknown as DuplicateRef | null) ?? null,
+    outcome: (r.outcome as unknown as CheckOutcome | null) ?? null,
+  }) as Draft;
 const toJob = (r: JobRow): Job => ({
   ...r,
   status: r.status as JobStatus,
@@ -77,7 +81,12 @@ export class PrismaAssistantStore implements AssistantStore {
   }
 
   async saveDraft(draft: Draft): Promise<void> {
-    const data = { ...draft, proposal: json(draft.proposal), duplicateOf: draft.duplicateOf ? json(draft.duplicateOf) : Prisma.DbNull };
+    const data = {
+      ...draft,
+      proposal: json(draft.proposal),
+      duplicateOf: draft.duplicateOf ? json(draft.duplicateOf) : Prisma.DbNull,
+      outcome: draft.outcome ? json(draft.outcome) : Prisma.DbNull,
+    };
     await this.db().aiDraft.upsert({ where: { id: draft.id }, create: data, update: data });
   }
 

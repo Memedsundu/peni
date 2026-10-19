@@ -9,6 +9,7 @@ import {
   type BillsDTO,
   type BillStateDTO,
   type BillSummaryDTO,
+  type BillDraftDTO,
   type DraftDTO,
   type ProposalLineDTO,
   type StockUnitDTO,
@@ -490,7 +491,7 @@ export function BillForm({
   slug: string;
   data: BillsDTO;
   bill: BillDTO | null;
-  draft?: DraftDTO | null;
+  draft?: BillDraftDTO | null;
   onClose: () => void;
   onDone?: (b: BillDTO) => void;
   onConfirmed?: (d: DraftDTO) => void;
@@ -528,7 +529,7 @@ export function BillForm({
   // A bill that looks already entered is saved only with a yes (piece 25).
   const [askDuplicate, setAskDuplicate] = useState(!!draft?.duplicateOf);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
-  const save = useSave<BillDTO | DraftDTO>(lang, (r) => ("proposal" in r ? onConfirmed?.(r) : onDone?.(r)));
+  const save = useSave<BillDTO | DraftDTO>(lang, (r) => ("kind" in r ? onConfirmed?.(r) : onDone?.(r)));
 
   // A bill being corrected may name a supplier or item that was removed since; keep them choosable.
   const suppliers = [...data.suppliers];

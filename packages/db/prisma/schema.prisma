@@ -1495,6 +1495,8 @@ model AiDraft {
   dismissReason String?
   /// An earlier bill or draft it may repeat (piece 25).
   duplicateOf   Json?
+  /// A statement or Z report: what the person saw when they said it was checked (piece 27).
+  outcome       Json?
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 

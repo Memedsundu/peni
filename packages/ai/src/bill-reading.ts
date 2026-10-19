@@ -12,8 +12,16 @@ export type ReadCategory = (typeof READ_CATEGORIES)[number];
 
 const day = z.string().describe("YYYY-MM-DD");
 
+/** What a document is: a bill is read here; statements and Z reports have their own reading (piece 27). */
+export const DOCUMENT_KINDS = ["bill", "bankStatement", "cardStatement", "zReport", "other"] as const;
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
 export const billReadingSchema = z.object({
-  isBill: z.boolean().describe("true when this is a receipt, invoice or bill for something the café bought or has to pay"),
+  kind: z
+    .enum(DOCUMENT_KINDS)
+    .describe(
+      "bill: a receipt, invoice or bill for something the café bought or has to pay. bankStatement: a bank account's statement or list of transactions. cardStatement: a credit card's statement. zReport: a cash register's end-of-day Z report. other: anything else",
+    ),
   supplierName: z.string().nullable().describe("The seller as printed, e.g. 'Moda Süt Ürünleri Ltd. Şti.'"),
   supplierTaxNumber: z.string().nullable().describe("VKN (10 digits) or TCKN (11 digits) of the seller"),
   number: z.string().nullable().describe("Fatura no, fiş no or belge no"),
@@ -50,7 +58,7 @@ Amounts are Turkish lira as numbers: "1.234,50" is 1234.5.
 Every line amount must include its KDV. When the document lists net amounts and KDV separately, add each line's KDV to it so the lines add up to the total.
 Fold discounts into the lines they belong to.
 Categories: ingredients (food, drink and anything that goes into what the café sells), supplies (cups, napkins, cleaning), rent, utilities (electricity, water, gas, internet, phone), services (repairs, accounting, delivery), other.
-If this isn't a bill at all (a menu, a photo of a person, a bank statement), set isBill false and leave the rest empty.
+If this isn't a bill (a bank or card statement, a Z report, a menu, a photo of a person), set kind to what it is and leave the rest empty.
 When the document shows its KDV ("KDV %20 ... 301,67", "Toplam KDV"), copy the amount for each rate into "kdv"; never work it out yourself.
 Write "doubts" in Turkish, short and plain, for the café owner.`;
 
@@ -69,17 +77,30 @@ export function billReadingRequest(
   document: { name: string; contentType: string; bytes: Uint8Array },
   items: readonly ReadStockItem[] = [],
 ): AiRequest<BillReading> {
-  const part: AiPart =
-    document.contentType === "application/pdf"
-      ? { type: "pdf", name: document.name || "belge.pdf", bytes: document.bytes }
-      : { type: "image", contentType: document.contentType as "image/jpeg" | "image/png" | "image/webp", bytes: document.bytes };
+  const part = documentPart(document);
   return {
     purpose: "document.read",
     instructions: items.length ? `${BILL_INSTRUCTIONS}\n\n${STOCK_INSTRUCTIONS}` : BILL_INSTRUCTIONS,
-    parts: [{ type: "text", text: items.length ? `Read this document.\n\nStock items:\n${stockList(items)}` : "Read this document." }, part],
+    parts: [{ type: "text", text: `${readThis(document.name)}${items.length ? `\n\nStock items:\n${stockList(items)}` : ""}` }, part],
     schema: billReadingSchema,
     schemaName: "bill_reading",
   };
+}
+
+/** "Read this document (ekstre-ekim.pdf)." The file's name can say what it is. */
+export function readThis(name: string): string {
+  const n = name
+    .replace(/[\r\n]+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return n ? `Read this document (${n}).` : "Read this document.";
+}
+
+/** The model's view of a document: a PDF or a photo. */
+export function documentPart(document: { name: string; contentType: string; bytes: Uint8Array }): AiPart {
+  return document.contentType === "application/pdf"
+    ? { type: "pdf", name: document.name || "belge.pdf", bytes: document.bytes }
+    : { type: "image", contentType: document.contentType as "image/jpeg" | "image/png" | "image/webp", bytes: document.bytes };
 }
 
 /** "1. Süt (l)", one per line: the numbers the model answers with. */

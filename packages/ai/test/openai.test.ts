@@ -82,7 +82,7 @@ describe("OpenAiModel (plan piece 24)", () => {
 
 describe("Reading a bill", () => {
   const reading: BillReading = {
-    isBill: true,
+    kind: "bill",
     supplierName: "  Moda Süt Ürünleri ",
     supplierTaxNumber: "1234567890",
     number: "A-1024",

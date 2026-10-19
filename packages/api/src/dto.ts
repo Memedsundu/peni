@@ -1620,13 +1620,14 @@ export interface DocumentRefDTO {
 
 export type DraftStatusDTO = "open" | "confirmed" | "dismissed";
 
-export interface DraftDTO {
+/** A draft of each kind (piece 27): a bill to add, or a statement or Z report to check. */
+export type DraftDTO = BillDraftDTO | StatementDraftDTO | ZReportDraftDTO;
+
+interface DraftBaseDTO {
   id: string;
-  kind: "bill";
   status: DraftStatusDTO;
   title: string;
   createdAt: string;
-  proposal: BillProposalDTO;
   /** What the assistant wasn't sure of, for the owner. */
   doubts: string[];
   document: DocumentRefDTO | null;
@@ -1639,6 +1640,117 @@ export interface DraftDTO {
   dismissReason: string | null;
   /** It may repeat this; confirming needs `allowDuplicate`. */
   duplicateOf: DuplicateRefDTO | null;
+}
+
+export interface BillDraftDTO extends DraftBaseDTO {
+  kind: "bill";
+  proposal: BillProposalDTO;
+}
+
+export interface StatementDraftDTO extends DraftBaseDTO {
+  kind: "statement";
+  /** What was read, matched against Peni as it is now; null once decided. */
+  statement: StatementCheckDTO | null;
+  outcome: CheckOutcomeDTO | null;
+}
+
+export interface ZReportDraftDTO extends DraftBaseDTO {
+  kind: "zreport";
+  /** What was read, beside the till's day as it is now; null once decided. */
+  zreport: ZCheckDTO | null;
+  outcome: CheckOutcomeDTO | null;
+}
+
+/** What a statement line looks like it is, from its description. */
+export type StatementGuessDTO =
+  | "cardSales"
+  | "supplier"
+  | "wages"
+  | "tax"
+  | "rent"
+  | "utilities"
+  | "fee"
+  | "cardPayment"
+  | "transfer"
+  | "cash"
+  | "loan"
+  | "check"
+  | "other";
+
+/** One of Peni's records on a statement's account: Nakit ve banka's kinds, or a card's charges and payments. */
+export type StatementRecordKindDTO = MoneyLineKindDTO | "charge" | "cardPayment";
+
+export interface StatementRecordDTO {
+  kind: StatementRecordKindDTO;
+  /** The supplier, the person paid, the note. */
+  label: string | null;
+  day: string;
+  /** From the account's side: in positive, out negative. */
+  amountKurus: number;
+  billId: string | null;
+}
+
+export interface StatementLineDTO {
+  date: string;
+  description: string;
+  /** From the café's side: in positive, out negative. */
+  amountKurus: number;
+  balanceKurus: number | null;
+  guess: StatementGuessDTO;
+  /** What Peni has for it, or null. Card sales may be several days, less the bank's commission (`feeKurus`). */
+  match: (StatementRecordDTO & { days: number; feeKurus: number }) | null;
+}
+
+/** A bank or credit card statement beside Peni (plan piece 27, A5). */
+export interface StatementCheckDTO {
+  account: "bank" | "card";
+  bankName: string | null;
+  accountHint: string | null;
+  from: string | null;
+  to: string | null;
+  openingKurus: number | null;
+  closingKurus: number | null;
+  lines: StatementLineDTO[];
+  /** Peni's records in the statement's days that no line matched. */
+  missing: StatementRecordDTO[];
+  /** Card sales of the statement's last days that no line matched: they may reach the bank after it ends. */
+  inTransitKurus: number;
+  /** Whether Peni follows the account for those days: the bank once Nakit ve banka has started. */
+  followed: boolean;
+  /** Bank: Peni's balance at the end of the last day, less the card sales on their way. Card: what Peni says was owed then, below zero. */
+  peniBalanceKurus: number | null;
+  /** The statement's closing balance less Peni's. */
+  differenceKurus: number | null;
+  /** The bank's commission on the card sales matched. */
+  feesKurus: number;
+  /** Whether Peni's bank balance can be set to the statement's (the bank, a difference, an open month, "cash.manage"). */
+  canFix: boolean;
+}
+
+/** A Z report beside the till's own day (plan piece 27, A6). */
+export interface ZCheckDTO {
+  date: string | null;
+  zNumber: string | null;
+  receipts: number | null;
+  refundsKurus: number | null;
+  /** Paid in ways the till doesn't take (meal cards). */
+  otherKurus: number | null;
+  kdv: BillKdvDTO[];
+  /** Cash, card, and the total against cash and card together: Z, till, and Z less till. */
+  rows: { key: "cash" | "card" | "total"; zKurus: number | null; tillKurus: number; differenceKurus: number | null }[];
+  /** Paid at the till with peni or from the askı: not on the Z report's cash or card. */
+  till: { peniKurus: number; askiKurus: number; payments: number };
+  /** Some row is off by more than ₺1: saying it's checked needs a note. */
+  differs: boolean;
+}
+
+/** What the person saw when they said it was checked. */
+export interface CheckOutcomeDTO {
+  note: string | null;
+  matched: number;
+  unmatched: number;
+  differenceKurus: number | null;
+  correctionKurus: number | null;
 }
 
 /**
@@ -1693,6 +1805,8 @@ export interface DraftsDTO {
   canUpload: boolean;
   /** Can confirm bill drafts ("bills.add"). */
   canConfirm: boolean;
+  /** Can say a statement or Z report is checked ("cash.manage"). */
+  canCheck: boolean;
   /** Bills' form needs these to check a draft. */
   billForm: BillsDTO;
 }
