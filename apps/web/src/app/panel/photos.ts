@@ -4,11 +4,12 @@ const MAX_SIDE = 1600;
 /**
  * Shrinks a photo in the browser before it's sent (plan piece 14): turned the right way up,
  * at most 1600px on its longest side, as WebP (JPEG where the browser can't make WebP).
- * Phone photos of 4–12 MB come out at a few hundred KB.
+ * Phone photos of 4–12 MB come out at a few hundred KB. A bill keeps more (`maxSide`), so
+ * its small print stays readable.
  */
-export async function shrinkPhoto(file: File): Promise<Blob> {
+export async function shrinkPhoto(file: File, maxSide = MAX_SIDE): Promise<Blob> {
   const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-  const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bitmap.width * scale);
   canvas.height = Math.round(bitmap.height * scale);

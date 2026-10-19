@@ -1449,7 +1449,8 @@ export type AlertTypeDTO =
   | "hoursMissing"
   | "payClose"
   | "payLeft"
-  | "tasksLate";
+  | "tasksLate"
+  | "draftsOpen";
 
 /** Something that needs doing, worked out from the café's own numbers. One per kind. */
 export interface AlertDTO {
@@ -1547,4 +1548,104 @@ export interface SalesReportDTO {
   unpriced: number;
   /** Month by month, up to this month, from the first month with numbers; at most 12. */
   months: { month: string; salesKurus: number; expensesKurus: number; profitKurus: number }[];
+}
+
+// ─────────────────────────────────────────────── the assistant (plan piece 24)
+
+/** A bill as the assistant proposes it; anything it couldn't read is null. */
+export interface BillProposalDTO {
+  /** A supplier the café already has, when the name matched. */
+  supplierId: string | null;
+  /** The seller as printed; offered as a new supplier when nothing matched. */
+  supplierName: string | null;
+  supplierTaxNumber: string | null;
+  number: string | null;
+  date: string | null;
+  dueDate: string | null;
+  /** The total printed on the document, to compare the lines with. */
+  totalKurus: number | null;
+  lines: { itemId: string | null; name: string; category: BillCategoryDTO; qtyMilli: number | null; totalKurus: number }[];
+}
+
+export interface DocumentRefDTO {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+  /** Where the staff can see it; it needs their session. */
+  url: string;
+}
+
+export type DraftStatusDTO = "open" | "confirmed" | "dismissed";
+
+export interface DraftDTO {
+  id: string;
+  kind: "bill";
+  status: DraftStatusDTO;
+  title: string;
+  createdAt: string;
+  proposal: BillProposalDTO;
+  /** What the assistant wasn't sure of, for the owner. */
+  doubts: string[];
+  document: DocumentRefDTO | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  /** The bill it became. */
+  resultId: string | null;
+  /** Fields changed before confirming. */
+  changed: string[];
+  dismissReason: string | null;
+}
+
+/** A document being read, or one that couldn't become a draft. */
+export interface ReadingDTO {
+  jobId: string;
+  documentName: string;
+  at: string;
+  state: "reading" | "failed" | "notBill";
+  /** Why it failed, in the café's words. */
+  error: string | null;
+}
+
+/** `GET /staff/:slug/drafts`: Taslaklar. */
+export interface DraftsDTO {
+  cafe: { slug: string; name: string };
+  today: string;
+  open: DraftDTO[];
+  /** Confirmed or dismissed lately, newest first. */
+  recent: DraftDTO[];
+  /** Documents read in the last day that haven't become a draft yet. */
+  reading: ReadingDTO[];
+  /** Whether the assistant can read: off without an OpenAI key, "demo" in the demo without one. */
+  ai: "on" | "demo" | "off";
+  /** Can upload a document ("bills.add"). */
+  canUpload: boolean;
+  /** Can confirm bill drafts ("bills.add"). */
+  canConfirm: boolean;
+  /** Bills' form needs these to check a draft. */
+  billForm: BillsDTO;
+}
+
+export type AiEventKindDTO = "document.uploaded" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
+
+/** `GET /staff/:slug/assistant/log`: what the assistant did and what people did with it. */
+export interface AiLogDTO {
+  events: {
+    id: string;
+    at: string;
+    kind: AiEventKindDTO;
+    who: string | null;
+    purpose: string | null;
+    model: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    ms: number | null;
+    ok: boolean;
+    detail: string | null;
+    draftId: string | null;
+  }[];
+  /** This calendar month so far. */
+  month: { calls: number; inputTokens: number; outputTokens: number };
+  /** Pass as `before` for older events; null when there are none. */
+  next: string | null;
 }

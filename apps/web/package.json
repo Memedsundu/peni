@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource/instrument-serif": "5.3.0",
+    "@peni/ai": "workspace:*",
     "@peni/api": "workspace:*",
     "@peni/brand": "workspace:*",
     "@peni/core": "workspace:*",

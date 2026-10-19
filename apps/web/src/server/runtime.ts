@@ -1,3 +1,4 @@
+import { OpenAiModel } from "@peni/ai";
 import { createPrismaClient, createPrismaStores } from "@peni/db";
 import { PeniApp, inMemoryStores } from "./app";
 import { JoseIdTokenVerifier, OutboxEmailSender, ResendEmailSender, type EmailSender } from "./customer-auth";
@@ -16,13 +17,19 @@ const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp>; pen
  * the web client and each app's) and RESEND_API_KEY with EMAIL_FROM. Without
  * Resend, the demo keeps sign-in emails in an outbox instead of sending them.
  * PENI_PUBLIC_URL is the site's address for links in emails (gift emails need it).
+ * OPENAI_API_KEY turns the assistant on (OPENAI_MODEL picks the model, gpt-5-mini by
+ * default); without it the demo uses a stand-in that doesn't read, and anything else
+ * runs with the assistant off.
  */
 export function getApp(): Promise<PeniApp> {
   globalForPeni.peniApp ??= (async () => {
     const demo = process.env.PENI_DEMO !== "0";
     const url = process.env.DATABASE_URL;
     const stores = url ? createPrismaStores(createPrismaClient(url)) : inMemoryStores();
-    const app = new PeniApp({ demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) }, publicUrl: process.env.PENI_PUBLIC_URL || undefined }, stores);
+    const app = new PeniApp(
+      { demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) }, publicUrl: process.env.PENI_PUBLIC_URL || undefined, ai: aiFromEnv() },
+      stores,
+    );
     if (demo && (await app.identity.listCafes()).length === 0) await seed(app);
     return app;
   })();
@@ -32,6 +39,12 @@ export function getApp(): Promise<PeniApp> {
 /** The demo's outbox, when sign-in emails are kept instead of sent. */
 export function demoOutbox(): OutboxEmailSender | null {
   return globalForPeni.peniOutbox ?? null;
+}
+
+/** Left out (undefined) when there's no key, so the app picks the demo's stand-in or turns the assistant off. */
+function aiFromEnv() {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  return apiKey ? { model: new OpenAiModel({ apiKey, model: process.env.OPENAI_MODEL?.trim() || undefined }), mode: "on" as const } : undefined;
 }
 
 function verifierFromEnv(): JoseIdTokenVerifier {

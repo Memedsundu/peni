@@ -615,6 +615,48 @@ const future = await call("GET", `/staff/moda/reports?from=${report.today}&throu
 assert.deepEqual([future.status, future.json.error.code], [400, "REPORT_RANGE"]);
 step("Raporlar adds up for this month, has today's sales from this run (the same as on Bugün), and isn't for the till or for days to come");
 
+// 5s. Taslaklar (piece 24): Murat uploads a receipt; the demo's stand-in reads it in the
+//     background into a draft (next to the one the demo starts with). Leyla sees it beside
+//     its document, fixes the number and confirms: the bill is added in her name, once.
+//     Ece's till can't see drafts; a web page isn't a document.
+const MURAT = await staffSignIn("murat@moda.test");
+const uploadDoc = async (bytes, type, headers) =>
+  fetch(`${BASE}/api/v1/staff/moda/documents?name=fis.pdf`, { method: "POST", headers: { "content-type": type, ...headers }, body: bytes }).then(async (r) => ({ status: r.status, json: await r.json() }));
+const receipt = new TextEncoder().encode("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
+const uploaded = await uploadDoc(receipt, "application/pdf", MURAT);
+assert.equal(uploaded.status, 200);
+assert.equal(uploaded.json.documentName, "fis.pdf");
+let drafts = null;
+for (let i = 0; i < 20; i++) {
+  drafts = (await call("GET", "/staff/moda/drafts", { headers: STAFF })).json;
+  if (!drafts.reading.some((r) => r.jobId === uploaded.json.jobId && r.state === "reading")) break;
+  await new Promise((r) => setTimeout(r, 250));
+}
+assert.equal(drafts.ai, "demo");
+assert.ok(drafts.open.length >= 2, "the demo's draft and this one wait");
+const fresh = drafts.open.find((d) => d.document?.name === "fis.pdf");
+assert.ok(fresh, "the upload became a draft");
+assert.equal(fresh.proposal.supplierId, "sup_seed_ambalaj");
+const docRes = await fetch(`${BASE}${fresh.document.url}`, { headers: STAFF });
+assert.deepEqual([docRes.status, docRes.headers.get("content-type"), (await docRes.arrayBuffer()).byteLength], [200, "application/pdf", receipt.length]);
+const confirmBody = {
+  supplierId: fresh.proposal.supplierId,
+  number: "A-20512",
+  date: fresh.proposal.date,
+  lines: fresh.proposal.lines.map((l) => ({ itemId: null, name: l.name, category: l.category, totalKurus: l.totalKurus })),
+};
+const confirmed = (await call("POST", `/staff/moda/drafts/${fresh.id}/confirm`, { headers: STAFF, body: confirmBody })).json;
+assert.deepEqual([confirmed.status, confirmed.decidedBy, confirmed.changed], ["confirmed", "Leyla Kara", ["number"]]);
+assert.equal((await call("POST", `/staff/moda/drafts/${fresh.id}/confirm`, { headers: STAFF, body: confirmBody })).json.resultId, confirmed.resultId);
+const draftBill = (await call("GET", `/staff/moda/bills/${confirmed.resultId}`, { headers: STAFF })).json;
+assert.deepEqual([draftBill.number, draftBill.totalKurus, draftBill.createdBy], ["A-20512", 181_000, "Leyla Kara"]);
+const aiLog = (await call("GET", "/staff/moda/drafts/log", { headers: STAFF })).json;
+assert.equal(aiLog.events[0].kind, "draft.confirmed");
+assert.equal((await call("GET", "/staff/moda/drafts", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
+const notDoc = await uploadDoc(new TextEncoder().encode("<html></html>"), "text/html", MURAT);
+assert.deepEqual([notDoc.status, notDoc.json.error.code], [415, "DOCUMENT_TYPE"]);
+step("Taslaklar: an uploaded receipt is read in the background into a draft, checked beside its document and confirmed once in Leyla's name; not for the till, and only photos and PDFs");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

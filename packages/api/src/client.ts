@@ -43,6 +43,10 @@ import type {
   TaskListDTO,
   TaskListsDTO,
   SalesReportDTO,
+  AiLogDTO,
+  DraftDTO,
+  DraftsDTO,
+  ReadingDTO,
   TodayDTO,
   ShiftWeekDTO,
 } from "./dto";
@@ -111,6 +115,8 @@ import type {
   SaveTaskListInput,
   CheckTaskInput,
   AlertEmailInput,
+  ConfirmDraftInput,
+  DismissDraftInput,
   CopyWeekInput,
   PayoutInput,
   PublishWeekInput,
@@ -429,6 +435,24 @@ export function createPeniClient(options: PeniClientOptions) {
             undefined,
             true,
           ),
+      },
+      /**
+       * Taslaklar (piece 24): what the assistant prepared, to confirm or dismiss. Needs
+       * "assistant.use"; uploading and confirming a bill also need "bills.add".
+       */
+      drafts: {
+        list: (cafeSlug: string) => call<DraftsDTO>("GET", `/staff/${slug(cafeSlug)}/drafts`, undefined, true),
+        /** A photo or PDF of a bill; the assistant reads it in the background. */
+        upload: (cafeSlug: string, file: Blob, name = "") =>
+          call<ReadingDTO>("POST", `/staff/${slug(cafeSlug)}/documents${name ? `?name=${encodeURIComponent(name)}` : ""}`, file, true),
+        /** Adds the bill as checked, in the confirmer's name. Once only. */
+        confirm: (cafeSlug: string, draftId: string, input: ConfirmDraftInput) =>
+          call<DraftDTO>("POST", `/staff/${slug(cafeSlug)}/drafts/${encodeURIComponent(draftId)}/confirm`, input, true),
+        dismiss: (cafeSlug: string, draftId: string, input: DismissDraftInput = {}) =>
+          call<DraftDTO>("POST", `/staff/${slug(cafeSlug)}/drafts/${encodeURIComponent(draftId)}/dismiss`, input, true),
+        /** The assistant's log, newest first; `before` (an ISO time from `next`) pages back. */
+        log: (cafeSlug: string, before?: string) =>
+          call<AiLogDTO>("GET", `/staff/${slug(cafeSlug)}/drafts/log${before ? `?before=${encodeURIComponent(before)}` : ""}`, undefined, true),
       },
       /** Görevler (piece 22). "tasks.view" sees and ticks today's; "tasks.edit" other days and the lists. */
       tasks: {

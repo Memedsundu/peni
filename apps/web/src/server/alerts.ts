@@ -7,6 +7,7 @@ import type { DebtService } from "./debts";
 import type { PayService } from "./pay";
 import type { StaffContext } from "./staff";
 import type { StockService } from "./stock";
+import type { AssistantService } from "./assistant";
 import type { SalesReportService } from "./sales-report";
 import type { TaskService } from "./tasks";
 
@@ -22,6 +23,7 @@ const ORDER: AlertDTO["type"][] = [
   "payLeft",
   "hoursMissing",
   "debtsSoon",
+  "draftsOpen",
   "stockLow",
   "tasksLate",
   "stockNoCost",
@@ -33,6 +35,7 @@ export interface AlertDeps {
   pay: PayService;
   tasks: TaskService;
   sales: SalesReportService;
+  drafts: Pick<AssistantService, "countOpen" | "openTitles">;
   store: TaskStore;
   staff: StaffStore;
   directory: PeniDirectory;
@@ -139,6 +142,12 @@ export class AlertService {
           names: late.lists.map((l) => `${l.name} (${l.count})`),
           href: "/panel/gorevler",
         });
+    }
+
+    if (permissions.has("assistant.use")) {
+      const count = await this.d.drafts.countOpen(cafeId);
+      if (count)
+        add({ type: "draftsOpen", level: "warning", count, amountKurus: null, names: await this.d.drafts.openTitles(cafeId, NAMES), href: "/panel/taslaklar" });
     }
 
     return out.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical") || ORDER.indexOf(a.type) - ORDER.indexOf(b.type));

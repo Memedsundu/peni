@@ -1,0 +1,22 @@
+{
+  "name": "@peni/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Peni's AI: one model interface (OpenAI for now, D23), and what the assistant reads and drafts.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

@@ -165,6 +165,10 @@ model Cafe {
   taskChecks     TaskCheck[]
   alertDigests   AlertDigest[]
   alertMutes     AlertMute[]
+  documents      CafeDocument[]
+  drafts         AiDraft[]
+  jobs           Job[]
+  aiEvents       AiEvent[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -1409,4 +1413,92 @@ model AlertMute {
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@id([cafeId, memberId])
+}
+
+// ─────────────────────────────────────────────── the assistant (plan piece 24)
+
+/// A receipt, invoice or statement the café handed the assistant. Private to the staff.
+model CafeDocument {
+  id          String   @id
+  cafeId      String
+  name        String
+  contentType String   @db.VarChar(40)
+  bytes       Bytes
+  size        Int
+  sha256      String   @db.VarChar(64)
+  uploadedBy  String
+  createdAt   DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, sha256])
+}
+
+/// Something the assistant proposes; nothing happens until a person confirms it (D21).
+model AiDraft {
+  id            String    @id
+  cafeId        String
+  kind          String
+  status        String
+  title         String
+  /// As the assistant wrote it.
+  proposal      Json
+  doubts        String[]
+  documentId    String?
+  jobId         String?
+  createdAt     DateTime
+  decidedById   String?
+  decidedAt     DateTime?
+  resultId      String?
+  changed       String[]
+  dismissReason String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, status, createdAt])
+}
+
+/// Background work, run right after it's added and retried on later passes.
+model Job {
+  id          String    @id
+  cafeId      String
+  kind        String
+  payload     Json
+  status      String
+  attempts    Int
+  runAt       DateTime
+  lockedUntil DateTime?
+  lastError   String?
+  result      Json?
+  createdAt   DateTime
+  finishedAt  DateTime?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([status, runAt])
+  @@index([cafeId, kind, createdAt])
+}
+
+/// The assistant's log: each call to the model, each draft and what people did with it.
+model AiEvent {
+  id           String   @id
+  cafeId       String
+  at           DateTime
+  kind         String
+  memberId     String?
+  purpose      String?
+  model        String?
+  inputTokens  Int
+  outputTokens Int
+  ms           Int?
+  ok           Boolean
+  detail       String?
+  draftId      String?
+  documentId   String?
+  jobId        String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, at])
+  @@index([cafeId, kind, at])
 }

@@ -9,10 +9,11 @@ import {
   type BillsDTO,
   type BillStateDTO,
   type BillSummaryDTO,
+  type DraftDTO,
   type StockUnitDTO,
 } from "@peni/api";
 import { formatTL } from "@peni/brand/format";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice, Sheet } from "../../kasa/ui";
 import { bigInput, bigUnit, formatDay, formatMonth, formatQty, parseBig, parseTL, shiftMonth, tlInput } from "../amounts";
@@ -430,36 +431,47 @@ let lineKeys = 0;
 const stockLine = (): LineForm => ({ key: ++lineKeys, kind: "stock", itemId: "", qty: "", total: "", name: "", category: "ingredients" });
 const otherLine = (): LineForm => ({ key: ++lineKeys, kind: "other", itemId: "", qty: "", total: "", name: "", category: "rent" });
 
-/** "Fatura ekle", or "Düzelt" when given the bill. */
-function BillForm({
+/**
+ * "Fatura ekle", or "Düzelt" when given the bill. Given a draft (piece 24), it's the
+ * assistant's reading to check: filled in from it, shown in the page rather than over it,
+ * and saved with "Onayla" (never paid from here: the assistant doesn't pay, D21).
+ */
+export function BillForm({
   t,
   lang,
   slug,
   data,
   bill,
+  draft = null,
   onClose,
   onDone,
+  onConfirmed,
 }: {
   t: T;
   lang: Lang;
   slug: string;
   data: BillsDTO;
   bill: BillDTO | null;
+  draft?: DraftDTO | null;
   onClose: () => void;
-  onDone: (b: BillDTO) => void;
+  onDone?: (b: BillDTO) => void;
+  onConfirmed?: (d: DraftDTO) => void;
 }) {
   const key = useRef(newIdempotencyKey());
   const supplierKey = useRef(newIdempotencyKey());
-  const [supplierId, setSupplierId] = useState(bill?.supplierId ?? "");
-  const [newName, setNewName] = useState("");
-  const [date, setDate] = useState(bill?.date ?? data.today);
-  const [number, setNumber] = useState(bill?.number ?? "");
-  const [dueDate, setDueDate] = useState(bill?.dueDate ?? "");
+  const proposal = draft?.proposal;
+  const [supplierId, setSupplierId] = useState(
+    bill?.supplierId ?? proposal?.supplierId ?? (proposal?.supplierName && data.canAddSupplier ? "__new" : ""),
+  );
+  const [newName, setNewName] = useState(proposal?.supplierId ? "" : (proposal?.supplierName ?? ""));
+  const [date, setDate] = useState(bill?.date ?? proposal?.date ?? data.today);
+  const [number, setNumber] = useState(bill?.number ?? proposal?.number ?? "");
+  const [dueDate, setDueDate] = useState(bill?.dueDate ?? proposal?.dueDate ?? "");
   const [note, setNote] = useState(bill?.note ?? "");
   const [paid, setPaid] = useState<"no" | (typeof QUICK_METHODS)[number]>("no");
   const [lines, setLines] = useState<LineForm[]>(() =>
-    bill
-      ? bill.lines.map((l) => ({
+    (bill ?? proposal)
+      ? (bill ?? proposal)!.lines.map((l) => ({
           key: ++lineKeys,
           kind: l.itemId ? "stock" : "other",
           itemId: l.itemId ?? "",
@@ -470,7 +482,7 @@ function BillForm({
         }))
       : [data.items.length ? stockLine() : otherLine()],
   );
-  const save = useSave(lang, onDone);
+  const save = useSave<BillDTO | DraftDTO>(lang, (r) => ("proposal" in r ? onConfirmed?.(r) : onDone?.(r)));
 
   // A bill being corrected may name a supplier or item that was removed since; keep them choosable.
   const suppliers = [...data.suppliers];
@@ -507,7 +519,11 @@ function BillForm({
   const submit = () =>
     save.run(async () => {
       let sid: string | null = supplierId || null;
-      if (supplierId === "__new") sid = (await api.staff.suppliers.add(slug, { key: supplierKey.current, name: newName.trim() })).supplier.id;
+      if (supplierId === "__new") {
+        // A tax number read off the bill comes along when it looks like one.
+        const taxNo = proposal?.supplierTaxNumber && /^\d{10,11}$/.test(proposal.supplierTaxNumber) ? proposal.supplierTaxNumber : undefined;
+        sid = (await api.staff.suppliers.add(slug, { key: supplierKey.current, name: newName.trim(), ...(taxNo ? { taxNo } : {}) })).supplier.id;
+      }
       const fields = {
         supplierId: sid,
         date,
@@ -516,13 +532,15 @@ function BillForm({
         note: note.trim() || null,
         lines: parsed.map((p) => p.line!),
       };
+      if (draft) return api.staff.drafts.confirm(slug, draft.id, fields);
       return bill
         ? api.staff.bills.correct(slug, bill.id, { version: bill.version, ...fields })
         : api.staff.bills.add(slug, { key: key.current, ...fields, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
     });
 
+  const Frame = draft ? InPage : Sheet;
   return (
-    <Sheet title={bill ? t("correctingBill") : t("addBill")} onClose={onClose} labelClose={t("close")} wide>
+    <Frame title={draft ? t("draftCheck") : bill ? t("correctingBill") : t("addBill")} onClose={onClose} labelClose={t("close")} wide>
       {bill && <p className="-mt-2 text-sm text-muted">{t("correctHelp")}</p>}
       <label className="flex flex-col gap-2 text-sm text-muted">
         {t("billSupplier")}
@@ -550,17 +568,17 @@ function BillForm({
       <section className="flex flex-col gap-3">
         <h3 className="text-sm text-muted">{t("billLines")}</h3>
         {data.items.length === 0 && !bill && <p className="text-sm text-muted">{t("noItemsYet")}</p>}
-        <ul className="flex flex-col gap-3">
+        <ul className="@container flex flex-col gap-3">
           {lines.map((l, i) => {
             const p = parsed[i]!;
             const item = p.item;
             const unitKurus = item && p.qtyMilli && p.totalKurus !== null ? Math.round((p.totalKurus * 1000) / p.qtyMilli) : null;
             return (
-              <li key={l.key} className="grid grid-cols-[1fr_1fr_auto] gap-2 rounded-2xl border border-line p-3 sm:grid-cols-[1fr_8rem_8rem_auto]">
+              <li key={l.key} className="grid grid-cols-[1fr_1fr_auto] gap-2 rounded-2xl border border-line p-3 @lg:grid-cols-[1fr_8rem_8rem_auto]">
                 {l.kind === "stock" ? (
                   <>
                     <select
-                      className={`${field} order-1 col-span-2 min-h-12 sm:order-none sm:col-span-1`}
+                      className={`${field} order-1 col-span-2 min-h-12 @lg:order-none @lg:col-span-1`}
                       value={l.itemId}
                       onChange={(e) => set(l.key, { itemId: e.target.value })}
                       aria-label={t("lineItem")}
@@ -572,7 +590,7 @@ function BillForm({
                         </option>
                       ))}
                     </select>
-                    <span className="relative order-3 flex items-center sm:order-none">
+                    <span className="relative order-3 flex items-center @lg:order-none">
                       <input
                         className={`${field} min-h-12 pr-14 text-right tabular`}
                         inputMode="decimal"
@@ -587,7 +605,7 @@ function BillForm({
                 ) : (
                   <>
                     <input
-                      className={`${field} order-1 col-span-2 min-h-12 sm:order-none sm:col-span-1`}
+                      className={`${field} order-1 col-span-2 min-h-12 @lg:order-none @lg:col-span-1`}
                       value={l.name}
                       maxLength={80}
                       placeholder={t("lineWhatPlaceholder")}
@@ -595,7 +613,7 @@ function BillForm({
                       aria-label={t("lineWhat")}
                     />
                     <select
-                      className={`${field} order-3 min-h-12 sm:order-none`}
+                      className={`${field} order-3 min-h-12 @lg:order-none`}
                       value={l.category}
                       onChange={(e) => set(l.key, { category: e.target.value as BillCategoryDTO })}
                       aria-label={t("lineCategory")}
@@ -608,7 +626,7 @@ function BillForm({
                     </select>
                   </>
                 )}
-                <span className="relative order-4 col-span-2 flex items-center sm:order-none sm:col-span-1">
+                <span className="relative order-4 col-span-2 flex items-center @lg:order-none @lg:col-span-1">
                   <input
                     className={`${field} min-h-12 pr-10 text-right tabular ${l.total.trim() && p.totalKurus === null ? "border-red" : ""}`}
                     inputMode="decimal"
@@ -622,7 +640,7 @@ function BillForm({
                 <Button
                   kind="bare"
                   size="sm"
-                  className="order-2 sm:order-none"
+                  className="order-2 @lg:order-none"
                   aria-label={t("removeBillLine")}
                   disabled={lines.length === 1}
                   onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
@@ -630,7 +648,7 @@ function BillForm({
                   ×
                 </Button>
                 {unitKurus !== null && item && (
-                  <span className="order-5 col-span-3 text-sm text-muted sm:order-none sm:col-span-4">
+                  <span className="order-5 col-span-3 text-sm text-muted @lg:order-none @lg:col-span-4">
                     {fill(t("perUnit"), { price: formatTL(unitKurus), unit: unitLabel(item.unit, lang) })}
                     {item.costKurus !== null &&
                       item.costKurus !== unitKurus &&
@@ -654,7 +672,7 @@ function BillForm({
         {duplicate && <Notice tone="red">{t("lineDuplicate")}</Notice>}
       </section>
 
-      {!bill && data.canManage && (
+      {!bill && !draft && data.canManage && (
         <Segmented
           label={t("paidQuestion")}
           value={paid}
@@ -678,13 +696,25 @@ function BillForm({
               {t("billTotal")} · {t("kdvIncluded")}
             </span>
             <span className="text-2xl font-semibold tabular">{formatTL(total)}</span>
+            {proposal?.totalKurus != null && proposal.totalKurus !== total && (
+              <span className="text-sm text-red">{fill(t("draftDocTotal"), { total: formatTL(proposal.totalKurus) })}</span>
+            )}
           </span>
           <Button kind="primary" size="lg" className="shrink-0 whitespace-nowrap" disabled={!ready || save.busy} onClick={submit}>
-            {bill ? t("save") : t("saveBill")}
+            {draft ? t("draftConfirm") : bill ? t("save") : t("saveBill")}
           </Button>
         </div>
       </div>
-    </Sheet>
+    </Frame>
+  );
+}
+
+/** A draft is checked beside its document, so its form sits in the page instead of over it. */
+function InPage({ title, children }: { title: string; onClose: () => void; children: ReactNode; labelClose: string; wide?: boolean }) {
+  return (
+    <section aria-label={title} className="flex flex-col gap-5 overflow-clip rounded-3xl border border-line bg-paper p-6">
+      {children}
+    </section>
   );
 }
 

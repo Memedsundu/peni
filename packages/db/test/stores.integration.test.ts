@@ -679,4 +679,45 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.tasks.setMuted(cafeId, "stf_a", false);
     expect(await stores.tasks.listMuted(cafeId)).toEqual([]);
   });
+
+  it("keeps documents, drafts, jobs and the assistant's log; two passes never take the same job", async () => {
+    const doc = { id: `doc_${run}`, cafeId, name: "fis.pdf", contentType: "application/pdf" as const, bytes: new Uint8Array([37, 80, 68, 70, 45]), size: 5, sha256: "ab".repeat(32), uploadedBy: "stf_a", createdAt: at };
+    await stores.assistant.saveDocument(doc);
+    expect(await stores.assistant.getDocument(cafeId, doc.id)).toEqual(doc);
+    expect(await stores.assistant.getDocument("cafe_other", doc.id)).toBeNull();
+
+    const proposal = { supplierId: null, supplierName: "Moda Süt", supplierTaxNumber: null, number: "A1", date: "2026-10-14", dueDate: null, totalKurus: 12_000, lines: [{ itemId: null, name: "Süt", category: "ingredients" as const, qtyMilli: 24_000, totalKurus: 12_000 }] };
+    const draft = { id: `drf_${run}`, cafeId, kind: "bill" as const, status: "open" as const, title: "Moda Süt", proposal, doubts: ["Tarih silik."], documentId: doc.id, jobId: null, createdAt: at, decidedById: null, decidedAt: null, resultId: null, changed: [], dismissReason: null };
+    await stores.assistant.saveDraft(draft);
+    await stores.assistant.saveDraft({ ...draft, id: `drf2_${run}`, createdAt: new Date(at.getTime() + 1000) });
+    expect(await stores.assistant.getDraft(cafeId, draft.id)).toEqual(draft);
+    expect(await stores.assistant.countOpenDrafts(cafeId)).toBe(2);
+    const done = { ...draft, status: "confirmed" as const, decidedById: "stf_a", decidedAt: at, resultId: "bil_1", changed: ["date"] };
+    await stores.assistant.saveDraft(done);
+    expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id]);
+    expect(await stores.assistant.listDrafts(cafeId, { status: "confirmed", limit: 10 })).toEqual([done]);
+
+    // Due jobs are taken once each, even by two passes at the same moment.
+    const old = new Date("2000-01-01T00:00:00Z");
+    const now = new Date("2000-01-02T00:00:00Z");
+    const until = new Date("2100-01-01T00:00:00Z");
+    const job = (n: number) => ({ id: `job${n}_${run}`, cafeId, kind: "document.read", payload: { documentId: doc.id }, status: "queued" as const, attempts: 0, runAt: new Date(old.getTime() + n), lockedUntil: null, lastError: null, result: null, createdAt: at, finishedAt: null });
+    for (const n of [1, 2, 3, 4]) await stores.assistant.addJob(job(n));
+    await stores.assistant.addJob({ ...job(5), runAt: new Date("2000-01-03T00:00:00Z") });
+    const [a, b] = await Promise.all([stores.assistant.claimJobs(now, 3, until), stores.assistant.claimJobs(now, 3, until)]);
+    const mine = [...a, ...b].filter((j) => j.cafeId === cafeId);
+    expect(mine.map((j) => j.id).sort()).toEqual([1, 2, 3, 4].map((n) => `job${n}_${run}`));
+    expect(mine.every((j) => j.status === "running" && j.attempts === 1 && j.lockedUntil?.getTime() === until.getTime())).toBe(true);
+    for (const j of mine) await stores.assistant.saveJob({ ...j, status: "done", lockedUntil: null, result: { draftId: draft.id }, finishedAt: at });
+    expect(await stores.assistant.getJob(`job1_${run}`)).toMatchObject({ status: "done", result: { draftId: draft.id }, payload: { documentId: doc.id } });
+    expect((await stores.assistant.listJobs(cafeId, { kinds: ["document.read"], since: at })).length).toBe(5);
+    await stores.assistant.saveJob({ ...job(5), status: "done", finishedAt: at });
+
+    const event = { id: `aie_${run}`, cafeId, at, kind: "ai.call" as const, memberId: "stf_a", purpose: "document.read", model: "gpt-5-mini", inputTokens: 900, outputTokens: 120, ms: 4200, ok: true, detail: null, draftId: draft.id, documentId: doc.id, jobId: null };
+    await stores.assistant.addEvent(event);
+    await stores.assistant.addEvent({ ...event, id: `aie2_${run}`, at: new Date(at.getTime() + 1000), kind: "draft.confirmed", inputTokens: 0, outputTokens: 0, model: null });
+    expect((await stores.assistant.listEvents(cafeId, { limit: 10 })).map((e) => e.kind)).toEqual(["draft.confirmed", "ai.call"]);
+    expect(await stores.assistant.listEvents(cafeId, { limit: 10, before: new Date(at.getTime() + 1000) })).toEqual([event]);
+    expect(await stores.assistant.usage(cafeId, at, new Date(at.getTime() + 86_400_000))).toEqual({ calls: 1, inputTokens: 900, outputTokens: 120 });
+  });
 });
