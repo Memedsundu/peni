@@ -1,11 +1,12 @@
 "use client";
 
-import { PeniApiError, type AlertDTO, type TodayDTO } from "@peni/api";
+import { PeniApiError, type AlertDTO, type TodayDTO, type TodaySalesDTO } from "@peni/api";
 import { alertWords } from "@peni/api/alert-text";
 import { formatTL } from "@peni/brand/format";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
+import { axisLabel, change, Chart, compactTL, signedPercent, type ChartColors } from "../chart";
 import { useSave } from "../controls";
 import { has, PanelShell, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T } from "../text";
@@ -66,6 +67,7 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
       {error && <Notice tone="red">{error}</Notice>}
       {data && (
         <>
+          {data.sales && <SalesToday sales={data.sales} slug={cafe.slug} t={t} lang={lang} />}
           <section className="flex flex-col gap-3" aria-labelledby="attention">
             <h2 id="attention" className="text-sm text-muted">
               {t("todayAttention")}
@@ -175,3 +177,65 @@ export function Progress({ done, total }: { done: number; total: number }) {
     </span>
   );
 }
+
+/** Today's sales so far, hour by hour, against the same weekday last week (plan piece 23). */
+function SalesToday({ sales, slug, t, lang }: { sales: TodaySalesDTO; slug: string; t: T; lang: Lang }) {
+  const c = change(sales.salesKurus, sales.lastWeekKurus);
+  const weekday = new Date(`${sales.lastWeekDay}T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { weekday: "long", timeZone: "UTC" });
+  const option = useCallback(
+    (k: ChartColors) => ({
+      grid: { left: 48, right: 8, top: 12, bottom: 24 },
+      tooltip: { valueFormatter: (v: unknown) => (typeof v === "number" ? formatTL(v * 100) : "—") },
+      xAxis: {
+        type: "category",
+        data: sales.hours.map((h) => `${h.hour}:00`),
+        axisLine: { lineStyle: { color: k.line } },
+        axisTick: { show: false },
+        axisLabel: { ...axisLabel(k), hideOverlap: true },
+      },
+      yAxis: { type: "value", splitLine: { lineStyle: { color: k.line } }, axisLabel: { ...axisLabel(k), formatter: (v: number) => compactTL(v * 100, lang) } },
+      series: [
+        {
+          name: t("todayTitle"),
+          type: "bar",
+          data: sales.hours.map((h) => h.salesKurus / 100),
+          barMaxWidth: 22,
+          itemStyle: { color: k.ink, borderRadius: [3, 3, 0, 0] },
+        },
+        {
+          name: weekday,
+          type: "line",
+          data: sales.hours.map((h) => h.lastWeekKurus / 100),
+          symbol: "none",
+          itemStyle: { color: k.mark },
+          lineStyle: { color: k.mark, width: 2, type: [4, 4] },
+        },
+      ],
+    }),
+    [sales, lang],
+  );
+  return (
+    <section className="flex flex-col gap-3 rounded-3xl border border-line p-5" aria-labelledby="sales-today">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 id="sales-today" className="text-sm text-muted">
+          {t("todaySales")}
+        </h2>
+        <a href={withCafe("/panel/raporlar", slug)} className="text-sm font-semibold underline underline-offset-4">
+          {t("openReports")}
+        </a>
+      </div>
+      <p className="flex flex-wrap items-baseline gap-x-3">
+        <span className="font-serif text-4xl leading-tight tabular">{lira(sales.salesKurus)}</span>
+        <span className="text-muted">{fill(t("rpOrdersN"), { n: sales.orders })}</span>
+        {c !== null && <span className={`font-semibold tabular ${c >= 0 ? "text-green" : "text-red"}`}>{signedPercent(c, lang)}</span>}
+      </p>
+      <p className="text-sm text-muted">
+        {sales.salesKurus === 0 && sales.orders === 0 ? `${t("todaySalesNone")} ` : ""}
+        {fill(t("todaySalesVs"), { day: weekday, v: lira(sales.lastWeekKurus) })}
+      </p>
+      {sales.hours.length > 0 && <Chart option={option} height={170} label={`${t("todaySales")}: ${lira(sales.salesKurus)}`} />}
+    </section>
+  );
+}
+
+const lira = (kurus: number) => formatTL(Math.round(kurus / 100) * 100);

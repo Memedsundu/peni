@@ -7,6 +7,7 @@ import type { DebtService } from "./debts";
 import type { PayService } from "./pay";
 import type { StaffContext } from "./staff";
 import type { StockService } from "./stock";
+import type { SalesReportService } from "./sales-report";
 import type { TaskService } from "./tasks";
 
 /** The morning email goes from this hour on, the café's own time. */
@@ -31,6 +32,7 @@ export interface AlertDeps {
   debts: DebtService;
   pay: PayService;
   tasks: TaskService;
+  sales: SalesReportService;
   store: TaskStore;
   staff: StaffStore;
   directory: PeniDirectory;
@@ -145,7 +147,12 @@ export class AlertService {
   /** Bugün: the viewer's alerts and today's tasks. */
   async today(ctx: StaffContext): Promise<TodayDTO> {
     const cafeId = ctx.cafe.id;
-    const [alerts, tasks, muted] = await Promise.all([this.list(cafeId, ctx.permissions), this.d.tasks.summary(ctx), this.d.store.listMuted(cafeId)]);
+    const [alerts, tasks, muted, sales] = await Promise.all([
+      this.list(cafeId, ctx.permissions),
+      this.d.tasks.summary(ctx),
+      this.d.store.listMuted(cafeId),
+      this.d.sales.today(ctx),
+    ]);
     return {
       cafe: { slug: ctx.cafe.slug, name: ctx.cafe.name },
       today: await this.dayOf(cafeId),
@@ -153,6 +160,7 @@ export class AlertService {
       alerts,
       tasks,
       email: { eligible: this.mayEmail(ctx.rolePermissions), on: !muted.includes(ctx.member.id) },
+      sales,
     };
   }
 

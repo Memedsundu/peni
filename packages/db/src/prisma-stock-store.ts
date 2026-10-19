@@ -95,9 +95,14 @@ export class PrismaStockStore implements StockStore {
     return (await this.db().stockMove.findMany({ where: { cafeId, batchKey }, orderBy: { id: "asc" } })).map(toMove);
   }
 
-  async listMoves(cafeId: string, opts: { itemId?: string; reasons?: StockReason[]; limit: number }): Promise<StockMove[]> {
+  async listMoves(cafeId: string, opts: { itemId?: string; reasons?: StockReason[]; from?: Date; to?: Date; limit: number }): Promise<StockMove[]> {
     const rows = await this.db().stockMove.findMany({
-      where: { cafeId, ...(opts.itemId ? { itemId: opts.itemId } : {}), ...(opts.reasons ? { reason: { in: opts.reasons } } : {}) },
+      where: {
+        cafeId,
+        ...(opts.itemId ? { itemId: opts.itemId } : {}),
+        ...(opts.reasons ? { reason: { in: opts.reasons } } : {}),
+        ...(opts.from || opts.to ? { at: { ...(opts.from ? { gte: opts.from } : {}), ...(opts.to ? { lt: opts.to } : {}) } } : {}),
+      },
       orderBy: [{ at: "desc" }, { id: "desc" }],
       take: opts.limit,
     });

@@ -95,6 +95,7 @@ import { giftEmail } from "./gift-email";
 import { PayService } from "./pay";
 import { TaskService } from "./tasks";
 import { AlertService } from "./alerts";
+import { SalesReportService } from "./sales-report";
 import { shiftEmail } from "./shift-email";
 import { ShiftService } from "./shifts";
 import { AppError } from "./errors";
@@ -229,6 +230,11 @@ export class PeniApp {
   readonly tasks: TaskService;
   /** Bugün's alerts and the morning email (piece 22). */
   readonly alerts: AlertService;
+  /** Raporlar, and today's sales on Bugün (piece 23). */
+  readonly salesReports: SalesReportService;
+  /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
+  readonly orderStore: OrderStore;
+  readonly paymentStore: PaymentStore;
   readonly taskStore: TaskStore;
   /** Shifts, hours, rates and pay as stored; for the demo seed and the data move from Shelby. */
   readonly shiftStore: ShiftStore;
@@ -295,11 +301,15 @@ export class PeniApp {
     this.pay = new PayService(stores.shifts, stores.staff, this.money, this.directory, atomically, () => this.now());
     this.taskStore = stores.tasks;
     this.tasks = new TaskService(stores.tasks, stores.shifts, stores.staff, this.directory, () => this.now());
+    this.orderStore = stores.orders;
+    this.paymentStore = stores.payments;
+    this.salesReports = new SalesReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
     this.alerts = new AlertService({
       stock: this.stock,
       debts: this.debts,
       pay: this.pay,
       tasks: this.tasks,
+      sales: this.salesReports,
       store: stores.tasks,
       staff: stores.staff,
       directory: this.directory,

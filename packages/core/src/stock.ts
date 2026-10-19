@@ -127,7 +127,7 @@ export interface StockStore {
   /** The moves of one batch, if it was applied. */
   listBatch(cafeId: string, batchKey: string): Promise<StockMove[]>;
   /** Newest first; only these reasons when given. */
-  listMoves(cafeId: string, opts: { itemId?: string; reasons?: StockReason[]; limit: number }): Promise<StockMove[]>;
+  listMoves(cafeId: string, opts: { itemId?: string; reasons?: StockReason[]; from?: Date; to?: Date; limit: number }): Promise<StockMove[]>;
   getRecipe(cafeId: string, productId: string): Promise<Recipe | null>;
   listRecipes(cafeId: string): Promise<Recipe[]>;
   saveRecipe(recipe: Recipe): Promise<void>;
@@ -245,9 +245,16 @@ export class InMemoryStockStore implements StockStore {
     return this.moves.filter((m) => m.cafeId === cafeId && m.batchKey === batchKey).map((m) => ({ ...m }));
   }
 
-  async listMoves(cafeId: string, opts: { itemId?: string; reasons?: StockReason[]; limit: number }) {
+  async listMoves(cafeId: string, opts: { itemId?: string; reasons?: StockReason[]; from?: Date; to?: Date; limit: number }) {
     return this.moves
-      .filter((m) => m.cafeId === cafeId && (!opts.itemId || m.itemId === opts.itemId) && (!opts.reasons || opts.reasons.includes(m.reason)))
+      .filter(
+        (m) =>
+          m.cafeId === cafeId &&
+          (!opts.itemId || m.itemId === opts.itemId) &&
+          (!opts.reasons || opts.reasons.includes(m.reason)) &&
+          (!opts.from || m.at >= opts.from) &&
+          (!opts.to || m.at < opts.to),
+      )
       .reverse()
       .slice(0, opts.limit)
       .map((m) => ({ ...m }));

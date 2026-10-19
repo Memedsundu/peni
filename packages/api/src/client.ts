@@ -42,6 +42,7 @@ import type {
   TaskDayDTO,
   TaskListDTO,
   TaskListsDTO,
+  SalesReportDTO,
   TodayDTO,
   ShiftWeekDTO,
 } from "./dto";
@@ -418,6 +419,16 @@ export function createPeniClient(options: PeniClientOptions) {
         get: (cafeSlug: string) => call<TodayDTO>("GET", `/staff/${slug(cafeSlug)}/today`, undefined, true),
         /** The morning email for the viewer, on or off. */
         email: (cafeSlug: string, input: AlertEmailInput) => call<TodayDTO>("POST", `/staff/${slug(cafeSlug)}/today/email`, input, true),
+      },
+      /** Raporlar (piece 23). Needs "reports.view"; without dates, this month so far. */
+      reports: {
+        get: (cafeSlug: string, range?: { from: string; through: string }) =>
+          call<SalesReportDTO>(
+            "GET",
+            `/staff/${slug(cafeSlug)}/reports${range ? `?from=${encodeURIComponent(range.from)}&through=${encodeURIComponent(range.through)}` : ""}`,
+            undefined,
+            true,
+          ),
       },
       /** Görevler (piece 22). "tasks.view" sees and ticks today's; "tasks.edit" other days and the lists. */
       tasks: {

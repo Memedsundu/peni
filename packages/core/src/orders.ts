@@ -96,6 +96,9 @@ export function orderProblem(lines: { quantity: number; discountPercent: number 
 
 export interface OrderFilter {
   businessDay?: string;
+  /** Business days from and through, inclusive (reports, piece 23). */
+  from?: string;
+  through?: string;
   status?: OrderStatus;
   /** Newest first; defaults to 200. */
   limit?: number;
@@ -144,6 +147,8 @@ export class InMemoryOrderStore implements OrderStore {
           o.cafeId === cafeId &&
           !o.deletedAt &&
           (!filter.businessDay || o.businessDay === filter.businessDay) &&
+          (!filter.from || o.businessDay >= filter.from) &&
+          (!filter.through || o.businessDay <= filter.through) &&
           (!filter.status || o.status === filter.status),
       )
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || b.number - a.number)

@@ -1,5 +1,5 @@
-import { addMonths, dayPay, defaultSettings, dueOn, localDateKey, monthDays, plusDays, rateOn, shiftEnds, startOfLocalDay, weekStartOf } from "@peni/core";
-import type { Bill, BillLine, Cafe, MenuItem, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, TaskCheck, TaskItem, TaskList, Weekday, WorkDay } from "@peni/core";
+import { addMonths, dayPay, defaultSettings, dueOn, localDateKey, monthDays, orderTotals, plusDays, rateOn, shiftEnds, startOfLocalDay, weekStartOf } from "@peni/core";
+import type { Bill, BillLine, Cafe, MenuItem, Order, OrderLine, Payment, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, TaskCheck, TaskItem, TaskList, Weekday, WorkDay } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -50,7 +50,7 @@ const DAY = 24 * 60 * MIN;
  * line, a filling event, a question with answers and trends in the report.
  * Deterministic for a given day: no randomness beyond a fixed-seed generator.
  */
-export async function seed(app: PeniApp): Promise<void> {
+export async function seed(app: PeniApp, opts: { sales?: boolean } = {}): Promise<void> {
   const now = app.now();
   const today = startOfLocalDay(now, TZ);
   /** `daysAgo` local days back at hh:mm in Istanbul (no DST there, so plain arithmetic holds). */
@@ -152,6 +152,14 @@ export async function seed(app: PeniApp): Promise<void> {
     murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
     hakan: staffAt[`${DEMO_STAFF.hakan.email}:moda`]!.id,
     ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
+    on,
+  });
+  // Tests of bills and money keep the figures they were written against.
+  if (opts.sales !== false)
+    await seedSales(app, {
+    murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
+    ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
+    leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
     on,
   });
   await seedTasks(app, {
@@ -888,4 +896,116 @@ async function seedTasks(app: PeniApp, p: { murat: string; hakan: string; ece: s
     }
   }
   for (const c of checks) await app.taskStore.saveCheck(c);
+}
+
+/**
+ * Raporlar (plan piece 23): Moda's till from the start of last month to yesterday, so the
+ * charts have weeks to compare. Busier at weekends and in the morning and late afternoon;
+ * cash and card; a few line and order discounts and two refunds. Today stays empty so the
+ * till starts the day at #1. Last month's own bills come with it, so its profit is real.
+ */
+async function seedSales(app: PeniApp, p: { murat: string; ece: string; leyla: string; on: (daysAgo: number, hh: number, mm?: number) => Date }): Promise<void> {
+  const cafeId = "cafe_moda";
+  const timeZone = (await app.directory.getSettings(cafeId)).timeZone;
+  const day = (daysAgo: number) => localDateKey(p.on(daysAgo, 12), timeZone);
+  const rand = mulberry32(1908);
+  const menu = new Map((await app.menu.listMenu(cafeId)).map((m) => [m.productId, m]));
+  const weights: [string, number][] = [["cay", 30], ["latte", 18], ["turk", 14], ["filtre", 12], ["simit", 12], ["cheesecake", 8], ["limonata", 6]];
+  const pick = () => {
+    let r = rand() * 100;
+    for (const [id, w] of weights) if ((r -= w) < 0) return id;
+    return "cay";
+  };
+  // Orders per hour from 08:00 to 21:00.
+  const hourWeights = [3, 8, 9, 7, 5, 6, 6, 5, 7, 7, 5, 4, 3, 2];
+  const hourOf = () => {
+    let r = rand() * hourWeights.reduce((a, b) => a + b, 0);
+    for (const [i, w] of hourWeights.entries()) if ((r -= w) < 0) return 8 + i;
+    return 21;
+  };
+  const first = monthDays(addMonths(day(0).slice(0, 7), -1)).from;
+  const back = Math.round((Date.parse(`${day(0)}T12:00:00Z`) - Date.parse(`${first}T12:00:00Z`)) / 86_400_000);
+  const refundOn = new Set([back - 9, 11]);
+
+  for (let ago = back; ago >= 1; ago--) {
+    const businessDay = day(ago);
+    const weekday = new Date(`${businessDay}T12:00:00Z`).getUTCDay();
+    const base = weekday === 6 ? 85 : weekday === 0 ? 75 : 55;
+    const count = Math.round(base * (0.85 + rand() * 0.3));
+    const times = Array.from({ length: count }, () => hourOf() * 60 + Math.floor(rand() * 60)).sort((a, b) => a - b);
+    for (const [i, minute] of times.entries()) {
+      const lines: OrderLine[] = [];
+      const n = rand() < 0.55 ? 1 : rand() < 0.75 ? 2 : 3;
+      for (let k = 0; k < n; k++) {
+        const productId = pick();
+        const same = lines.find((l) => l.productId === productId);
+        if (same) same.quantity += 1;
+        else {
+          const m = menu.get(productId)!;
+          lines.push({ productId, name: m.name, unitPriceKurus: m.priceKurus, quantity: productId === "cay" && rand() < 0.3 ? 2 : 1, discountPercent: rand() < 0.03 ? 10 : 0 });
+        }
+      }
+      const discountPercent = rand() < 0.02 ? 15 : 0;
+      const t = orderTotals(lines, discountPercent);
+      const at = p.on(ago, Math.floor(minute / 60), minute % 60);
+      const by = rand() < 0.75 ? p.ece : p.murat;
+      const method: Payment["method"] = rand() < 0.42 ? "cash" : "card";
+      const refunded = refundOn.has(ago) && i === 5;
+      const id = `ord_seed_${businessDay}_${i + 1}`;
+      const order: Order = {
+        id, cafeId, number: i + 1, businessDay, status: refunded ? "refunded" : "paid", lines, discountPercent, ...t,
+        createdAt: new Date(at.getTime() - 40_000), createdByMemberId: by, createKey: `seed:${id}`,
+        paidAt: at, paidByMemberId: by, paymentMethod: method, tenderedKurus: null, changeKurus: null,
+        voidedAt: null, voidedByMemberId: null, voidReason: null,
+        refundedAt: refunded ? new Date(at.getTime() + 15 * 60_000) : null, refundedByMemberId: refunded ? p.murat : null,
+        refundReason: refunded ? "Yanlış sipariş" : null, refundKurus: refunded ? t.totalKurus : null,
+        deletedAt: null, deletedByMemberId: null, deleteReason: null,
+      };
+      await app.orderStore.saveOrder(order);
+      const payment = (kind: Payment["kind"], when: Date, member: string): Payment => ({
+        id: `pay_seed_${businessDay}_${i + 1}${kind === "refund" ? "_r" : ""}`, cafeId, orderId: id, kind, method, amountKurus: t.totalKurus,
+        tenderedKurus: null, changeKurus: null, status: "approved", terminal: "manual", deviceId: null, cashSessionId: null,
+        key: `seed:${kind}:${id}`, reason: kind === "refund" ? "Yanlış sipariş" : null, startedAt: when, startedByMemberId: member,
+        settledAt: when, settledByMemberId: member, reference: null, receiptNo: null, failure: null,
+      });
+      await app.paymentStore.savePayment(payment("sale", at, by));
+      if (refunded) await app.paymentStore.savePayment(payment("refund", order.refundedAt!, p.murat));
+    }
+  }
+
+  // Last month's bills, all paid: rent, electricity, coffee, milk twice a week, simit.
+  const month = first.slice(0, 7);
+  const on = (d: number) => `${month}-${String(d).padStart(2, "0")}`;
+  const bill = (id: string, supplierId: string, date: string, lines: BillLine[], method: "cash" | "bank" | "card") => ({ id, supplierId, date, lines, method });
+  const milk = [2, 5, 9, 12, 16, 19, 23, 26].map((d) =>
+    bill(`bil_seed_lm_sut_${d}`, "sup_seed_sut", on(d), [{ itemId: "stk_sut", name: "Süt", category: "ingredients", qtyMilli: 18_000, totalKurus: 77_400 }], "cash"),
+  );
+  const bills = [
+    bill("bil_seed_lm_kira", "sup_seed_ev", on(1), [{ itemId: null, name: "Dükkân kirası", category: "rent", qtyMilli: null, totalKurus: 4_500_000 }], "bank"),
+    bill("bil_seed_lm_elektrik", "sup_seed_elektrik", on(8), [{ itemId: null, name: "Elektrik", category: "utilities", qtyMilli: null, totalKurus: 361_000 }], "bank"),
+    bill(
+      "bil_seed_lm_kahve",
+      "sup_seed_kahve",
+      on(12),
+      [
+        { itemId: "stk_espresso", name: "Espresso çekirdeği", category: "ingredients", qtyMilli: 4_000, totalKurus: 352_000 },
+        { itemId: "stk_filtre", name: "Filtre kahve çekirdeği", category: "ingredients", qtyMilli: 2_000, totalKurus: 214_000 },
+        { itemId: "stk_turk", name: "Türk kahvesi", category: "ingredients", qtyMilli: 2_000, totalKurus: 116_000 },
+      ],
+      "bank",
+    ),
+    bill("bil_seed_lm_simit", "sup_seed_firin", on(20), [{ itemId: "stk_simit", name: "Simit", category: "ingredients", qtyMilli: 120_000, totalKurus: 120_000 }], "cash"),
+    bill("bil_seed_lm_temizlik", "sup_seed_ambalaj", on(14), [{ itemId: null, name: "Temizlik malzemesi", category: "supplies", qtyMilli: null, totalKurus: 64_000 }], "card"),
+    ...milk,
+  ];
+  // Bills from the day the café started keeping its money on would need its moves too.
+  for (const b of bills.filter((x) => x.date < day(18))) {
+    const totalKurus = b.lines.reduce((s, l) => s + l.totalKurus, 0);
+    const at = new Date(`${b.date}T09:00:00Z`);
+    await app.billStore.saveBill({
+      id: b.id, cafeId, supplierId: b.supplierId, number: null, date: b.date, dueDate: null, note: null, lines: b.lines, totalKurus, paidKurus: totalKurus,
+      paidAt: at, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null, createdById: p.leyla, createdAt: at, updatedAt: at, createKey: `seed:${b.id}`,
+    });
+    await app.billStore.addPayment({ id: `bpy_${b.id}`, cafeId, billId: b.id, amountKurus: totalKurus, method: b.method, paidOn: b.date, account: null, memberId: p.leyla, createdAt: at });
+  }
 }
