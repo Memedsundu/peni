@@ -898,6 +898,17 @@ export interface WalletDTO {
 /** What `GET /me/wallet` actually returns: both history arrays are always there. */
 export type FullWalletDTO = WalletDTO & { recentRecipients: RecentRecipientDTO[]; ledger: LedgerEntryDTO[] };
 
+/** `GET /me/export`, "Verilerimi indir": everything Peni keeps about the customer (KVKK m. 11). (plan piece 34) */
+export interface AccountExportDTO {
+  exportedAt: string;
+  profile: { displayName: string; email: string | null; phone: string | null; profileVisible: boolean };
+  signIns: { provider: string; email: string | null }[];
+  cafes: { cafe: string; joinedAt: string; balancePeni: number }[];
+  peniHistory: LedgerEntryDTO[];
+  gifts: GiftDTO[];
+  posts: { cafe: string; at: string; kind: "comment" | "event"; text: string }[];
+}
+
 export interface StaffReportFieldsDTO {
   sinceIso: string;
   issuedPeni: number;

@@ -335,6 +335,36 @@ const TEXT = {
   today: { tr: "Bugün", en: "Today" },
   tomorrow: { tr: "Yarın", en: "Tomorrow" },
   addToCalendar: { tr: "Takvime ekle", en: "Add to calendar" },
+
+  // Hesabım, Gizlilik, Koşullar (piece 34)
+  account: { tr: "Hesabım", en: "Account" },
+  signInToAccount: { tr: "Hesabını görmek için giriş yap.", en: "Sign in to see your account." },
+  yourData: { tr: "Verilerin", en: "Your data" },
+  downloadData: { tr: "Verilerimi indir", en: "Download my data" },
+  downloadDataHelp: {
+    tr: "Hakkında tuttuğumuz her şey tek bir dosyada: profilin, kafelerin, peni hareketlerin, ısmarlamaların ve yazdıkların.",
+    en: "Everything we keep about you in one file: your profile, cafés, peni history, treats and what you wrote.",
+  },
+  deleteAccount: { tr: "Hesabımı sil", en: "Delete my account" },
+  deleteAccountHelp: {
+    tr: "Adın, e-postan ve giriş bilgilerin silinir, her yerden çıkış yapılır. Kafelerin defterleri için peni hareketlerin “Silinmiş üye” adıyla kalır.",
+    en: "Your name, email and sign-ins are deleted and you're signed out everywhere. Your peni history stays in the cafés' books as “Deleted member”.",
+  },
+  deleteAccountSure: { tr: "Hesabın silinsin mi?", en: "Delete your account?" },
+  deleteAccountPeni: {
+    tr: "Kafelerde kalan {peni} peni de silinir. Bu geri alınamaz.",
+    en: "The {peni} peni you have at cafés goes too. This can't be undone.",
+  },
+  deleteAccountNoPeni: { tr: "Bu geri alınamaz.", en: "This can't be undone." },
+  deleteAccountYes: { tr: "Evet, hesabımı sil", en: "Yes, delete my account" },
+  deleting: { tr: "Siliniyor…", en: "Deleting…" },
+  accountDeleted: { tr: "Hesabın silindi. Yolun yine bir kafeye düşerse görüşürüz.", en: "Your account is deleted. See you if you're ever back at a café." },
+  keepAccount: { tr: "Vazgeç", en: "Keep it" },
+  privacy: { tr: "Gizlilik", en: "Privacy" },
+  terms: { tr: "Kullanım koşulları", en: "Terms of use" },
+  cafesOnPeni: { tr: "Peni'deki kafeler", en: "Cafés on Peni" },
+  getTheApp: { tr: "Uygulamayı indir", en: "Get the app" },
+  cafePanelLink: { tr: "Kafe paneline gir", en: "Open the café panel" },
 } as const;
 
 export type TextKey = keyof typeof TEXT;

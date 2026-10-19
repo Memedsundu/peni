@@ -1,4 +1,5 @@
 import type {
+  AccountExportDTO,
   AskidaDTO,
   CafeDetailDTO,
   ClaimDTO,
@@ -219,6 +220,8 @@ export interface PeniAppOptions {
 }
 
 const DEMO_INBOX_DOMAIN = "fatura.peni.test";
+/** What cafés see in place of someone who deleted their account. */
+export const DELETED_NAME = "Silinmiş üye";
 const HOUR_MS = 3_600_000;
 const CLOSED_CLAIM = { claimed: "CLAIM_TAKEN", expired: "CLAIM_EXPIRED", cancelled: "CLAIM_CANCELLED" } as const;
 const DAY_MS = 24 * HOUR_MS;
@@ -514,6 +517,53 @@ export class PeniApp {
     if (input.profileVisible !== undefined) updated.profileVisible = input.profileVisible;
     await this.identity.saveCustomer(updated);
     return this.me(updated);
+  }
+
+  /** "Verilerimi indir" (KVKK m. 11): what Peni keeps about the customer, in one file. (plan piece 34) */
+  async exportAccount(customer: CustomerRecord): Promise<AccountExportDTO> {
+    const wallet = await this.wallet(customer);
+    const posts: AccountExportDTO["posts"] = [];
+    const cafes: AccountExportDTO["cafes"] = [];
+    for (const m of await this.directory.listMemberships({ customerId: customer.id })) {
+      const cafe = await this.cafeById(m.cafeId);
+      cafes.push({ cafe: cafe.name, joinedAt: m.joinedAt.toISOString(), balancePeni: await this.peni.walletBalance(m.id) });
+      for (const p of await this.community.listPosts(cafe.id, { hiddenComments: true, hiddenPosts: true })) {
+        if (p.hostCustomerId === customer.id) posts.push({ cafe: cafe.name, at: p.publishedAt.toISOString(), kind: "event", text: [p.title, p.body].filter(Boolean).join("\n") });
+        for (const c of p.comments) if (c.customerId === customer.id) posts.push({ cafe: cafe.name, at: c.createdAt.toISOString(), kind: "comment", text: c.body });
+      }
+    }
+    return {
+      exportedAt: this.now().toISOString(),
+      profile: { displayName: customer.displayName, email: customer.email, phone: customer.phone, profileVisible: customer.profileVisible },
+      signIns: (await this.identity.loginsOf(customer.id)).map((l) => ({ provider: l.provider, email: l.email })),
+      cafes,
+      peniHistory: wallet.ledger,
+      gifts: wallet.gifts,
+      posts: posts.sort((a, b) => a.at.localeCompare(b.at)),
+    };
+  }
+
+  /**
+   * "Hesabımı sil" (plan piece 34): the person is forgotten and signed out everywhere. What
+   * cafés need for their books stays under "Silinmiş üye": peni earned and spent, treats,
+   * askı. Peni left at cafés is given up. Their place at events still to come is freed, and
+   * events they opened that haven't happened are taken down.
+   */
+  async deleteAccount(customer: CustomerRecord): Promise<{ ok: true }> {
+    const at = this.now();
+    for (const m of await this.directory.listMemberships({ customerId: customer.id })) {
+      for (const p of await this.community.listPosts(m.cafeId)) {
+        if (!p.eventStartsAt || p.eventStartsAt <= at) continue;
+        if (p.hostCustomerId === customer.id) {
+          const { reactions: _r, rsvps: _v, comments: _c, ...post } = p;
+          await this.community.savePost({ ...post, hiddenAt: at });
+        } else if (p.rsvps.includes(customer.id)) await this.community.removeRsvp(p.id, customer.id);
+      }
+    }
+    const staff = await this.staffStore.accountForCustomer(customer.id);
+    if (staff) await this.staffStore.saveAccount({ ...staff, customerId: null });
+    await this.identity.forgetCustomer(customer.id, DELETED_NAME, at);
+    return { ok: true };
   }
 
   // ─────────────────────────────────────────────── cafés

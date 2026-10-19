@@ -127,6 +127,9 @@ export const updateProfileSchema = z.object({
   profileVisible: z.boolean().optional(),
 });
 
+/** "Hesabımı sil": sent only after the customer said yes. (plan piece 34) */
+export const deleteAccountSchema = z.object({ confirm: z.literal(true) });
+
 // ─────────────────────────────────────────────── menu (plan piece 5)
 
 const menuName = z.string().trim().min(1, "Bir ad yaz").max(60);
@@ -666,6 +669,7 @@ export type CountStockInput = z.input<typeof countStockSchema>;
 export type WasteStockInput = z.input<typeof wasteStockSchema>;
 export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
+export type DeleteAccountInput = z.input<typeof deleteAccountSchema>;
 
 export type StaffSignInInput = z.input<typeof staffSignInSchema>;
 export type ChangePasswordInput = z.input<typeof changePasswordSchema>;

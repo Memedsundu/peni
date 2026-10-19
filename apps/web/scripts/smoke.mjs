@@ -870,6 +870,20 @@ assert.equal((await call("GET", "/staff/moda/insights?month=1999-01", { headers:
 assert.equal((await call("GET", "/staff/moda/insights", { headers: ecePassword })).json.error.code, "FORBIDDEN");
 step(`Müdavimler: ${insights.visitors} members came this month, ${insights.cameBack.cameBack} of last month's came back; nobody named; Ece can't open it`);
 
+// 5aa. Launch readiness (plan piece 34): health, "Verilerimi indir", "Hesabımı sil".
+const health = await call("GET", "/health");
+assert.equal(health.status, 200);
+assert.equal(health.json.database, "ok");
+const oguz = await signIn("cus_oguz");
+const exported = await call("GET", "/me/export", { token: oguz });
+assert.equal(exported.json.profile.displayName, "Oğuz Yıldırım");
+assert.ok(exported.json.cafes.length > 0 && Array.isArray(exported.json.peniHistory));
+assert.equal((await call("POST", "/me/delete", { token: oguz, body: {} })).json.error.code, "VALIDATION");
+assert.deepEqual((await call("POST", "/me/delete", { token: oguz, body: { confirm: true } })).json, { ok: true });
+assert.equal((await call("GET", "/me", { token: oguz })).status, 401);
+for (const page of ["/", "/gizlilik", "/kosullar?lang=en", "/hesap"]) assert.equal((await fetch(`${BASE}${page}`)).status, 200, page);
+step("Launch: health answers, a customer downloads their data and deletes their account, legal pages are up");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

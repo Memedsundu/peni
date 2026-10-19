@@ -1,17 +1,45 @@
 import { fill } from "@peni/api/customer-text";
+import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import { View } from "react-native";
-import { api } from "../../lib/api";
+import { api, PUBLIC_URL } from "../../lib/api";
 import { useSession } from "../../lib/session";
-import { Btn, Field, Label, Notice, Pills, Screen, Title, Toggle, Txt } from "../../ui/kit";
+import { Btn, Field, Label, Notice, Pills, Screen, Sheet, Title, Toggle, Txt } from "../../ui/kit";
 
-/** "Ben": the name others see, whether members can find you, the language, signing out. */
+/**
+ * "Ben": the name others see, whether members can find you, the language, signing out, and
+ * (plan piece 34) your data, deleting the account, privacy and terms.
+ */
 export default function Me() {
   const { me, t, lang, toggleLang, error, setMe, signOut } = useSession();
   const [name, setName] = useState(me?.customer.displayName ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "red" | "green"; text: string } | null>(null);
+  const [deleting, setDeleting] = useState<{ peni: number } | null>(null);
   if (!me) return null;
+
+  const web = (path: string) => void WebBrowser.openBrowserAsync(`${PUBLIC_URL}${path}${lang === "en" && path !== "/hesap" ? "?lang=en" : ""}`);
+  const askDelete = async () => {
+    setMessage(null);
+    try {
+      setDeleting({ peni: (await api.wallet.get()).totalPeni });
+    } catch (e) {
+      setMessage({ tone: "red", text: error(e) });
+    }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.me.deleteAccount();
+      setDeleting(null);
+      await signOut();
+    } catch (e) {
+      setDeleting(null);
+      setMessage({ tone: "red", text: error(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const save = async (input: { displayName?: string; profileVisible?: boolean }) => {
     setBusy(true);
@@ -62,6 +90,36 @@ export default function Me() {
       <Btn kind="quiet" onPress={() => void signOut()}>
         {t("signOut")}
       </Btn>
+      <View style={{ gap: 8 }}>
+        <Label>{t("yourData")}</Label>
+        <Txt muted>{t("downloadDataHelp")}</Txt>
+        <Btn kind="quiet" onPress={() => web("/hesap")}>
+          {t("downloadData")}
+        </Btn>
+        <Txt muted>{t("deleteAccountHelp")}</Txt>
+        <Btn kind="quiet" onPress={() => void askDelete()}>
+          {t("deleteAccount")}
+        </Btn>
+      </View>
+      <View style={{ flexDirection: "row", gap: 16 }}>
+        <Btn kind="bare" size="sm" onPress={() => web("/gizlilik")}>
+          {t("privacy")}
+        </Btn>
+        <Btn kind="bare" size="sm" onPress={() => web("/kosullar")}>
+          {t("terms")}
+        </Btn>
+      </View>
+      {deleting && (
+        <Sheet title={t("deleteAccountSure")} onClose={() => !busy && setDeleting(null)}>
+          <Txt size={17}>{deleting.peni > 0 ? fill(t("deleteAccountPeni"), { peni: deleting.peni }) : t("deleteAccountNoPeni")}</Txt>
+          <Btn kind="danger" busy={busy} onPress={() => void remove()}>
+            {t("deleteAccountYes")}
+          </Btn>
+          <Btn kind="quiet" disabled={busy} onPress={() => setDeleting(null)}>
+            {t("keepAccount")}
+          </Btn>
+        </Sheet>
+      )}
     </Screen>
   );
 }
