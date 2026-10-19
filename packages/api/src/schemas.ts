@@ -129,6 +129,23 @@ export const payOrderSchema = z.object({
 /** Backing out of a payment still waiting; `declined` when the terminal said no. */
 export const cancelPaymentSchema = z.object({ declined: z.boolean().optional() });
 
+const cashCount = {
+  key: actionKey,
+  /** In kuruş; or give `counts` and the total is worked out. */
+  countKurus: z.number().int().min(0).max(100_000_000).optional(),
+  /** Pieces per note or coin, keyed by its value in kuruş. */
+  counts: z.record(z.string(), z.number().int().min(0).max(10_000)).optional(),
+  note: z.string().max(200, "En çok 200 karakter").optional(),
+};
+export const openCashSchema = z.object(cashCount);
+export const closeCashSchema = z.object({ ...cashCount, sessionId: z.string().min(1) });
+export const cashMoveSchema = z.object({
+  key: actionKey,
+  kind: z.enum(["in", "out"]),
+  amountKurus: z.number().int().min(1).max(100_000_000),
+  reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun"),
+});
+
 export const orderReasonSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
 
 const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -217,6 +234,9 @@ export type CreateOrderInput = z.input<typeof createOrderSchema>;
 export type UpdateOrderInput = z.input<typeof updateOrderSchema>;
 export type PayOrderInput = z.input<typeof payOrderSchema>;
 export type CancelPaymentInput = z.input<typeof cancelPaymentSchema>;
+export type OpenCashInput = z.input<typeof openCashSchema>;
+export type CloseCashInput = z.input<typeof closeCashSchema>;
+export type CashMoveInput = z.input<typeof cashMoveSchema>;
 export type OrderListQuery = z.input<typeof orderListQuerySchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
 

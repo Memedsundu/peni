@@ -59,6 +59,8 @@ beforeEach(async () => {
   leyla = await at("leyla");
   murat = await at("murat");
   ece = await eceAtTill("Kasa");
+  // Cash needs the drawer open (piece 9).
+  await app.cash.open(ece, { key: "open-the-drawer", countKurus: 50_000 });
 });
 
 describe("payments through one interface (plan piece 8)", () => {

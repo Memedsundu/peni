@@ -18,6 +18,8 @@ export interface PaymentRequest {
   changeKurus: number | null;
   key: string;
   reason: string | null;
+  /** The open drawer session, when there is one. */
+  cashSessionId: string | null;
 }
 
 /**

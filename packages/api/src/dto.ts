@@ -202,6 +202,55 @@ export interface OrderClaimDTO {
   expiresAt: string;
 }
 
+/** A drawer count at opening or closing. */
+export interface CashCountDTO {
+  at: string;
+  by: string;
+  /** What should have been there; null the first time a café opens its drawer. */
+  expectedKurus: number | null;
+  countKurus: number;
+  /** Counted minus expected: negative is missing money. */
+  differenceKurus: number;
+  /** Notes and coins by value in kuruş, when counted that way. */
+  counts: Record<string, number> | null;
+  note: string | null;
+}
+
+export interface CashMoveDTO {
+  id: string;
+  kind: "in" | "out";
+  amountKurus: number;
+  reason: string;
+  at: string;
+  by: string;
+}
+
+export interface CashSessionDTO {
+  id: string;
+  opening: CashCountDTO;
+  closing: CashCountDTO | null;
+  totals: {
+    cashSalesKurus: number;
+    cashRefundsKurus: number;
+    inKurus: number;
+    outKurus: number;
+    /** To check against the card terminal's own end-of-day total. */
+    cardSalesKurus: number;
+    cardRefundsKurus: number;
+    /** What the drawer should hold now, or held at closing. */
+    expectedKurus: number;
+  };
+  moves: CashMoveDTO[];
+}
+
+/** `GET /staff/:slug/cash`: the open drawer, or the last one closed. */
+export interface CashStateDTO {
+  open: CashSessionDTO | null;
+  last: CashSessionDTO | null;
+  /** Notes and coins to count with, in kuruş, largest first. */
+  denominations: number[];
+}
+
 /** `GET /staff/:slug/orders`: one day's orders, newest first, and the day's sums. */
 export interface OrderListDTO {
   businessDay: string;

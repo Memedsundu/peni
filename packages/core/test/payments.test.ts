@@ -13,6 +13,7 @@ const payment = (over: Partial<Payment> = {}): Payment => ({
   status: "pending",
   terminal: "manual",
   deviceId: null,
+  cashSessionId: null,
   key: "k1",
   reason: null,
   startedAt: new Date("2026-10-16T09:00:00Z"),

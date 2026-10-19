@@ -41,6 +41,8 @@ export interface Payment {
   terminal: string;
   /** The till computer it was taken on, when it was a till. */
   deviceId: string | null;
+  /** The drawer's session it was taken in, when one was open (piece 9). Cash always has one. */
+  cashSessionId: string | null;
   /** The client's key: a retry after a lost answer finds this payment again. */
   key: string;
   /** A refund's reason. */
@@ -113,6 +115,8 @@ export interface PaymentStore {
   findPaymentByKey(cafeId: string, key: string): Promise<Payment | null>;
   /** Oldest first. */
   listPayments(cafeId: string, orderIds: string[]): Promise<Payment[]>;
+  /** Everything taken during a drawer session, oldest first. */
+  listCashSessionPayments(cafeId: string, cashSessionId: string): Promise<Payment[]>;
 }
 
 export class InMemoryPaymentStore implements PaymentStore {
@@ -139,6 +143,13 @@ export class InMemoryPaymentStore implements PaymentStore {
     const ids = new Set(orderIds);
     return [...this.payments.values()]
       .filter((p) => p.cafeId === cafeId && ids.has(p.orderId))
+      .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
+      .map((p) => ({ ...p }));
+  }
+
+  async listCashSessionPayments(cafeId: string, cashSessionId: string) {
+    return [...this.payments.values()]
+      .filter((p) => p.cafeId === cafeId && p.cashSessionId === cashSessionId)
       .sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime())
       .map((p) => ({ ...p }));
   }

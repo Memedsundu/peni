@@ -77,6 +77,13 @@ export const errorMessagesTr: Record<string, string> = {
   PAYMENT_IN_PROGRESS: "Kart cihazı bu siparişte bir ödeme alıyor. Önce onu bitir ya da cihazdan iptal et.",
   CONFIRMED_BY_TERMINAL: "Bu ödemeyi kart cihazı kendisi onaylıyor.",
   PAY_KEY_REUSED: "Bu ödeme başka bir siparişe ait. Sayfayı yenile.",
+  CASH_CLOSED: "Kasa kapalı. Nakit almadan önce kasayı aç.",
+  CASH_ALREADY_OPEN: "Kasa zaten açık.",
+  CASH_SESSION_CHANGED: "Kasa başka bir yerden kapatılmış ya da açılmış. Tekrar bak.",
+  CASH_TOO_LOW: "Kasada bu kadar para yok.",
+  COUNT_INVALID: "Sayımı kontrol et.",
+  DIFFERENCE_REASON_REQUIRED: "Sayım tutmuyor. Farkın sebebini yaz.",
+  AMOUNT_INVALID: "Tutarı kontrol et.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

@@ -8,6 +8,7 @@ import { PrismaLedgerStore } from "./prisma-ledger-store";
 import { PrismaMenuStore } from "./prisma-menu-store";
 import { PrismaOrderStore } from "./prisma-order-store";
 import { PrismaPaymentStore } from "./prisma-payment-store";
+import { PrismaCashStore } from "./prisma-cash-store";
 import { PrismaStaffStore } from "./prisma-staff-store";
 
 export * from "./generated/client";
@@ -20,6 +21,7 @@ export { PrismaMenuStore } from "./prisma-menu-store";
 export { PrismaOrderStore } from "./prisma-order-store";
 export { PrismaClaimStore } from "./prisma-claim-store";
 export { PrismaPaymentStore } from "./prisma-payment-store";
+export { PrismaCashStore } from "./prisma-cash-store";
 export { PrismaStaffStore } from "./prisma-staff-store";
 
 export function createPrismaClient(connectionString = process.env.DATABASE_URL): PrismaClient {
@@ -44,6 +46,7 @@ export function createPrismaStores(prisma: PrismaClient) {
     orders: new PrismaOrderStore(db),
     claims: new PrismaClaimStore(db),
     payments: new PrismaPaymentStore(db),
+    cash: new PrismaCashStore(db),
     staff: new PrismaStaffStore(db),
   };
 }
