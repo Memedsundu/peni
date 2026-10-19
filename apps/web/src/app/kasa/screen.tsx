@@ -76,8 +76,18 @@ export function CustomerScreen() {
         <>
           <Lines t={t} heading={t("yourOrder")} name={name} lines={state.lines} discountKurus={state.discountKurus} totalKurus={state.totalKurus} />
           <section className="flex flex-1 flex-col items-center justify-center gap-3 p-12 text-center">
-            <span className="text-xl text-muted">{t("total")}</span>
-            <span className="tabular font-serif text-[120px] leading-none">{formatTL(state.totalKurus)}</span>
+            {state.peni ? (
+              <>
+                <span className="text-xl text-green">{t("peniUsed").replace("{n}", String(state.peni))}</span>
+                <span className="text-xl text-muted">{t("left")}</span>
+                <span className="tabular font-serif text-[120px] leading-none">{formatTL(state.dueKurus ?? state.totalKurus)}</span>
+              </>
+            ) : (
+              <>
+                <span className="text-xl text-muted">{t("total")}</span>
+                <span className="tabular font-serif text-[120px] leading-none">{formatTL(state.totalKurus)}</span>
+              </>
+            )}
           </section>
         </>
       )}
@@ -96,8 +106,9 @@ export function CustomerScreen() {
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M5 12.5l4.5 4.5L19 7.5" />
                   </svg>
-                  {state.method === "cash" ? t("paidByCash") : t("paidByCard")}
+                  {state.method === "cash" ? t("paidByCash") : state.method === "peni" ? t("paidByPeni") : t("paidByCard")}
                 </span>
+                {state.peni && state.method !== "peni" ? <span className="text-base text-muted">{t("peniUsed").replace("{n}", String(state.peni))}</span> : null}
                 {state.changeKurus !== null && state.changeKurus > 0 && (
                   <span className="tabular text-base text-muted">
                     {t("change")}: {formatTL(state.changeKurus)}

@@ -92,6 +92,18 @@ export const manualTerminal: PaymentTerminal = {
   cancel: async () => {},
 };
 
+/**
+ * Peni are paid from the customer's wallet, not on any terminal: the ledger takes them
+ * before the payment is recorded, so it's approved as it's recorded. The payment's
+ * `reference` is the wallet's membership.
+ */
+export const peniTerminal: PaymentTerminal = {
+  kind: "peni",
+  confirmation: () => "now",
+  send: async () => {},
+  cancel: async () => {},
+};
+
 /** Which terminal a till computer pays with. */
 export interface PaymentTerminals {
   terminalFor(cafeId: string, deviceId: string | null): Promise<PaymentTerminal>;

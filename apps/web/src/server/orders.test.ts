@@ -124,6 +124,7 @@ describe("the till's orders (plan piece 6)", () => {
       salesKurus: 18_000,
       cashKurus: 6_000,
       cardKurus: 12_000,
+      peniKurus: 0,
       refundedCount: 1,
       refundedKurus: 2_500,
       voidedCount: 0,

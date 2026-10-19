@@ -1,6 +1,6 @@
 "use client";
 
-import { newIdempotencyKey, PeniApiError, type OrderDTO, type PaymentAnswerDTO, type PaymentDTO, type PaymentMethodDTO, type TillMenuDTO } from "@peni/api";
+import { newIdempotencyKey, PeniApiError, type OrderDTO, type PaymentAnswerDTO, type PaymentDTO, type PeniCheckDTO, type TillMenuDTO } from "@peni/api";
 import { formatPercent, formatTL } from "@peni/brand/format";
 import { lineTotal, orderTotals, QUICK_DISCOUNTS, type OrderLine } from "@peni/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,7 +23,9 @@ type Panel =
   | { kind: "cash" }
   /** A payment the terminal or the barista still has to settle, or one that just failed. */
   | { kind: "payment"; orderId: string; payment: PaymentDTO; tenderedKurus?: number }
-  | { kind: "discount"; productId: string | null };
+  | { kind: "discount"; productId: string | null }
+  /** Peni from the customer's wallet, with their ödeme kodu (piece 11). */
+  | { kind: "peni"; orderId: string };
 
 const emptyCart = (): Cart => ({ lines: [], discountPercent: 0, createKey: newIdempotencyKey(), order: null });
 
@@ -78,6 +80,9 @@ export function Sell({
   }, [loadMenu]);
 
   const totals = useMemo(() => orderTotals(cart.lines, cart.discountPercent), [cart.lines, cart.discountPercent]);
+  // Peni on the order fix its lines until they're given back.
+  const peniOn = cart.order?.peni ?? null;
+  const dueKurus = peniOn && cart.order ? cart.order.dueKurus : totals.totalKurus;
 
   // What the customer screen shows: the order as it's entered, then the paid order and its peni.
   const shown = useMemo<DisplayState>(() => {
@@ -97,11 +102,12 @@ export function Sell({
         method: paid.paymentMethod ?? "card",
         changeKurus: paid.changeKurus,
         claim: paid.claim,
+        peni: paid.peni?.peni,
       };
     }
     if (cart.lines.length === 0) return { kind: "idle" };
-    return { kind: "order", lines: cart.lines.map((l) => line({ ...l, totalKurus: lineTotal(l) })), ...totals };
-  }, [paid, cart.lines, totals]);
+    return { kind: "order", lines: cart.lines.map((l) => line({ ...l, totalKurus: lineTotal(l) })), ...totals, peni: peniOn?.peni, dueKurus };
+  }, [paid, cart.lines, totals, peniOn, dueKurus]);
   const shownRef = useRef(shown);
   shownRef.current = shown;
   const screen = useRef<ReturnType<typeof displayLink> | null>(null);
@@ -118,10 +124,12 @@ export function Sell({
   }, [shown]);
 
   const edit = (change: (c: Cart) => Partial<Cart>) => {
+    if (peniOn) return setError(t("peniLocked"));
     setError(null);
     setCart((c) => ({ ...c, ...change(c) }));
   };
   const add = (p: TillMenuDTO["categories"][number]["products"][number]) => {
+    if (peniOn) return setError(t("peniLocked"));
     setPaid(null);
     edit((c) => {
       const existing = c.lines.find((l) => l.productId === p.productId);
@@ -158,7 +166,7 @@ export function Sell({
     return serverOrder;
   };
 
-  const pay = async (method: PaymentMethodDTO, tenderedKurus?: number) => {
+  const pay = async (method: "cash" | "card", tenderedKurus?: number) => {
     if (busy || cart.lines.length === 0) return;
     setBusy(true);
     setError(null);
@@ -187,9 +195,14 @@ export function Sell({
     if (answer.payment.status === "approved") {
       if (answer.payment.method === "cash") onDrawerChanged();
       setPanel(null);
-      setPaid(answer.order);
-      setCart(emptyCart());
       payKeys.current.clear();
+      if (answer.order.status === "paid") {
+        setPaid(answer.order);
+        setCart(emptyCart());
+      } else {
+        // Peni paid part of it: the rest goes on cash or card.
+        setCart((c) => ({ ...c, order: answer.order }));
+      }
       return;
     }
     // A declined or cancelled payment is over: trying again is a new payment.
@@ -206,6 +219,36 @@ export function Sell({
     } catch (e) {
       setError(onError(e));
       setPanel(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** "Peni": the order goes to the server first, so the peni are worked out on its total. */
+  const openPeni = async () => {
+    if (busy || cart.lines.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const order = await ensureOrder();
+      if (order) setPanel({ kind: "peni", orderId: order.id });
+    } catch (e) {
+      setError(onError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const givePeniBack = async () => {
+    if (!cart.order || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const order = await api.staff.till.returnPeni(slug, cart.order.id);
+      setCart((c) => ({ ...c, order }));
+      payKeys.current.clear();
+    } catch (e) {
+      setError(onError(e));
     } finally {
       setBusy(false);
     }
@@ -270,7 +313,7 @@ export function Sell({
           <>
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
               <h2 className="text-xl font-semibold">{t("order")}</h2>
-              <Button kind="bare" size="sm" onClick={() => setCart(emptyCart())} disabled={cart.lines.length === 0}>
+              <Button kind="bare" size="sm" onClick={() => setCart(emptyCart())} disabled={cart.lines.length === 0 || !!peniOn}>
                 {t("clear")}
               </Button>
             </div>
@@ -332,11 +375,25 @@ export function Sell({
                     {totals.discountKurus > 0 ? formatTL(-totals.discountKurus) : "—"}
                   </span>
                 </button>
+                {peniOn && (
+                  <div className="-my-1 flex min-h-11 items-center justify-between text-green">
+                    <span className="flex items-center gap-2">
+                      {t("peniOnOrder")} · {peniOn.name}
+                      <Button kind="bare" size="sm" className="min-h-9 px-2 underline underline-offset-4" onClick={() => void givePeniBack()} disabled={busy}>
+                        {t("peniGiveBack")}
+                      </Button>
+                    </span>
+                    <span className="tabular">{formatTL(-peniOn.peni * 100)}</span>
+                  </div>
+                )}
                 <div className="mt-1 flex items-baseline justify-between">
-                  <span className="text-[17px] font-semibold">{t("due")}</span>
-                  <span className="tabular font-serif text-[40px] leading-none">{formatTL(totals.totalKurus)}</span>
+                  <span className="text-[17px] font-semibold">{peniOn ? t("left") : t("due")}</span>
+                  <span className="tabular font-serif text-[40px] leading-none">{formatTL(dueKurus)}</span>
                 </div>
               </div>
+              <Button kind="quiet" size="md" disabled={cart.lines.length === 0 || busy || dueKurus < 100} onClick={() => void openPeni()}>
+                {t("peniTitle")}
+              </Button>
               <div className="grid grid-cols-2 gap-3">
                 <Button kind="secondary" size="lg" disabled={cart.lines.length === 0 || busy} onClick={() => setPanel({ kind: "cash" })}>
                   {t("cash")}
@@ -350,7 +407,10 @@ export function Sell({
         )}
       </aside>
 
-      {panel?.kind === "cash" && <CashPanel t={t} dueKurus={totals.totalKurus} busy={busy} onClose={() => setPanel(null)} onPay={(k) => void pay("cash", k)} />}
+      {panel?.kind === "cash" && <CashPanel t={t} dueKurus={dueKurus} busy={busy} onClose={() => setPanel(null)} onPay={(k) => void pay("cash", k)} />}
+      {panel?.kind === "peni" && (
+        <PeniPanel t={t} slug={slug} orderId={panel.orderId} onError={onError} onClose={() => setPanel(null)} onDone={(answer) => settled(answer)} />
+      )}
       {panel?.kind === "payment" && (
         <PaymentSheet
           t={t}
@@ -360,7 +420,7 @@ export function Sell({
           onConfirm={() => void settle((o, p) => api.staff.till.confirmPayment(slug, o, p))}
           onDecline={() => void settle((o, p) => api.staff.till.cancelPayment(slug, o, p, { declined: true }))}
           onCheck={() => void settle((o, p) => api.staff.till.payment(slug, o, p))}
-          onRetry={() => void pay(panel.payment.method, panel.tenderedKurus)}
+          onRetry={() => panel.payment.method !== "peni" && void pay(panel.payment.method, panel.tenderedKurus)}
         />
       )}
       {panel?.kind === "discount" && (panel.productId === null || discountLine) && (
@@ -481,8 +541,14 @@ function PaidView({ t, order, onNext }: { t: TillProps["t"]; order: OrderDTO; on
       </div>
       <h2 className="font-serif text-4xl font-normal">{t("paid")}</h2>
       <p className="tabular text-base text-muted">
-        #{order.number} · {order.paymentMethod === "cash" ? t("cash") : t("card")} · {formatTL(order.totalKurus)}
+        #{order.number} · {t(order.paymentMethod ?? "card")} ·{" "}
+        {formatTL(order.paymentMethod === "peni" ? order.totalKurus : order.totalKurus - (order.peni?.peni ?? 0) * 100)}
       </p>
+      {order.peni && order.paymentMethod !== "peni" && (
+        <p className="text-base text-muted">
+          {t("peni")} · {order.peni.name}: <strong className="tabular text-ink">{order.peni.peni}</strong> peni
+        </p>
+      )}
       {order.claim && (
         <p className="text-base text-muted">
           {t("peniOnScreen")}: <strong className="tabular text-ink">{order.claim.code}</strong> · {order.claim.peni} peni
@@ -497,6 +563,124 @@ function PaidView({ t, order, onNext }: { t: TillProps["t"]; order: OrderDTO; on
         {t("newOrder")}
       </Button>
     </div>
+  );
+}
+
+/**
+ * "Peniyle öde": the customer's ödeme kodu, scanned (the scanner types it and Enter) or
+ * typed, opens their wallet; the barista checks the name and takes as much as they want,
+ * up to what the order and the café's rules allow.
+ */
+function PeniPanel({
+  t,
+  slug,
+  orderId,
+  onError,
+  onClose,
+  onDone,
+}: {
+  t: TillProps["t"];
+  slug: string;
+  orderId: string;
+  onError: TillProps["onError"];
+  onClose: () => void;
+  onDone: (answer: PaymentAnswerDTO) => void;
+}) {
+  const [code, setCode] = useState("");
+  const [wallet, setWallet] = useState<PeniCheckDTO | null>(null);
+  const [amount, setAmount] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /** One key for this sheet, so a retried tap takes the peni once. */
+  const payKey = useRef(newIdempotencyKey());
+
+  const run = async (fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(onError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const look = () =>
+    run(async () => {
+      const w = await api.staff.till.checkPeni(slug, orderId, { code });
+      setWallet(w);
+      setAmount(String(w.maxPeni));
+    });
+  const take = () => run(async () => onDone(await api.staff.till.usePeni(slug, orderId, { code, peni: Number(amount), payKey: payKey.current })));
+
+  if (!wallet) {
+    return (
+      <Sheet title={t("peniTitle")} onClose={onClose} labelClose={t("close")}>
+        <p className="text-muted">{t("peniCodeHelp")}</p>
+        <form onSubmit={(e) => (e.preventDefault(), code.length === 6 && void look())}>
+          <input
+            aria-label={t("peniCode")}
+            placeholder={t("peniCode")}
+            inputMode="numeric"
+            autoComplete="off"
+            value={code}
+            onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            className="tabular min-h-16 w-full rounded-2xl border border-line bg-paper px-4 text-center text-4xl tracking-[0.3em] outline-none focus:border-ink"
+            autoFocus
+          />
+        </form>
+        {error && <Notice tone="red">{error}</Notice>}
+        <Keypad
+          onKey={(k) => setCode((v) => (k === "back" ? v.slice(0, -1) : v.length < 6 ? v + k : v))}
+          eraseLabel={t("erase")}
+          okLabel={t("peniLook")}
+          onOk={() => void look()}
+          okDisabled={busy || code.length !== 6}
+        />
+      </Sheet>
+    );
+  }
+  const peni = Number(amount || "0");
+  return (
+    <Sheet title={wallet.name} onClose={onClose} labelClose={t("close")}>
+      <div className="grid grid-cols-2 gap-3">
+        <div className="rounded-2xl bg-panel px-4 py-3">
+          <p className="text-sm text-muted">{t("peniBalance")}</p>
+          <p className="tabular text-2xl font-semibold">{wallet.balancePeni} peni</p>
+        </div>
+        <div className="rounded-2xl bg-panel px-4 py-3">
+          <p className="text-sm text-muted">{t("peniMax")}</p>
+          <p className="tabular text-2xl font-semibold">{wallet.maxPeni} peni</p>
+        </div>
+      </div>
+      {wallet.maxPeni === 0 ? (
+        <Notice>{t("peniNone")}</Notice>
+      ) : (
+        <>
+          <div className="flex items-baseline justify-between border-t border-line pt-4">
+            <span className="text-muted">{t("peniAmount")}</span>
+            <span className="tabular font-serif text-5xl text-green">{peni}</span>
+          </div>
+          {error && <Notice tone="red">{error}</Notice>}
+          <Button kind="quiet" onClick={() => setAmount(String(wallet.maxPeni))}>
+            {t("peniAll")}
+          </Button>
+          <Keypad
+            onKey={(k) =>
+              setAmount((v) => {
+                const next = k === "back" ? v.slice(0, -1) : v === "0" ? k : v + k;
+                return Number(next || "0") > wallet.maxPeni ? v : next;
+              })
+            }
+            eraseLabel={t("erase")}
+            okLabel={t("peniTake")}
+            onOk={() => void take()}
+            okDisabled={busy || peni < 1}
+          />
+        </>
+      )}
+    </Sheet>
   );
 }
 

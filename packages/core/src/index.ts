@@ -12,6 +12,7 @@ export * from "./orders";
 export * from "./claims";
 export * from "./payments";
 export * from "./cash";
+export * from "./spend";
 export * from "./identity";
 export * from "./community";
 export * from "./staff";

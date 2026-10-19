@@ -277,6 +277,27 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.claims.countMisses(mehmet, at)).toBe(0);
   });
 
+  it("keeps one ödeme kodu per member, unique at the café, and spends through the ledger", async () => {
+    const code = (membershipId: string, digits: string) => ({
+      cafeId, membershipId, code: digits, createdAt: at, expiresAt: new Date(at.getTime() + 300_000),
+    });
+    expect(await stores.spendCodes.saveSpendCode(code(`m_ayse_${run}`, "111111"))).toBe(true);
+    expect(await stores.spendCodes.saveSpendCode(code(`m_mehmet_${run}`, "111111"))).toBe(false);
+    expect(await stores.spendCodes.saveSpendCode(code(`m_ayse_${run}`, "222222"))).toBe(true);
+    expect(await stores.spendCodes.getSpendCode(cafeId, "111111")).toBeNull();
+    expect((await stores.spendCodes.getSpendCode(cafeId, "222222"))!.membershipId).toBe(`m_ayse_${run}`);
+
+    const service = new PeniService(new Ledger(stores.ledger), stores.directory, () => at, stores.claims, stores.spendCodes);
+    expect((await service.spenderForCode(cafeId, "222222")).id).toBe(`m_ayse_${run}`);
+    const before = await service.walletBalance(`m_ayse_${run}`);
+    const spend = { membershipId: `m_ayse_${run}`, orderId: `o_spend_${run}`, key: `k_spend_${run}`, requestedPeni: 5, capPeni: 5 };
+    expect(await service.spendAtTill(spend)).toBe(5);
+    expect(await service.spendAtTill(spend)).toBe(5);
+    expect(await service.walletBalance(`m_ayse_${run}`)).toBe(before - 5);
+    await service.releaseOrder(cafeId, `o_spend_${run}`, "void");
+    expect(await service.walletBalance(`m_ayse_${run}`)).toBe(before);
+  });
+
   it("keeps payments with one per key at a café, oldest first per order", async () => {
     const orderId = `ord_c_${run}`; // made by the claims test above
     const payment = {

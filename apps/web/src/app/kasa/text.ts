@@ -61,6 +61,31 @@ const TEXT = {
   due: { tr: "Ödenecek", en: "To pay" },
   cash: { tr: "Nakit", en: "Cash" },
   card: { tr: "Kart", en: "Card" },
+  peni: { tr: "Peni", en: "Peni" },
+
+  // Spending peni at the till (piece 11)
+  peniTitle: { tr: "Peniyle öde", en: "Pay with peni" },
+  peniCodeHelp: {
+    tr: "Müşteri Peni'de “Ödeme kodum”u açar. QR'ı okutun ya da 6 haneli kodu yazın.",
+    en: "The customer opens “My payment code” in Peni. Scan the QR or type the 6-digit code.",
+  },
+  peniCode: { tr: "Ödeme kodu", en: "Payment code" },
+  peniLook: { tr: "Cüzdanı aç", en: "Open the wallet" },
+  peniBalance: { tr: "Bakiye", en: "Balance" },
+  peniMax: { tr: "Bu siparişe en çok", en: "Most for this order" },
+  peniAll: { tr: "Tamamı", en: "All of it" },
+  peniAmount: { tr: "Düşülecek peni", en: "Peni to take" },
+  peniTake: { tr: "Peniyi düş", en: "Take the peni" },
+  peniNone: { tr: "Bu siparişe düşülecek peni yok.", en: "No peni can go on this order." },
+  peniOnOrder: { tr: "Peni", en: "Peni" },
+  peniGiveBack: { tr: "Geri ver", en: "Give back" },
+  peniLocked: {
+    tr: "Peni düşüldü. Siparişi değiştirmek için önce peniyi geri ver.",
+    en: "Peni are on this order. Give them back before changing it.",
+  },
+  left: { tr: "Kalan", en: "Left to pay" },
+  paidByPeni: { tr: "Peniyle ödendi", en: "Paid with peni" },
+  peniUsed: { tr: "{n} peni kullanıldı", en: "{n} peni used" },
   each: { tr: "tanesi", en: "each" },
   pricesChanged: {
     tr: "Menüde fiyat değişmiş. Toplamı kontrol edip tekrar dokun.",

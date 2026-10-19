@@ -258,6 +258,22 @@ const wrongCode = cardPaid.claim.code === "0000" ? "0001" : "0000";
 assert.equal((await call("POST", "/claims", { token: mehmet, body: { cafeSlug: "moda", code: wrongCode } })).json.error.code, "CLAIM_CODE_WRONG");
 const typed = (await call("POST", "/claims", { token: mehmet, body: { cafeSlug: "moda", code: cardPaid.claim.code } })).json;
 assert.deepEqual([typed.state, typed.balancePeni], ["yours", mehmetBefore + cardPaid.claim.peni]);
+// 5h. Spending peni (piece 11): Ayşe opens her ödeme kodu; Ece takes 40 peni off a ₺265
+//     order and the rest goes on card, which alone earns peni.
+const ayseSpendBefore = await modaBalance(ayse);
+const payCode = (await call("POST", "/me/spend-code", { token: ayse, body: { cafeSlug: "moda" } })).json;
+assert.match(payCode.code, /^\d{6}$/);
+const peniOrder = (await call("POST", "/staff/moda/orders", { headers: ecePos, body: { createKey: key(), lines: [{ productId: "latte", quantity: 2 }, { productId: "simit", quantity: 1 }] } })).json;
+const wallet = (await call("POST", `/staff/moda/orders/${peniOrder.id}/peni/check`, { headers: ecePos, body: { code: payCode.code } })).json;
+assert.deepEqual([wallet.name, wallet.balancePeni], ["Ayşe Y.", ayseSpendBefore]);
+const peniKey = key();
+const usedPeni = (await call("POST", `/staff/moda/orders/${peniOrder.id}/peni`, { headers: ecePos, body: { code: payCode.code, peni: 40, payKey: peniKey } })).json;
+assert.deepEqual([usedPeni.payment.method, usedPeni.order.status, usedPeni.order.dueKurus], ["peni", "open", 22_500]);
+await call("POST", `/staff/moda/orders/${peniOrder.id}/peni`, { headers: ecePos, body: { code: payCode.code, peni: 40, payKey: peniKey } });
+assert.equal(await modaBalance(ayse), ayseSpendBefore - 40, "a retried tap takes the peni once");
+const rest = (await call("POST", `/staff/moda/orders/${peniOrder.id}/pay`, { headers: ecePos, body: { method: "card", payKey: key() } })).json;
+const restPaid = (await call("POST", `/staff/moda/orders/${peniOrder.id}/payments/${rest.payment.id}/confirm`, { headers: ecePos, body: {} })).json.order;
+assert.deepEqual([restPaid.status, restPaid.peni.peni, restPaid.claim.peni], ["paid", 40, 11], "only the ₺225 on card earns: 11 peni");
 
 // 5f. Kasa (piece 9): Ece takes ₺45 out for milk and closes the drawer ₺5 short, with a reason.
 await call("POST", "/staff/moda/cash/moves", { headers: ecePos, body: { key: key(), kind: "out", amountKurus: 4_500, reason: "Süt" } });
@@ -268,7 +284,7 @@ assert.equal(noReason.json.error.code, "DIFFERENCE_REASON_REQUIRED");
 const closedDrawer = (await call("POST", "/staff/moda/cash/close", { headers: ecePos, body: { key: key(), sessionId: beforeClose.id, countKurus: 45_000, note: "Bozuk para eksik" } })).json;
 assert.deepEqual([closedDrawer.open, closedDrawer.last.closing.differenceKurus], [null, -500]);
 await call("POST", `/staff/moda/devices/${till2.device.id}/revoke`, { headers: STAFF });
-step("No cash until the drawer is opened; Ece opens it with ₺500 counted by notes, sells 2 latte and a simit (one order despite a retry), starts a card payment and backs out of it, takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen, which Ayşe takes once by QR before Mehmet types it; Leyla voids an unpaid order and refunds the paid one, recorded as a refund payment, which takes Ayşe's peni back; Mehmet types the code of a card sale (a wrong code first); Ece takes ₺45 out for milk and closes the drawer ₺5 short with a reason");
+step("No cash until the drawer is opened; Ece opens it with ₺500 counted by notes, sells 2 latte and a simit (one order despite a retry), starts a card payment and backs out of it, takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen, which Ayşe takes once by QR before Mehmet types it; Leyla voids an unpaid order and refunds the paid one, recorded as a refund payment, which takes Ayşe's peni back; Mehmet types the code of a card sale (a wrong code first); Ayşe pays 40 peni of a ₺265 order with her ödeme kodu and the rest by card; Ece takes ₺45 out for milk and closes the drawer ₺5 short with a reason");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;

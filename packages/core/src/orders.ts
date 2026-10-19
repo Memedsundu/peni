@@ -7,7 +7,8 @@ import type { Kurus } from "./money";
  */
 
 export type OrderStatus = "open" | "paid" | "voided" | "refunded";
-export type PaymentMethod = "cash" | "card";
+/** "peni": paid from the customer's wallet with their ödeme kodu (piece 11). */
+export type PaymentMethod = "cash" | "card" | "peni";
 
 export interface OrderLine {
   productId: string;

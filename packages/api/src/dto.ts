@@ -108,7 +108,8 @@ export interface TillMenuDTO {
 }
 
 export type OrderStatusDTO = "open" | "paid" | "voided" | "refunded";
-export type PaymentMethodDTO = "cash" | "card";
+/** "peni": from the customer's wallet, with their ödeme kodu (piece 11). */
+export type PaymentMethodDTO = "cash" | "card" | "peni";
 
 export interface OrderLineDTO {
   productId: string;
@@ -141,6 +142,10 @@ export interface OrderDTO {
   changeKurus: number | null;
   voided: { at: string; by: string; reason: string } | null;
   refunded: { at: string; by: string; reason: string; amountKurus: number } | null;
+  /** What's left to pay on an open order, after any peni on it; 0 otherwise. */
+  dueKurus: number;
+  /** Peni on the order, and whose wallet they came from ("Ayşe Y."). */
+  peni: { peni: number; name: string } | null;
   /** What the viewer may do with it now. */
   canVoid: boolean;
   canRefund: boolean;
@@ -261,6 +266,8 @@ export interface OrderListDTO {
     salesKurus: number;
     cashKurus: number;
     cardKurus: number;
+    /** Paid with peni: what the café gave in goods. */
+    peniKurus: number;
     refundedCount: number;
     refundedKurus: number;
     voidedCount: number;
@@ -382,6 +389,25 @@ export interface GiftDTO {
   cancelledBySender: boolean;
   /** When the recipient said thanks. [G15] */
   thankedAt: string | null;
+}
+
+/** `POST /staff/:slug/orders/:id/peni/check`: whose wallet an ödeme kodu opens. */
+export interface PeniCheckDTO {
+  /** "Ayşe Y.", for the barista to check against the customer. */
+  name: string;
+  balancePeni: number;
+  /** The most that can go on this order now: within the balance and the café's rules. */
+  maxPeni: number;
+}
+
+/** `POST /me/spend-code`: the ödeme kodu to show at the till, for one café. */
+export interface SpendCodeDTO {
+  cafeSlug: string;
+  cafeName: string;
+  hue: CafeHue | null;
+  code: string;
+  expiresAt: string;
+  balancePeni: number;
 }
 
 /**

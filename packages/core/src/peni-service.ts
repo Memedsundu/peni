@@ -5,6 +5,7 @@ import { account, type Ledger, type LedgerTransaction } from "./ledger";
 import { applyBps, assertWholeNumber, kurusToPeniCeil, type Kurus, type Peni } from "./money";
 import { calculateEarn, planRedemption, type PricedLine, type RedemptionPlan } from "./rules";
 import type { CafePeniSettings } from "./settings";
+import { InMemorySpendCodeStore, normalizeSpendCode, randomSpendCode, SPEND_CODE_TTL_MS, type SpendCode, type SpendCodeStore } from "./spend";
 import { addDays, addHours, startOfLocalDay, startOfLocalMonth } from "./time";
 
 export type Clock = () => Date;
@@ -93,6 +94,7 @@ export class PeniService {
     private readonly directory: PeniDirectory,
     private readonly clock: Clock = () => new Date(),
     private readonly claims: ClaimStore = new InMemoryClaimStore(),
+    private readonly spendCodes: SpendCodeStore = new InMemorySpendCodeStore(),
   ) {}
 
   // ---------------------------------------------------------------- wallet
@@ -210,6 +212,64 @@ export class PeniService {
       const taken = { ...claim, claimedAt: now, claimedByMembershipId: membership.id };
       await this.claims.saveClaim(taken);
       return { claim: taken, already: false };
+    });
+  }
+
+  /**
+   * "Ödeme kodum" (plan piece 11): a fresh 6-digit code for spending at the till, valid
+   * a few minutes. Opening it again replaces the old one.
+   */
+  async issueSpendCode(membershipId: string, random: () => number = Math.random): Promise<SpendCode> {
+    const membership = await this.requireActiveMembership(membershipId);
+    const now = this.clock();
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const code: SpendCode = {
+        cafeId: membership.cafeId,
+        membershipId: membership.id,
+        code: randomSpendCode(random),
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + SPEND_CODE_TTL_MS),
+      };
+      if (await this.spendCodes.saveSpendCode(code)) return code;
+    }
+    throw new PeniError("INVALID_TRANSACTION", "No free spend code right now");
+  }
+
+  /** Whose wallet a code the till scanned or typed opens, at this café. */
+  async spenderForCode(cafeId: string, raw: string): Promise<Membership> {
+    const code = normalizeSpendCode(raw);
+    const found = code ? await this.spendCodes.getSpendCode(cafeId, code) : null;
+    if (!found) throw new PeniError("SPEND_CODE_WRONG", "No such spend code here");
+    if (found.expiresAt <= this.clock()) throw new PeniError("SPEND_CODE_EXPIRED", "This spend code has expired; open a new one");
+    return this.requireActiveMembership(found.membershipId);
+  }
+
+  /**
+   * Takes peni from the wallet for an order at the till: as many as asked, up to the
+   * order's cap and the balance. `key` is the till's payment key, so a retry takes them once.
+   */
+  async spendAtTill(input: { membershipId: string; orderId: string; key: string; requestedPeni: Peni; capPeni: Peni }): Promise<Peni> {
+    const membership = await this.requireActiveMembership(input.membershipId);
+    assertWholeNumber(input.requestedPeni, "peni");
+    return this.ledger.atomically(async () => {
+      const idempotencyKey = `redeem:${input.key}`;
+      const again = await this.ledger.findByIdempotencyKey(idempotencyKey);
+      if (again) return inflow(again, account.redemption(membership.cafeId));
+      const balance = await this.ledger.balance(account.member(membership.id));
+      const peni = Math.min(input.requestedPeni, input.capPeni, balance);
+      if (peni <= 0) throw new PeniError("NOTHING_TO_SPEND", "No peni can go on this order");
+      await this.ledger.post({
+        cafeId: membership.cafeId,
+        kind: "redeem",
+        entries: [
+          { account: account.member(membership.id), delta: -peni },
+          { account: account.redemption(membership.cafeId), delta: peni },
+        ],
+        idempotencyKey,
+        meta: { orderId: input.orderId },
+        createdAt: this.clock(),
+      });
+      return peni;
     });
   }
 

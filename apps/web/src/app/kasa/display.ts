@@ -11,7 +11,16 @@ export type DisplayLine = { name: string; quantity: number; discountPercent: num
 
 export type DisplayState =
   | { kind: "idle" }
-  | { kind: "order"; lines: DisplayLine[]; subtotalKurus: number; discountKurus: number; totalKurus: number }
+  | {
+      kind: "order";
+      lines: DisplayLine[];
+      subtotalKurus: number;
+      discountKurus: number;
+      totalKurus: number;
+      /** Peni the customer spent on it, and what's left to pay (piece 11). */
+      peni?: number;
+      dueKurus?: number;
+    }
   | {
       kind: "paid";
       number: number;
@@ -21,6 +30,7 @@ export type DisplayState =
       method: PaymentMethodDTO;
       changeKurus: number | null;
       claim: OrderClaimDTO | null;
+      peni?: number;
     };
 
 type Message = { type: "state"; state: DisplayState } | { type: "hello" };
