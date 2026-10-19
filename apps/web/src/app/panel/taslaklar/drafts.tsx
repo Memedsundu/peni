@@ -1,16 +1,17 @@
 "use client";
 
-import { PeniApiError, type AiLogDTO, type DraftDTO, type DraftsDTO, type ReadingDTO } from "@peni/api";
+import { PeniApiError, type AiLogDTO, type DraftDTO, type DraftsDTO, type InboxDTO, type ReadingDTO } from "@peni/api";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
 import { Field, Segmented } from "../controls";
 import { billHref, BillForm } from "../faturalar/bills";
 import { Repeats, ScanInput, useScan } from "../scan";
+import { Emails, InboxCard } from "./inbox";
 import { PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
 
-type Tab = "waiting" | "history" | "log";
+type Tab = "waiting" | "history" | "emails" | "log";
 
 /**
  * Taslaklar (plan piece 24): a bill or receipt goes in, the assistant reads it, and the
@@ -31,6 +32,7 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
   const [tab, setTab] = useState<Tab>("waiting");
   const [openId, setOpenId] = useState<string | null>(initialId);
   const [done, setDone] = useState<DraftDTO | null>(null);
+  const [inbox, setInbox] = useState<InboxDTO | null>(null);
 
   const load = useCallback(
     () =>
@@ -46,15 +48,21 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
       ),
     [cafe.slug, lang],
   );
+  // The address for bills (piece 26); Taslaklar works without it.
+  const loadInbox = useCallback(() => api.staff.inbox.get(cafe.slug).then(setInbox, () => undefined), [cafe.slug]);
   useEffect(() => void load(), [load]);
+  useEffect(() => void loadInbox(), [loadInbox]);
 
   // While something is being read, look again every few seconds.
   const reading = data?.reading.some((r) => r.state === "reading") ?? false;
   useEffect(() => {
     if (!reading) return;
-    const timer = setInterval(() => void load(), 3000);
+    const timer = setInterval(() => {
+      void load();
+      void loadInbox();
+    }, 3000);
     return () => clearInterval(timer);
-  }, [reading, load]);
+  }, [reading, load, loadInbox]);
 
   const open = (id: string | null) => {
     setOpenId(id);
@@ -87,6 +95,18 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
             {data.ai === "off" && <Notice>{t("drOff")}</Notice>}
             {done && <Decided t={t} slug={cafe.slug} draft={done} />}
             {data.canUpload && <Upload t={t} lang={lang} slug={cafe.slug} onUploaded={() => void load()} />}
+            {data.ai !== "off" && inbox && (
+              <InboxCard
+                t={t}
+                lang={lang}
+                slug={cafe.slug}
+                inbox={inbox}
+                onChange={(i) => {
+                  setInbox(i);
+                  void load();
+                }}
+              />
+            )}
             <Segmented
               label={t("drShow")}
               value={tab}
@@ -94,11 +114,13 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
               options={[
                 { value: "waiting", label: `${t("drWaiting")}${data.open.length ? ` (${data.open.length})` : ""}` },
                 { value: "history", label: t("drHistory") },
+                { value: "emails", label: t("drEmails") },
                 { value: "log", label: t("drLog") },
               ]}
             />
             {tab === "waiting" && <Waiting t={t} lang={lang} data={data} onOpen={open} />}
             {tab === "history" && <History t={t} lang={lang} slug={cafe.slug} data={data} />}
+            {tab === "emails" && <Emails t={t} lang={lang} slug={cafe.slug} inbox={inbox} />}
             {tab === "log" && <Log t={t} lang={lang} slug={cafe.slug} />}
           </>
         )
@@ -166,6 +188,7 @@ function Waiting({ t, lang, data, onOpen }: { t: T; lang: Lang; data: DraftsDTO;
             <span className="text-sm text-muted">
               {when(d.createdAt, lang)}
               {d.document?.name ? ` · ${d.document.name}` : ""}
+              {d.document?.sender ? ` · ${fill(t("drByEmail"), { sender: d.document.sender })}` : ""}
               {d.doubts.length > 0 && <span className="text-red"> · {fill(t("drNotes"), { n: d.doubts.length })}</span>}
               {d.duplicateOf && <span className="font-semibold text-red"> · {t(d.duplicateOf.kind === "bill" ? "dupBillShort" : "dupDraftShort")}</span>}
             </span>
@@ -294,6 +317,7 @@ function DocumentView({ t, draft }: { t: T; draft: DraftDTO }) {
           <img src={doc.url} alt={doc.name || t("drDocument")} className="max-h-[70vh] w-full object-contain" />
         )}
       </div>
+      {doc.sender && <p className="text-sm text-muted">{fill(t("drByEmail"), { sender: doc.sender })}</p>}
       <a href={doc.url} target="_blank" rel="noreferrer" className="text-sm text-muted underline underline-offset-4">
         {t("drOpenDocument")}
       </a>
@@ -345,6 +369,7 @@ function History({ t, lang, slug, data }: { t: T; lang: Lang; slug: string; data
 
 const EVENT: Record<AiLogDTO["events"][number]["kind"], TextKey> = {
   "document.uploaded": "ev_document_uploaded",
+  "email.received": "ev_email_received",
   "ai.call": "ev_ai_call",
   "draft.created": "ev_draft_created",
   "draft.confirmed": "ev_draft_confirmed",

@@ -36,3 +36,23 @@ export function receiptPdf(lines: { text: string; bold?: boolean }[]): Uint8Arra
 }
 
 const latin1 = (s: string) => Uint8Array.from(s, (c) => c.charCodeAt(0) & 0xff);
+
+/** The demo's Ambalaj Dünyası bill, dated "18.10.2026": the first draft, and the inbox's sample email (piece 26). */
+export function ambalajBill(day: string, note?: string): Uint8Array {
+  return receiptPdf([
+    { text: "AMBALAJ DÜNYASI TİC. LTD. ŞTİ.", bold: true },
+    { text: "Ihlamurkuyu Sk. No:12 Kadiköy/Istanbul" },
+    { text: "VKN 0123456789" },
+    { text: "" },
+    { text: `FATURA NO: A-20511     TARIH: ${day}` },
+    { text: "----------------------------------------" },
+    { text: "Karton bardak 8 oz" },
+    { text: "  1000 adet x 1,45            1.450,00" },
+    { text: "Peçete" },
+    { text: "  20 paket x 18,00              360,00" },
+    { text: "----------------------------------------" },
+    { text: "KDV %20                         301,67" },
+    { text: "TOPLAM (KDV DAHIL)            1.810,00", bold: true },
+    ...(note ? [{ text: "" }, { text: note }] : []),
+  ]);
+}

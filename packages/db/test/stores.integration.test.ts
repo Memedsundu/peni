@@ -684,7 +684,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
   });
 
   it("keeps documents, drafts, jobs and the assistant's log; two passes never take the same job", async () => {
-    const doc = { id: `doc_${run}`, cafeId, name: "fis.pdf", contentType: "application/pdf" as const, bytes: new Uint8Array([37, 80, 68, 70, 45]), size: 5, sha256: "ab".repeat(32), uploadedBy: "stf_a", createdAt: at };
+    const doc = { id: `doc_${run}`, cafeId, name: "fis.pdf", contentType: "application/pdf" as const, bytes: new Uint8Array([37, 80, 68, 70, 45]), size: 5, sha256: "ab".repeat(32), uploadedBy: "stf_a", emailId: null, sender: null, createdAt: at };
     await stores.assistant.saveDocument(doc);
     expect(await stores.assistant.getDocument(cafeId, doc.id)).toEqual(doc);
     expect(await stores.assistant.getDocument("cafe_other", doc.id)).toBeNull();
@@ -744,5 +744,27 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.assistant.listEvents(cafeId, { limit: 10 })).map((e) => e.kind)).toEqual(["draft.confirmed", "ai.call"]);
     expect(await stores.assistant.listEvents(cafeId, { limit: 10, before: new Date(at.getTime() + 1000) })).toEqual([event]);
     expect(await stores.assistant.usage(cafeId, at, new Date(at.getTime() + 86_400_000))).toEqual({ calls: 1, inputTokens: 900, outputTokens: 120 });
+  });
+
+  it("keeps each café's inbox address and the emails that reached it, each email once", async () => {
+    const inbox = { cafeId, token: `t${run}`.slice(0, 16), enabled: true, createdAt: at, updatedAt: at };
+    await stores.assistant.saveInbox(inbox);
+    expect(await stores.assistant.getInbox(cafeId)).toEqual(inbox);
+    expect(await stores.assistant.findInbox(inbox.token)).toEqual(inbox);
+    await stores.assistant.saveInbox({ ...inbox, enabled: false, token: `u${run}`.slice(0, 16) });
+    expect(await stores.assistant.findInbox(inbox.token)).toBeNull();
+    expect((await stores.assistant.getInbox(cafeId))?.enabled).toBe(false);
+
+    const email = { id: `eml_${run}`, cafeId, providerId: `re_${run}`, sender: "e-fatura@sut.test", subject: "Fatura MS-0412", receivedAt: at, documents: [], skipped: [] };
+    // Two deliveries at once: one takes it.
+    const taken = await Promise.all([stores.assistant.addInboundEmail(email), stores.assistant.addInboundEmail({ ...email, id: `eml2_${run}` })]);
+    expect(taken.sort()).toEqual([false, true]);
+    const kept = (await stores.assistant.findInboundEmail(cafeId, email.providerId))!;
+    const done = { ...kept, documents: [{ documentId: `doc_${run}`, name: "fatura.pdf" }], skipped: [{ name: "fatura.xml", why: "type" as const }] };
+    await stores.assistant.saveInboundEmail(done);
+    await stores.assistant.addInboundEmail({ ...email, id: `eml3_${run}`, providerId: `re3_${run}`, receivedAt: new Date(at.getTime() + 1000) });
+    expect((await stores.assistant.listInboundEmails(cafeId, { limit: 10 })).map((e) => e.providerId)).toEqual([`re3_${run}`, email.providerId]);
+    expect(await stores.assistant.listInboundEmails(cafeId, { limit: 10, since: new Date(at.getTime() + 500) })).toHaveLength(1);
+    expect(await stores.assistant.findInboundEmail(cafeId, email.providerId)).toEqual(done);
   });
 });

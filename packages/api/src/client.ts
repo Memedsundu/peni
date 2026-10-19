@@ -48,6 +48,7 @@ import type {
   DraftsDTO,
   UploadDTO,
   UploadsDTO,
+  InboxDTO,
   TodayDTO,
   ShiftWeekDTO,
 } from "./dto";
@@ -117,6 +118,7 @@ import type {
   CheckTaskInput,
   AlertEmailInput,
   ConfirmDraftInput,
+  InboxSettingsInput,
   DismissDraftInput,
   CopyWeekInput,
   PayoutInput,
@@ -460,6 +462,13 @@ export function createPeniClient(options: PeniClientOptions) {
         /** The assistant's log, newest first; `before` (an ISO time from `next`) pages back. */
         log: (cafeSlug: string, before?: string) =>
           call<AiLogDTO>("GET", `/staff/${slug(cafeSlug)}/drafts/log${before ? `?before=${encodeURIComponent(before)}` : ""}`, undefined, true),
+      },
+      /** The café's address for bills (piece 26) and the emails that reached it. */
+      inbox: {
+        get: (cafeSlug: string) => call<InboxDTO>("GET", `/staff/${slug(cafeSlug)}/inbox`, undefined, true),
+        update: (cafeSlug: string, input: InboxSettingsInput) => call<InboxDTO>("POST", `/staff/${slug(cafeSlug)}/inbox`, input, true),
+        /** Demo only: a sample supplier email with a bill attached. */
+        sample: (cafeSlug: string) => call<InboxDTO>("POST", `/staff/${slug(cafeSlug)}/inbox/sample`, {}, true),
       },
       /** Görevler (piece 22). "tasks.view" sees and ticks today's; "tasks.edit" other days and the lists. */
       tasks: {

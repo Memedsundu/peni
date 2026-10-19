@@ -3,18 +3,20 @@ import type {
   AiEventKind,
   AssistantStore,
   BillProposal,
+  CafeInbox,
   DocumentType,
   Draft,
   DraftKind,
   DraftStatus,
   DuplicateRef,
+  InboundEmail,
   Job,
   JobStatus,
   LineMatch,
   StoredDocument,
 } from "@peni/core";
 import type { Db } from "./db";
-import { Prisma, type AiDraft as DraftRow, type AiEvent as EventRow, type Job as JobRow } from "./generated/client";
+import { Prisma, type AiDraft as DraftRow, type AiEvent as EventRow, type InboundEmail as EmailRow, type Job as JobRow } from "./generated/client";
 
 const toDraft = (r: DraftRow): Draft => ({
   ...r,
@@ -30,9 +32,25 @@ const toJob = (r: JobRow): Job => ({
   result: (r.result as Record<string, unknown> | null) ?? null,
 });
 const toEvent = (r: EventRow): AiEvent => ({ ...r, kind: r.kind as AiEventKind });
+const toEmail = (r: EmailRow): InboundEmail => ({
+  ...r,
+  documents: r.documents as unknown as InboundEmail["documents"],
+  skipped: r.skipped as unknown as InboundEmail["skipped"],
+});
 const json = (v: unknown) => v as Prisma.InputJsonValue;
 /** Everything about a document but its bytes. */
-const INFO = { id: true, cafeId: true, name: true, contentType: true, size: true, sha256: true, uploadedBy: true, createdAt: true } as const;
+const INFO = {
+  id: true,
+  cafeId: true,
+  name: true,
+  contentType: true,
+  size: true,
+  sha256: true,
+  uploadedBy: true,
+  emailId: true,
+  sender: true,
+  createdAt: true,
+} as const;
 
 export class PrismaAssistantStore implements AssistantStore {
   constructor(private readonly db: Db) {}
@@ -159,5 +177,45 @@ export class PrismaAssistantStore implements AssistantStore {
 
   async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void> {
     await this.db().aiLineMatch.deleteMany({ where: { cafeId, supplierKey: supplierId ?? "", readKey } });
+  }
+
+  async getInbox(cafeId: string): Promise<CafeInbox | null> {
+    return this.db().cafeInbox.findUnique({ where: { cafeId } });
+  }
+
+  async findInbox(token: string): Promise<CafeInbox | null> {
+    return this.db().cafeInbox.findUnique({ where: { token } });
+  }
+
+  async saveInbox(inbox: CafeInbox): Promise<void> {
+    await this.db().cafeInbox.upsert({ where: { cafeId: inbox.cafeId }, create: inbox, update: inbox });
+  }
+
+  async addInboundEmail(email: InboundEmail): Promise<boolean> {
+    // The unique (café, provider id) decides when the same email is delivered twice at once.
+    const r = await this.db().inboundEmail.createMany({
+      data: [{ ...email, documents: json(email.documents), skipped: json(email.skipped) }],
+      skipDuplicates: true,
+    });
+    return r.count === 1;
+  }
+
+  async saveInboundEmail(email: InboundEmail): Promise<void> {
+    const { id, ...rest } = email;
+    await this.db().inboundEmail.update({ where: { id }, data: { ...rest, documents: json(rest.documents), skipped: json(rest.skipped) } });
+  }
+
+  async findInboundEmail(cafeId: string, providerId: string): Promise<InboundEmail | null> {
+    const r = await this.db().inboundEmail.findUnique({ where: { cafeId_providerId: { cafeId, providerId } } });
+    return r ? toEmail(r) : null;
+  }
+
+  async listInboundEmails(cafeId: string, opts: { limit: number; since?: Date }): Promise<InboundEmail[]> {
+    const rows = await this.db().inboundEmail.findMany({
+      where: { cafeId, ...(opts.since ? { receivedAt: { gte: opts.since } } : {}) },
+      orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
+      take: opts.limit,
+    });
+    return rows.map(toEmail);
   }
 }

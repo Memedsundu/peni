@@ -20,6 +20,9 @@ const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp>; pen
  * OPENAI_API_KEY turns the assistant on (OPENAI_MODEL picks the model, gpt-5-mini by
  * default); without it the demo uses a stand-in that doesn't read, and anything else
  * runs with the assistant off.
+ * PENI_INBOX_DOMAIN turns on each café's address for bills (piece 26), with Resend's
+ * inbound email: RESEND_WEBHOOK_SECRET signs its webhook and RESEND_API_KEY fetches
+ * attachments. Without them the demo shows addresses that only take its sample email.
  */
 export function getApp(): Promise<PeniApp> {
   globalForPeni.peniApp ??= (async () => {
@@ -27,7 +30,7 @@ export function getApp(): Promise<PeniApp> {
     const url = process.env.DATABASE_URL;
     const stores = url ? createPrismaStores(createPrismaClient(url)) : inMemoryStores();
     const app = new PeniApp(
-      { demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) }, publicUrl: process.env.PENI_PUBLIC_URL || undefined, ai: aiFromEnv() },
+      { demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) }, publicUrl: process.env.PENI_PUBLIC_URL || undefined, ai: aiFromEnv(), inboxDomain: inboxFromEnv() },
       stores,
     );
     if (demo && (await app.identity.listCafes()).length === 0) await seed(app);
@@ -45,6 +48,12 @@ export function demoOutbox(): OutboxEmailSender | null {
 function aiFromEnv() {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   return apiKey ? { model: new OpenAiModel({ apiKey, model: process.env.OPENAI_MODEL?.trim() || undefined }), mode: "on" as const } : undefined;
+}
+
+/** Undefined (the demo's sample-only addresses, or none) unless email can really come in. */
+function inboxFromEnv(): string | undefined {
+  const domain = process.env.PENI_INBOX_DOMAIN?.trim().toLowerCase();
+  return domain && process.env.RESEND_WEBHOOK_SECRET?.trim() && process.env.RESEND_API_KEY?.trim() ? domain : undefined;
 }
 
 function verifierFromEnv(): JoseIdTokenVerifier {

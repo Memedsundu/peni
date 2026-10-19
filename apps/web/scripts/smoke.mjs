@@ -684,6 +684,26 @@ assert.deepEqual([notDoc.status, notDoc.json.error.code], [415, "DOCUMENT_TYPE"]
 step("Taslaklar: an uploaded receipt is read in the background into a draft, checked beside its document and confirmed once in Leyla's name; not for the till, and only photos and PDFs");
 step("Scanning: lines linked to stock, KDV read and kept, the same file and the same bill number caught, and Murat sees his upload saved");
 
+// 5t. The forward-to-Peni inbox (piece 26): Moda has its own address; the demo emails it a
+//     sample bill, whose PDF is read into a draft that knows its sender and whose XML is
+//     left. The real webhook refuses anything until the server is set up for email.
+const inbox = (await call("GET", "/staff/moda/inbox", { headers: MURAT })).json;
+assert.match(inbox.address, /^moda\.[a-z2-9]{10}@fatura\.peni\.test$/);
+assert.deepEqual([inbox.ready, inbox.enabled, inbox.canManage, inbox.canSendSample], [true, true, true, true]);
+let mailed = (await call("POST", "/staff/moda/inbox/sample", { headers: MURAT, body: {} })).json;
+assert.deepEqual(mailed.emails[0].skipped, [{ name: "A-20511.xml", why: "type" }]);
+for (let i = 0; i < 20 && mailed.emails[0].documents[0].state === "reading"; i++) {
+  await new Promise((r) => setTimeout(r, 250));
+  mailed = (await call("GET", "/staff/moda/inbox", { headers: MURAT })).json;
+}
+assert.equal(mailed.emails[0].documents[0].state, "waiting");
+const emailed = (await call("GET", "/staff/moda/drafts", { headers: STAFF })).json.open.find((d) => d.id === mailed.emails[0].documents[0].draftId);
+assert.deepEqual([emailed.document.sender, emailed.proposal.supplierId], ["satis@ambalajdunyasi.test", "sup_seed_ambalaj"]);
+assert.equal((await call("GET", "/staff/moda/inbox", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
+const hook = await fetch(`${BASE}/api/v1/inbox/resend`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+assert.equal(hook.status, 503);
+step("Inbox: Moda's own address takes a sample supplier email, reads its PDF into a draft from that supplier and leaves the XML; the webhook waits for the server's email setup");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

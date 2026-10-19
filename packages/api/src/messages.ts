@@ -204,6 +204,8 @@ export const errorMessagesTr: Record<string, string> = {
   DRAFT_NOT_FOUND: "Bu taslak bulunamadı.",
   DRAFT_DECIDED: "Bu taslak zaten onaylandı ya da bırakıldı.",
   AI_OFF: "Asistan şu an kapalı. Belgeyi elle girebilirsin.",
+  INBOX_NOT_READY: "E-posta kutusu bu sunucuda henüz kurulmadı.",
+  INBOX_SAMPLE_DEMO: "Örnek e-posta yalnızca demoda gönderilir.",
   REPORT_RANGE: "Bu tarihlerle rapor olmaz. Başlangıç bitişten önce, bitiş en geç bugün olmalı; en çok 400 gün.",
 };
 

@@ -1614,6 +1614,8 @@ export interface DocumentRefDTO {
   size: number;
   /** Where the staff can see it; it needs their session. */
   url: string;
+  /** Who emailed it, when it came to the café's address (piece 26). */
+  sender: string | null;
 }
 
 export type DraftStatusDTO = "open" | "confirmed" | "dismissed";
@@ -1695,7 +1697,7 @@ export interface DraftsDTO {
   billForm: BillsDTO;
 }
 
-export type AiEventKindDTO = "document.uploaded" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
+export type AiEventKindDTO = "document.uploaded" | "email.received" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
 
 /** `GET /staff/:slug/assistant/log`: what the assistant did and what people did with it. */
 export interface AiLogDTO {
@@ -1717,4 +1719,33 @@ export interface AiLogDTO {
   month: { calls: number; inputTokens: number; outputTokens: number };
   /** Pass as `before` for older events; null when there are none. */
   next: string | null;
+}
+
+/** Why a file in an email wasn't read: not a photo or PDF, too large, already sent in, or the day's limit. */
+export type InboxSkipDTO = "type" | "large" | "same" | "limit";
+
+/** One email that reached the café's address and what became of each file in it. */
+export interface InboundEmailDTO {
+  id: string;
+  sender: string;
+  subject: string;
+  at: string;
+  documents: { documentId: string; name: string; state: "reading" | "failed" | "notBill" | "waiting" | "saved" | "dismissed"; draftId: string | null }[];
+  skipped: { name: string; why: InboxSkipDTO }[];
+}
+
+/**
+ * `GET /staff/:slug/inbox` (plan piece 26, A4): the café's own address for bills, and the
+ * emails that reached it lately ("assistant.use"). Turning it off or taking a new address
+ * needs "bills.manage".
+ */
+export interface InboxDTO {
+  /** Whether this server takes email at all; without it there's no address to show. */
+  ready: boolean;
+  address: string | null;
+  enabled: boolean;
+  canManage: boolean;
+  /** The demo can send itself a sample email. */
+  canSendSample: boolean;
+  emails: InboundEmailDTO[];
 }

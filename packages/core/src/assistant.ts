@@ -34,7 +34,11 @@ export interface StoredDocument {
   size: number;
   /** Hex SHA-256 of the bytes: the same file twice is found (piece 25's duplicate guard). */
   sha256: string;
+  /** The staff member who sent it; "" for one that came by email. */
   uploadedBy: string;
+  /** The email it came in (piece 26), and who sent it. */
+  emailId: string | null;
+  sender: string | null;
   createdAt: Date;
 }
 
@@ -189,7 +193,7 @@ export const JOB_LOCK_MS = 5 * 60_000;
  * to the model (what for, which model, tokens, how long, whether it worked), each draft
  * written, confirmed or dismissed, and each job that gave up.
  */
-export type AiEventKind = "document.uploaded" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
+export type AiEventKind = "document.uploaded" | "email.received" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
 
 export interface AiEvent {
   id: string;
@@ -209,6 +213,67 @@ export interface AiEvent {
   draftId: string | null;
   documentId: string | null;
   jobId: string | null;
+}
+
+// ─────────────────────────────────────────────── the email inbox (plan piece 26)
+
+/**
+ * Each café's own address for bills (A4): suppliers send e-invoices there, or the owner
+ * forwards what lands in their own mailbox. The token is the secret part of the address;
+ * a new one retires the old address at once.
+ */
+export interface CafeInbox {
+  cafeId: string;
+  token: string;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Why a file in an email wasn't read. */
+export type SkipReason = "type" | "large" | "same" | "limit";
+
+/** One email that reached a café's address, and what became of each file in it. */
+export interface InboundEmail {
+  id: string;
+  cafeId: string;
+  /** The mail service's id for it: the same email delivered twice is taken once. */
+  providerId: string;
+  sender: string;
+  subject: string;
+  receivedAt: Date;
+  documents: { documentId: string; name: string }[];
+  skipped: { name: string; why: SkipReason }[];
+}
+
+/** Ten letters and digits a person can read out: about 50 bits. */
+export const INBOX_TOKEN_LENGTH = 10;
+const TOKEN_ALPHABET = "abcdefghijkmnpqrstuvwxyz23456789";
+
+export function newInboxToken(random: (n: number) => Uint8Array): string {
+  return [...random(INBOX_TOKEN_LENGTH)].map((b) => TOKEN_ALPHABET[b % TOKEN_ALPHABET.length]).join("");
+}
+
+/** "moda.k3x9q2mfa7@fatura.peni.app" */
+export function inboxAddress(slug: string, token: string, domain: string): string {
+  return `${slug}.${token}@${domain}`;
+}
+
+/**
+ * The inbox tokens in a list of recipients ("Moda <moda.k3x9q2mfa7@fatura.peni.app>"),
+ * only for addresses at our domain. The slug is for people; the token alone decides.
+ */
+export function inboxTokens(recipients: string[], domain: string): string[] {
+  const tokens = new Set<string>();
+  const host = domain.toLowerCase();
+  for (const r of recipients) {
+    const m = /<?([^<>\s@]+)@([^<>\s@]+?)>?\s*$/.exec(r.trim());
+    if (!m || m[2]!.toLowerCase() !== host) continue;
+    const local = m[1]!.toLowerCase().split("+")[0]!;
+    const token = local.slice(local.lastIndexOf(".") + 1);
+    if (token.length === INBOX_TOKEN_LENGTH && [...token].every((c) => TOKEN_ALPHABET.includes(c))) tokens.add(token);
+  }
+  return [...tokens];
 }
 
 // ─────────────────────────────────────────────── the store
@@ -252,6 +317,17 @@ export interface AssistantStore {
   /** One per café, supplier and read name: a newer one replaces it. */
   saveLineMatch(match: LineMatch): Promise<void>;
   deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void>;
+
+  getInbox(cafeId: string): Promise<CafeInbox | null>;
+  findInbox(token: string): Promise<CafeInbox | null>;
+  saveInbox(inbox: CafeInbox): Promise<void>;
+  /** Claims the email for the café; false when it already has it (taken the first time). */
+  addInboundEmail(email: InboundEmail): Promise<boolean>;
+  /** What became of its files, once they're taken. */
+  saveInboundEmail(email: InboundEmail): Promise<void>;
+  findInboundEmail(cafeId: string, providerId: string): Promise<InboundEmail | null>;
+  /** Newest first; `since` for the day's count. */
+  listInboundEmails(cafeId: string, opts: { limit: number; since?: Date }): Promise<InboundEmail[]>;
 }
 
 export class InMemoryAssistantStore implements AssistantStore {
@@ -260,6 +336,8 @@ export class InMemoryAssistantStore implements AssistantStore {
   private readonly jobs = new Map<string, Job>();
   private readonly events: AiEvent[] = [];
   private readonly matches = new Map<string, LineMatch>();
+  private readonly inboxes = new Map<string, CafeInbox>();
+  private readonly emails: InboundEmail[] = [];
 
   async saveDocument(doc: StoredDocument) {
     this.documents.set(doc.id, { ...doc, bytes: doc.bytes.slice() });
@@ -356,5 +434,37 @@ export class InMemoryAssistantStore implements AssistantStore {
   }
   async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string) {
     this.matches.delete(`${cafeId}|${supplierId ?? ""}|${readKey}`);
+  }
+
+  async getInbox(cafeId: string) {
+    const i = this.inboxes.get(cafeId);
+    return i ? { ...i } : null;
+  }
+  async findInbox(token: string) {
+    const i = [...this.inboxes.values()].find((x) => x.token === token);
+    return i ? { ...i } : null;
+  }
+  async saveInbox(inbox: CafeInbox) {
+    this.inboxes.set(inbox.cafeId, { ...inbox });
+  }
+  async addInboundEmail(email: InboundEmail) {
+    if (this.emails.some((e) => e.cafeId === email.cafeId && e.providerId === email.providerId)) return false;
+    this.emails.push(structuredClone(email));
+    return true;
+  }
+  async saveInboundEmail(email: InboundEmail) {
+    const i = this.emails.findIndex((e) => e.id === email.id);
+    if (i >= 0) this.emails[i] = structuredClone(email);
+  }
+  async findInboundEmail(cafeId: string, providerId: string) {
+    const e = this.emails.find((x) => x.cafeId === cafeId && x.providerId === providerId);
+    return e ? structuredClone(e) : null;
+  }
+  async listInboundEmails(cafeId: string, opts: { limit: number; since?: Date }) {
+    return this.emails
+      .filter((e) => e.cafeId === cafeId && (!opts.since || e.receivedAt >= opts.since))
+      .sort((a, b) => b.receivedAt.getTime() - a.receivedAt.getTime() || b.id.localeCompare(a.id))
+      .slice(0, opts.limit)
+      .map((e) => structuredClone(e));
   }
 }
