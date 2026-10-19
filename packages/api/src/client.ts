@@ -47,6 +47,7 @@ import type {
   DraftDTO,
   DraftsDTO,
   UploadDTO,
+  HeardDTO,
   UploadsDTO,
   InboxDTO,
   TodayDTO,
@@ -122,6 +123,7 @@ import type {
   DismissDraftInput,
   CheckDraftInput,
   CheckSampleInput,
+  QuickEntryInput,
   CopyWeekInput,
   PayoutInput,
   PublishWeekInput,
@@ -454,6 +456,10 @@ export function createPeniClient(options: PeniClientOptions) {
           if (opts.again) q.set("again", "1");
           return call<UploadDTO>("POST", `/staff/${slug(cafeSlug)}/documents${q.size ? `?${q}` : ""}`, file, true);
         },
+        /** Quick entry (piece 28): "Tesisatçıya 450 lira nakit ödedim"; read in the background like an upload. Once per key. */
+        quick: (cafeSlug: string, input: QuickEntryInput) => call<UploadDTO>("POST", `/staff/${slug(cafeSlug)}/notes`, input, true),
+        /** A short recording turned into text, to read and fix before sending it with `quick`. Nothing is kept. */
+        hear: (cafeSlug: string, audio: Blob, lang: "tr" | "en" = "tr") => call<HeardDTO>("POST", `/staff/${slug(cafeSlug)}/notes/voice?lang=${lang}`, audio, true),
         /** What the viewer sent lately and what became of it ("bills.add"): for the till and Faturalar. */
         mine: (cafeSlug: string) => call<UploadsDTO>("GET", `/staff/${slug(cafeSlug)}/documents/mine`, undefined, true),
         /** Adds the bill as checked, in the confirmer's name. Once only. */

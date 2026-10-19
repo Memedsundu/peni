@@ -1,4 +1,4 @@
-import { OpenAiModel } from "@peni/ai";
+import { OpenAiModel, OpenAiTranscriber } from "@peni/ai";
 import { createPrismaClient, createPrismaStores } from "@peni/db";
 import { PeniApp, inMemoryStores } from "./app";
 import { JoseIdTokenVerifier, OutboxEmailSender, ResendEmailSender, type EmailSender } from "./customer-auth";
@@ -18,8 +18,9 @@ const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp>; pen
  * Resend, the demo keeps sign-in emails in an outbox instead of sending them.
  * PENI_PUBLIC_URL is the site's address for links in emails (gift emails need it).
  * OPENAI_API_KEY turns the assistant on (OPENAI_MODEL picks the model, gpt-5-mini by
- * default); without it the demo uses a stand-in that doesn't read, and anything else
- * runs with the assistant off.
+ * default, and OPENAI_TRANSCRIBE_MODEL the one that turns speech into text for quick
+ * entry, gpt-4o-mini-transcribe by default); without it the demo uses a stand-in that
+ * doesn't read, and anything else runs with the assistant off.
  * PENI_INBOX_DOMAIN turns on each café's address for bills (piece 26), with Resend's
  * inbound email: RESEND_WEBHOOK_SECRET signs its webhook and RESEND_API_KEY fetches
  * attachments. Without them the demo shows addresses that only take its sample email.
@@ -47,7 +48,12 @@ export function demoOutbox(): OutboxEmailSender | null {
 /** Left out (undefined) when there's no key, so the app picks the demo's stand-in or turns the assistant off. */
 function aiFromEnv() {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
-  return apiKey ? { model: new OpenAiModel({ apiKey, model: process.env.OPENAI_MODEL?.trim() || undefined }), mode: "on" as const } : undefined;
+  if (!apiKey) return undefined;
+  return {
+    model: new OpenAiModel({ apiKey, model: process.env.OPENAI_MODEL?.trim() || undefined }),
+    mode: "on" as const,
+    transcriber: new OpenAiTranscriber({ apiKey, model: process.env.OPENAI_TRANSCRIBE_MODEL?.trim() || undefined }),
+  };
 }
 
 /** Undefined (the demo's sample-only addresses, or none) unless email can really come in. */

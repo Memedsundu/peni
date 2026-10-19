@@ -79,11 +79,49 @@ function looksLikeCsv(bytes: Uint8Array): boolean {
   return /[;,\t|]/.test(first);
 }
 
+// ─────────────────────────────────────────────── quick entry (plan piece 28)
+
+/**
+ * "Tesisatçıya 450 lira nakit ödedim": a line typed or said instead of a document (A7).
+ * Speech is turned into text first and shown to the person, who can fix it before it's
+ * read; the recording itself is never kept.
+ */
+export interface QuickEntry {
+  text: string;
+  /** Whether it was said rather than typed. */
+  voice: boolean;
+}
+
+export const QUICK_TEXT_MAX = 500;
+/** One entry may hold a few expenses ("…ve simitçiye 120"); each becomes its own draft. */
+export const QUICK_DRAFTS_MAX = 5;
+/** Quick entries a café may send in a day, typed or said. */
+export const QUICK_PER_DAY = 200;
+/** A recording: about a minute of speech from a phone or a laptop. */
+export const MAX_AUDIO_BYTES = 5 * 1024 * 1024;
+export const AUDIO_SECONDS_MAX = 60;
+
+export type AudioType = "audio/webm" | "audio/ogg" | "audio/mp4" | "audio/mpeg" | "audio/wav";
+
+/** What a recording really is, from its first bytes; null for anything else. */
+export function sniffAudioType(bytes: Uint8Array): AudioType | null {
+  const at = (i: number, text: string) => [...text].every((c, k) => bytes[i + k] === c.charCodeAt(0));
+  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return "audio/webm";
+  if (at(0, "OggS")) return "audio/ogg";
+  if (at(4, "ftyp")) return "audio/mp4";
+  if (at(0, "RIFF") && at(8, "WAVE")) return "audio/wav";
+  if (at(0, "ID3") || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)) return "audio/mpeg";
+  return null;
+}
+
+/** How the person said a bill was paid; "credit" is the café's credit card. */
+export type ProposalPaidMethod = "cash" | "card" | "bank" | "credit";
+
 // ─────────────────────────────────────────────── drafts
 
 /**
  * What a draft is: a bill to add, or a statement or Z report to check against Peni's own
- * records (piece 27). Quick entries follow (piece 28).
+ * records (piece 27). A quick entry (piece 28) becomes a bill draft too.
  */
 export type DraftKind = "bill" | "statement" | "zreport";
 export type DraftStatus = "open" | "confirmed" | "dismissed";
@@ -103,6 +141,8 @@ export interface BillProposal {
   lines: ProposalLine[];
   /** The KDV printed on it, per rate (piece 25). */
   kdv: BillKdv[];
+  /** A quick entry that said it was already paid, and how (piece 28); null when it didn't say. */
+  paid?: { method: ProposalPaidMethod } | null;
 }
 
 export interface ProposalLine {
@@ -147,6 +187,8 @@ interface DraftBase {
   doubts: string[];
   /** The document it was read from. */
   documentId: string | null;
+  /** Or what was typed or said, for a quick entry (piece 28). */
+  entry: QuickEntry | null;
   jobId: string | null;
   createdAt: Date;
   decidedById: string | null;
@@ -232,7 +274,15 @@ export const JOB_LOCK_MS = 5 * 60_000;
  * to the model (what for, which model, tokens, how long, whether it worked), each draft
  * written, confirmed or dismissed, and each job that gave up.
  */
-export type AiEventKind = "document.uploaded" | "email.received" | "ai.call" | "draft.created" | "draft.confirmed" | "draft.dismissed" | "job.failed";
+export type AiEventKind =
+  | "document.uploaded"
+  | "email.received"
+  | "note.sent"
+  | "ai.call"
+  | "draft.created"
+  | "draft.confirmed"
+  | "draft.dismissed"
+  | "job.failed";
 
 export interface AiEvent {
   id: string;

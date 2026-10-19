@@ -6,6 +6,7 @@ import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
 import { Field, Segmented } from "../controls";
 import { billHref, BillForm } from "../faturalar/bills";
+import { QuickEntry } from "../quick";
 import { Repeats, ScanInput, useScan } from "../scan";
 import { outcomeText, Samples, StatementCheck, ZCheck } from "./checks";
 import { Emails, InboxCard } from "./inbox";
@@ -96,6 +97,9 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
             {data.ai === "off" && <Notice>{t("drOff")}</Notice>}
             {done && <Decided t={t} slug={cafe.slug} draft={done} />}
             {data.canUpload && <Upload t={t} lang={lang} slug={cafe.slug} demo={data.ai === "demo"} onUploaded={() => void load()} />}
+            {data.canUpload && data.ai !== "off" && (
+              <QuickEntry t={t} lang={lang} slug={cafe.slug} canSpeak={data.canSpeak} checkHere={data.canConfirm} onSent={() => void load()} />
+            )}
             {data.ai !== "off" && inbox && (
               <InboxCard
                 t={t}
@@ -189,6 +193,7 @@ function Waiting({ t, lang, data, onOpen }: { t: T; lang: Lang; data: DraftsDTO;
             <span className="truncate text-lg font-medium">{d.title}</span>
             <span className="text-sm text-muted">
               {when(d.createdAt, lang)}
+              {d.entry ? ` · “${d.entry.text}”` : ""}
               {d.document?.name ? ` · ${d.document.name}` : ""}
               {d.document?.sender ? ` · ${fill(t("drByEmail"), { sender: d.document.sender })}` : ""}
               {d.doubts.length > 0 && <span className="text-red"> · {fill(t("drNotes"), { n: d.doubts.length })}</span>}
@@ -208,8 +213,11 @@ function ReadingRow({ t, lang, r }: { t: T; lang: Lang; r: ReadingDTO }) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-3 py-4">
       <span className="flex min-w-0 flex-col gap-1">
-        <span className="truncate text-lg font-medium">{r.documentName || t("drDocument")}</span>
-        <span className="text-sm text-muted">{when(r.at, lang)}</span>
+        <span className="truncate text-lg font-medium">{r.source === "note" ? `“${r.documentName}”` : r.documentName || t("drDocument")}</span>
+        <span className="text-sm text-muted">
+          {when(r.at, lang)}
+          {r.source === "note" ? ` · ${t("qeTitle")}` : ""}
+        </span>
       </span>
       {r.state === "reading" ? (
         <span className="flex items-center gap-2 text-sm text-muted" role="status">
@@ -217,7 +225,13 @@ function ReadingRow({ t, lang, r }: { t: T; lang: Lang; r: ReadingDTO }) {
           {t("drReading")}
         </span>
       ) : (
-        <span className="text-sm text-red">{r.state === "notBill" ? t("drNotBill") : `${t("drFailed")}: ${r.error ?? ""}`}</span>
+        <span className="text-sm text-red">
+          {r.state === "notBill" && r.source === "note"
+            ? `${t("qeNoExpense")}${r.error ? `: ${r.error}` : ""}`
+            : r.state === "notBill"
+              ? t("drNotBill")
+              : `${t("drFailed")}: ${r.error ?? ""}`}
+        </span>
       )}
     </li>
   );
@@ -314,6 +328,7 @@ function Check({
 
 function DocumentView({ t, draft }: { t: T; draft: DraftDTO }) {
   const doc = draft.document;
+  if (!doc && draft.entry) return <EntryView t={t} entry={draft.entry} />;
   if (!doc) return <Notice>{t("drNoDocument")}</Notice>;
   const pdf = doc.contentType === "application/pdf";
   // An Excel or CSV statement isn't shown in the page; it downloads.
@@ -341,6 +356,24 @@ function DocumentView({ t, draft }: { t: T; draft: DraftDTO }) {
       <a href={doc.url} target="_blank" rel="noreferrer" className="text-sm text-muted underline underline-offset-4">
         {t("drOpenDocument")}
       </a>
+    </section>
+  );
+}
+
+/** A quick entry's words in place of a document (piece 28). */
+function EntryView({ t, entry }: { t: T; entry: NonNullable<DraftDTO["entry"]> }) {
+  return (
+    <section className="flex flex-col gap-3 rounded-3xl bg-tile p-6 lg:sticky lg:top-6 lg:self-start" aria-label={t(entry.voice ? "qeSaid" : "qeWrote")}>
+      <p className="flex items-center gap-2 text-sm text-muted">
+        {entry.voice && (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+            <rect x="9" y="3" width="6" height="11" rx="3" />
+            <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+          </svg>
+        )}
+        {t(entry.voice ? "qeSaid" : "qeWrote")} · {t("qeTitle")}
+      </p>
+      <blockquote className="font-serif text-2xl leading-snug">“{entry.text}”</blockquote>
     </section>
   );
 }
@@ -396,11 +429,12 @@ function History({ t, lang, slug, data }: { t: T; lang: Lang; slug: string; data
 }
 
 /** What a confirmed bill's log line lists; a statement's or Z report's says its own outcome. */
-const CHANGED = new Set(["supplier", "date", "number", "dueDate", "lines", "kdv"]);
+const CHANGED = new Set(["supplier", "date", "number", "dueDate", "lines", "kdv", "paid"]);
 
 const EVENT: Record<AiLogDTO["events"][number]["kind"], TextKey> = {
   "document.uploaded": "ev_document_uploaded",
   "email.received": "ev_email_received",
+  "note.sent": "ev_note_sent",
   "ai.call": "ev_ai_call",
   "draft.created": "ev_draft_created",
   "draft.confirmed": "ev_draft_confirmed",

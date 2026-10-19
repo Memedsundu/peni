@@ -1,27 +1,39 @@
 import {
   billReadingRequest,
   isAiError,
+  quickReadingRequest,
   readBill,
+  readQuick,
   readStatement,
   readZ,
   ScriptedModel,
+  ScriptedTranscriber,
   statementReadingRequest,
+  TURKISH_WEEKDAYS,
   zReadingRequest,
   type AiModel,
   type AiRequest,
   type BillReading,
+  type QuickReading,
   type ReadBill,
   type StatementReading,
+  type Transcriber,
   type ZReading,
 } from "@peni/ai";
-import type { AiLogDTO, BillDraftDTO, BillProposalDTO, DraftDTO, DraftsDTO, ReadingDTO, UploadDTO, UploadsDTO } from "@peni/api";
+import type { AiLogDTO, BillDraftDTO, BillProposalDTO, DraftDTO, DraftsDTO, HeardDTO, ReadingDTO, UploadDTO, UploadsDTO } from "@peni/api";
 import {
+  AUDIO_SECONDS_MAX,
   DOCUMENT_NAME_MAX,
+  MAX_AUDIO_BYTES,
   MAX_DOCUMENT_BYTES,
+  QUICK_DRAFTS_MAX,
+  QUICK_PER_DAY,
+  QUICK_TEXT_MAX,
   billNumberKey,
   isSheet,
   lineKey,
   localDateKey,
+  sniffAudioType,
   sniffDocumentType,
   startOfLocalDay,
   type AiEvent,
@@ -38,6 +50,7 @@ import {
   type PeniDirectory,
   type Permission,
   type ProposalLine,
+  type QuickEntry,
   type StaffStore,
   type StatementAccount,
   type StockItem,
@@ -58,12 +71,16 @@ import type { StaffContext } from "./staff";
 export type AiMode = "on" | "demo" | "off";
 
 const READ = "document.read";
+/** Reading a quick entry (piece 28). */
+const NOTE = "note.read";
 /** Readings show on Taslaklar for a day; after that, the log has them. */
 const READING_SHOWN_MS = 24 * 3_600_000;
 const RECENT_DRAFTS = 20;
 const LOG_PAGE = 50;
 /** The most stock items the model is shown to match lines against. */
 const STOCK_SHOWN = 300;
+/** The most suppliers a quick entry is matched against (piece 28). */
+const SUPPLIERS_SHOWN = 200;
 /** Two bills from one supplier on one day whose totals are this close look like one bill. */
 const SAME_TOTAL_KURUS = 100;
 
@@ -84,10 +101,11 @@ export class AssistantService {
     private readonly staff: StaffStore,
     private readonly directory: PeniDirectory,
     private readonly checks: ChecksService,
-    private readonly ai: { model: AiModel | null; mode: AiMode },
+    private readonly ai: { model: AiModel | null; mode: AiMode; transcriber?: Transcriber | null },
     private readonly now: () => Date,
   ) {
     jobs.handle(READ, this.read);
+    jobs.handle(NOTE, this.readNote);
   }
 
   get mode(): AiMode {
@@ -131,6 +149,58 @@ export class AssistantService {
     if (await this.sameFile(cafeId, sha256)) return { skipped: "same" };
     const { doc } = await this.intake(cafeId, { ...file, contentType, sha256 }, { by: null, emailId: email.id, sender: email.sender });
     return { documentId: doc.id };
+  }
+
+  /**
+   * Quick entry (piece 28): "Tesisatçıya 450 lira nakit ödedim". Read in the background like
+   * a document; each expense in it becomes a bill draft on Taslaklar. The same key twice
+   * sends it once. A café may send QUICK_PER_DAY of them a day.
+   */
+  async quick(ctx: StaffContext, input: { key: string; text: string; voice?: boolean }): Promise<UploadDTO> {
+    this.require(ctx, "bills.add");
+    if (!this.ai.model) throw new AppError("AI_OFF", "The assistant is off", 409);
+    const text = input.text.replace(/\s+/g, " ").trim().slice(0, QUICK_TEXT_MAX);
+    if (!text) throw new AppError("VALIDATION", "Write something", 400);
+    const cafeId = ctx.cafe.id;
+    const tz = (await this.directory.getSettings(cafeId)).timeZone;
+    const today = startOfLocalDay(this.now(), tz);
+    const sent = await this.store.listJobs(cafeId, { kinds: [NOTE], since: new Date(Math.min(today.getTime(), this.now().getTime() - READING_SHOWN_MS)) });
+    const again = sent.find((j) => j.payload.key === input.key && j.payload.by === ctx.member.id);
+    if (again) return { reading: this.reading(again, String(again.payload.text)), duplicate: null };
+    if (sent.filter((j) => j.createdAt >= today).length >= QUICK_PER_DAY) throw new AppError("QUICK_LIMIT", "That's all the quick entries for today", 429);
+    const job = await this.jobs.add(cafeId, NOTE, { text, voice: !!input.voice, by: ctx.member.id, key: input.key });
+    await this.record({ cafeId, kind: "note.sent", memberId: ctx.member.id, jobId: job.id, detail: text.slice(0, 300) });
+    return { reading: this.reading(job, text), duplicate: null };
+  }
+
+  /**
+   * A short recording, turned into text for the person to read and fix before sending it
+   * with `quick`. The recording isn't kept; the call is logged.
+   */
+  async hear(ctx: StaffContext, bytes: Uint8Array, lang: "tr" | "en"): Promise<HeardDTO> {
+    this.require(ctx, "bills.add");
+    const ears = this.ai.transcriber;
+    if (!this.ai.model || !ears) throw new AppError("VOICE_OFF", "Speech isn't set up", 409);
+    if (bytes.length > MAX_AUDIO_BYTES) throw new AppError("AUDIO_TOO_LARGE", `Speak for at most ${AUDIO_SECONDS_MAX} seconds`, 413);
+    const contentType = sniffAudioType(bytes);
+    if (!contentType) throw new AppError("AUDIO_TYPE", "That isn't a recording", 415);
+    const cafeId = ctx.cafe.id;
+    // Supplier names are hard to hear right; telling the model which ones the café has helps.
+    const names = (await this.billStore.listSuppliers(cafeId)).map((s) => s.name).slice(0, 40);
+    const base = { cafeId, kind: "ai.call" as const, memberId: ctx.member.id, purpose: "voice.hear" };
+    const started = Date.now();
+    try {
+      const heard = await ears.transcribe({ bytes, contentType }, { language: lang, prompt: names.length ? `Tedarikçiler: ${names.join(", ")}.` : undefined });
+      await this.record({ ...base, model: heard.model, inputTokens: heard.inputTokens, outputTokens: heard.outputTokens, ms: heard.ms });
+      const text = heard.text.replace(/\s+/g, " ").trim().slice(0, QUICK_TEXT_MAX);
+      if (!text) throw new AppError("VOICE_EMPTY", "Nothing was heard", 422);
+      return { text };
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      await this.record({ ...base, model: ears.name, ms: Date.now() - started, ok: false, detail: message.slice(0, 300) });
+      throw new AppError("VOICE_FAILED", "Speech couldn't be turned into text", 502);
+    }
   }
 
   private async intake(
@@ -179,14 +249,13 @@ export class AssistantService {
   async mine(ctx: StaffContext): Promise<UploadsDTO> {
     this.require(ctx, "bills.add");
     const cafeId = ctx.cafe.id;
-    const jobs = (await this.store.listJobs(cafeId, { kinds: [READ], since: new Date(this.now().getTime() - READING_SHOWN_MS) }))
+    const jobs = (await this.store.listJobs(cafeId, { kinds: [READ, NOTE], since: new Date(this.now().getTime() - READING_SHOWN_MS) }))
       .filter((j) => j.payload.by === ctx.member.id)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     const uploads: UploadsDTO["uploads"] = [];
     for (const job of jobs) {
-      const documentId = String(job.payload.documentId);
-      const [doc, draft] = await Promise.all([this.store.getDocumentInfo(cafeId, documentId), this.store.getDraftByDocument(cafeId, documentId)]);
-      const base = this.reading(job, doc?.name ?? "");
+      const { name, draft } = await this.sentAs(cafeId, job);
+      const base = this.reading(job, name);
       const state: UploadsDTO["uploads"][number]["state"] = draft
         ? draft.status === "open"
           ? "waiting"
@@ -194,9 +263,32 @@ export class AssistantService {
             ? "saved"
             : "dismissed"
         : base.state;
-      uploads.push({ jobId: job.id, documentName: base.documentName, at: base.at, state, title: draft?.title ?? null, error: draft ? null : base.error });
+      uploads.push({
+        jobId: job.id,
+        source: base.source,
+        documentName: base.documentName,
+        at: base.at,
+        state,
+        title: draft?.title ?? null,
+        error: draft ? null : base.error,
+      });
     }
-    return { ai: this.ai.mode, uploads };
+    return { ai: this.ai.mode, canSpeak: this.canSpeak, uploads };
+  }
+
+  /** What a job was sent as (a document's name, or what was typed or said) and its first draft. */
+  private async sentAs(cafeId: string, job: Job): Promise<{ name: string; draft: Draft | null }> {
+    if (job.kind === NOTE) {
+      const ids = Array.isArray(job.result?.draftIds) ? (job.result.draftIds as string[]) : [];
+      return { name: String(job.payload.text ?? ""), draft: ids[0] ? await this.store.getDraft(cafeId, ids[0]) : null };
+    }
+    const documentId = String(job.payload.documentId);
+    const [doc, draft] = await Promise.all([this.store.getDocumentInfo(cafeId, documentId), this.store.getDraftByDocument(cafeId, documentId)]);
+    return { name: doc?.name ?? "", draft };
+  }
+
+  private get canSpeak(): boolean {
+    return !!this.ai.model && !!this.ai.transcriber;
   }
 
   /** Runs what's waiting. Routes call it after answering, so the person never waits on it. */
@@ -210,7 +302,7 @@ export class AssistantService {
     const [open, decided, jobs, billForm, today] = await Promise.all([
       this.store.listDrafts(cafeId, { status: "open", limit: 100 }),
       this.store.listDrafts(cafeId, { limit: RECENT_DRAFTS + 100 }),
-      this.store.listJobs(cafeId, { kinds: [READ], since: new Date(this.now().getTime() - READING_SHOWN_MS) }),
+      this.store.listJobs(cafeId, { kinds: [READ, NOTE], since: new Date(this.now().getTime() - READING_SHOWN_MS) }),
       this.bills.list(ctx),
       this.today(cafeId),
     ]);
@@ -221,8 +313,7 @@ export class AssistantService {
     const reading: ReadingDTO[] = [];
     for (const job of jobs) {
       if ((job.status === "done" && !job.result?.notBill) || written.has(job.id)) continue;
-      const doc = await this.store.getDocumentInfo(cafeId, String(job.payload.documentId));
-      reading.push(this.reading(job, doc?.name ?? ""));
+      reading.push(this.reading(job, (await this.sentAs(cafeId, job)).name));
     }
     return {
       cafe: { slug: ctx.cafe.slug, name: ctx.cafe.name },
@@ -240,6 +331,7 @@ export class AssistantService {
       canUpload: ctx.permissions.has("bills.add") && this.ai.model !== null,
       canConfirm: ctx.permissions.has("bills.add"),
       canCheck: ctx.permissions.has("cash.manage"),
+      canSpeak: ctx.permissions.has("bills.add") && this.canSpeak,
       billForm,
     };
   }
@@ -248,9 +340,14 @@ export class AssistantService {
    * "Onayla": the bill as the person checked it, added in their name, with the scan it came
    * from. Confirming twice adds it once. A bill that looks already entered needs
    * `allowDuplicate`. Each read line confirmed as a stock item (or unlinked from one) is
-   * remembered for the next bill (piece 25).
+   * remembered for the next bill (piece 25). `paid` pays it in full as it's added, like
+   * "Fatura ekle" (piece 28: a quick entry says how it was paid; the person confirms it).
    */
-  async confirm(ctx: StaffContext, draftId: string, input: BillInput & { allowDuplicate?: boolean }): Promise<BillDraftDTO> {
+  async confirm(
+    ctx: StaffContext,
+    draftId: string,
+    input: BillInput & { allowDuplicate?: boolean; paid?: { method: "cash" | "card" | "bank" | "credit"; from?: "drawer" | "reserve"; paidOn?: string } },
+  ): Promise<BillDraftDTO> {
     this.require(ctx, "assistant.use");
     this.require(ctx, "bills.add");
     const draft = await this.draft(ctx, draftId);
@@ -266,17 +363,19 @@ export class AssistantService {
       if (earlier) throw new AppError("BILL_DUPLICATE", "This bill looks already entered", 409);
     }
     // The draft's id is the bill's key: a second confirm finds the same bill.
-    const { allowDuplicate, ...fields } = input;
+    // Paid as the draft is confirmed: on the bill's own day unless said (a quick entry's "dün nakit ödedim").
+    const { allowDuplicate, paid, ...fields } = input;
     const bill = await this.bills.add(ctx, {
       ...fields,
       lines: fields.lines.map(({ from: _from, ...l }) => l),
       key: draft.id,
       documentId: draft.documentId,
+      ...(paid ? { paid: { paidOn: fields.date, ...paid } } : {}),
       allowDuplicate: allowDuplicate || draft.status !== "open",
     });
     if (draft.status === "open") {
       await this.learn(ctx.cafe.id, draft.proposal, input);
-      const changed = changedFields(draft.proposal, input);
+      const changed = changedFields(draft.proposal, input, input.paid?.method ?? null);
       Object.assign(draft, { status: "confirmed", decidedById: ctx.member.id, decidedAt: this.now(), resultId: bill.id, changed });
       await this.store.saveDraft(draft);
       await this.record({
@@ -450,6 +549,7 @@ export class AssistantService {
       proposal,
       doubts: [...read.doubts, ...doubts],
       documentId,
+      entry: null,
       jobId: job.id,
       createdAt: this.now(),
       decidedById: null,
@@ -469,6 +569,68 @@ export class AssistantService {
   };
 
   /**
+   * A quick entry (piece 28): the model is shown the café's suppliers and stock items and
+   * picks out each expense; each becomes a bill draft with what was typed or said beside it.
+   */
+  private readNote: JobHandler = async (job: Job) => {
+    const cafeId = job.cafeId;
+    const by = typeof job.payload.by === "string" ? job.payload.by : null;
+    const entry: QuickEntry = { text: String(job.payload.text ?? ""), voice: job.payload.voice === true };
+    if (!this.ai.model) return { error: "AI_OFF", retry: false };
+    const [items, suppliers, settings] = await Promise.all([
+      this.stock.listItems(cafeId),
+      this.billStore.listSuppliers(cafeId),
+      this.directory.getSettings(cafeId),
+    ]);
+    const shown = items
+      .filter((i) => !i.archivedAt)
+      .sort((a, b) => a.name.localeCompare(b.name, "tr"))
+      .slice(0, STOCK_SHOWN);
+    const known = [...suppliers].sort((a, b) => a.name.localeCompare(b.name, "tr")).slice(0, SUPPLIERS_SHOWN);
+    const today = localDateKey(this.now(), settings.timeZone);
+    const weekday = TURKISH_WEEKDAYS[new Date(`${today}T12:00:00Z`).getUTCDay()]!;
+    const asked = await this.ask(job, by, quickReadingRequest(entry, { today, weekday, suppliers: known, items: shown }));
+    if ("error" in asked) return asked;
+    const reading: QuickReading = asked.output;
+    const read = readQuick(reading, { today, suppliers: known.length, items: shown.length, max: QUICK_DRAFTS_MAX });
+    if (!read.expenses.length) return { result: { notBill: true, why: read.doubts[0] ?? null } };
+
+    const draftIds: string[] = [];
+    for (const expense of read.expenses) {
+      // A supplier the model picked from the list is named as the café has it, so it's matched.
+      const named = expense.supplierIndex !== null ? { ...expense, supplierName: known[expense.supplierIndex]!.name } : expense;
+      const { proposal, doubts } = await this.propose(cafeId, named, shown, null);
+      proposal.paid = expense.paid ? { method: expense.paid } : null;
+      const draft: BillDraft = {
+        id: `drf_${randomUUID()}`,
+        cafeId,
+        kind: "bill",
+        status: "open",
+        title: titleOf(proposal, named, proposal.lines[0]?.name),
+        proposal,
+        doubts: [...read.doubts, ...expense.doubts, ...doubts],
+        documentId: null,
+        entry,
+        jobId: job.id,
+        createdAt: this.now(),
+        decidedById: null,
+        decidedAt: null,
+        resultId: null,
+        changed: [],
+        dismissReason: null,
+        duplicateOf: null,
+        outcome: null,
+      };
+      draft.duplicateOf =
+        (await this.duplicateBill(cafeId, { ...proposal, totalKurus: lineSum(proposal) }, draft.id)) ?? (await this.duplicateDraft(cafeId, proposal, draft.id));
+      await this.store.saveDraft(draft);
+      await this.record({ cafeId, kind: "draft.created", memberId: by, purpose: NOTE, draftId: draft.id, jobId: job.id, detail: draft.title });
+      draftIds.push(draft.id);
+    }
+    return { result: { draftIds } };
+  };
+
+  /**
    * Asks the model, and logs the call either way. Statements and Z reports in the demo are
    * answered by `demo` instead, from the café's own numbers.
    */
@@ -485,7 +647,7 @@ export class AssistantService {
       kind: "ai.call" as const,
       memberId: by,
       purpose: request.purpose,
-      documentId: String(job.payload.documentId),
+      documentId: typeof job.payload.documentId === "string" ? job.payload.documentId : null,
       jobId: job.id,
     };
     const started = Date.now();
@@ -551,6 +713,7 @@ export class AssistantService {
       cafeId: job.cafeId,
       status: "open",
       documentId,
+      entry: null,
       jobId: job.id,
       createdAt: this.now(),
       decidedById: null,
@@ -689,7 +852,9 @@ export class AssistantService {
 
   private reading(job: Job, documentName: string): ReadingDTO {
     const state = job.status === "failed" ? "failed" : job.result?.notBill ? "notBill" : "reading";
-    return { jobId: job.id, documentName, at: job.createdAt.toISOString(), state, error: state === "failed" ? friendlyError(job.lastError) : null };
+    const source = job.kind === NOTE ? "note" : "document";
+    const why = state === "failed" ? friendlyError(job.lastError, source) : state === "notBill" && typeof job.result?.why === "string" ? job.result.why : null;
+    return { jobId: job.id, source, documentName, at: job.createdAt.toISOString(), state, error: why };
   }
 
   private async draft(ctx: StaffContext, id: string): Promise<Draft> {
@@ -717,6 +882,7 @@ export class AssistantService {
             sender: doc.sender,
           }
         : null,
+      entry: d.entry,
       decidedBy: who,
       decidedAt: d.decidedAt?.toISOString() ?? null,
       resultId: d.resultId,
@@ -734,7 +900,7 @@ export class AssistantService {
       };
     if (d.kind === "zreport")
       return { ...base, kind: "zreport", zreport: d.status === "open" ? await this.checks.zreport(ctx, d.proposal) : null, outcome: outcomeDto(d.outcome) };
-    return { ...base, kind: "bill", proposal: d.proposal as BillProposalDTO };
+    return { ...base, kind: "bill", proposal: { ...d.proposal, paid: d.proposal.paid ?? null } as BillProposalDTO };
   }
 
   private async names(ids: string[]): Promise<Map<string, string>> {
@@ -834,9 +1000,9 @@ function learnedMatches(all: LineMatch[], supplierId: string | null): Map<string
 
 const lineSum = (p: Pick<BillProposal, "lines">) => p.lines.reduce((s, l) => s + l.totalKurus, 0);
 
-function titleOf(p: BillProposal, read: ReadBill): string {
+function titleOf(p: BillProposal, read: ReadBill, fallback = "Fatura"): string {
   const total = p.totalKurus ?? read.lines.reduce((s, l) => s + l.totalKurus, 0);
-  return [p.supplierName ?? "Fatura", total ? formatTL(total) : null].filter(Boolean).join(" · ").slice(0, 120);
+  return [p.supplierName ?? fallback, total ? formatTL(total) : null].filter(Boolean).join(" · ").slice(0, 120);
 }
 
 /** "12/14 satır eşleşti" or "Z raporu: 1 fark", for the log. */
@@ -848,7 +1014,7 @@ function checkedDetail(kind: "statement" | "zreport", o: CheckOutcome): string {
 }
 
 /** Which parts of the bill the person changed before confirming, for the log. */
-function changedFields(p: BillProposal, input: BillInput): string[] {
+function changedFields(p: BillProposal, input: BillInput, paid: string | null): string[] {
   const out: string[] = [];
   if ((p.supplierId ?? null) !== (input.supplierId ?? null)) out.push("supplier");
   if ((p.date ?? null) !== input.date) out.push("date");
@@ -859,14 +1025,15 @@ function changedFields(p: BillProposal, input: BillInput): string[] {
   if (p.lines.map(line).join("\n") !== input.lines.map(line).join("\n")) out.push("lines");
   const kdv = (k: { ratePct: number; amountKurus: number }[] = []) => k.map((x) => `${x.ratePct}:${x.amountKurus}`).join(",");
   if (kdv(p.kdv) !== kdv(input.kdv)) out.push("kdv");
+  if ((p.paid?.method ?? null) !== paid) out.push("paid");
   return out;
 }
 
-function friendlyError(error: string | null): string {
+function friendlyError(error: string | null, source: "document" | "note" = "document"): string {
   if (error?.startsWith("AI_UNAVAILABLE")) return "Asistana şu an ulaşılamadı.";
   if (error?.startsWith("AI_OFF")) return "Asistan kapalı.";
-  if (error?.startsWith("AI_REJECTED")) return "Asistan bu belgeyi kabul etmedi.";
-  return "Belge okunamadı.";
+  if (error?.startsWith("AI_REJECTED")) return source === "note" ? "Asistan bu notu kabul etmedi." : "Asistan bu belgeyi kabul etmedi.";
+  return source === "note" ? "Not okunamadı." : "Belge okunamadı.";
 }
 
 /**
@@ -876,6 +1043,7 @@ function friendlyError(error: string | null): string {
  */
 export function demoModel(today: () => string): AiModel {
   return new ScriptedModel((request) => {
+    if (request.purpose === NOTE) return demoQuick(request.parts.map((p) => (p.type === "text" ? p.text : "")));
     if (request.purpose !== READ) return {};
     const list = request.parts.find((p) => p.type === "text")?.text ?? "";
     // The file's name says what a sample is (piece 27): "z-raporu-….pdf", "banka-ekstresi-….pdf".
@@ -925,4 +1093,77 @@ export function demoModel(today: () => string): AiModel {
       doubts: ["Demo: belge gerçekten okunmadı, bu örnek bir okuma."],
     } satisfies BillReading;
   }, "demo");
+}
+
+/** What the demo "hears" (piece 28): there's no recording to listen to without a key. */
+export const DEMO_HEARD = "Dün tesisatçıya 450 lira nakit ödedim";
+
+export function demoTranscriber(): Transcriber {
+  return new ScriptedTranscriber(() => DEMO_HEARD, "demo");
+}
+
+/**
+ * The demo's reading of a quick entry: amounts, "nakit"/"kart"/"havale", "dün", and who it
+ * went to are picked out by rule, so typing something of your own does something sensible.
+ * "…, simitçiye 120" makes a second expense.
+ */
+function demoQuick([context = "", said = ""]: string[]): QuickReading {
+  const today = /Today is (\d{4}-\d{2}-\d{2})/.exec(context)?.[1] ?? "";
+  const list = context.split("Stock items:")[0]!.split("Suppliers:")[1] ?? "";
+  const suppliers = [...list.matchAll(/^(\d+)\. (.+)$/gm)];
+  const text = said.replace(/^What they (?:wrote|said):\n/, "");
+  const lower = trLower(text);
+  const yesterday = today ? new Date(Date.parse(`${today}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10) : today;
+  const paidOf = (t: string): QuickReading["expenses"][number]["paid"] | null =>
+    /nakit|elden|kasadan/.test(t)
+      ? "cash"
+      : /kredi kart/.test(t)
+        ? "credit"
+        : /kart/.test(t)
+          ? "card"
+          : /havale|eft|bankadan/.test(t)
+            ? "bank"
+            : /borç|veresiye|sonra öde/.test(t)
+              ? "unpaid"
+              : null;
+  const everyPaid = paidOf(lower) ?? "unknown";
+  const parts = lower.split(/,|\bve\b/).filter((p) => /\d/.test(p));
+  const expenses = parts.flatMap((part) => {
+    const m = /(\d[\d.]*(?:,\d+)?)\s*(bin)?/.exec(part);
+    if (!m) return [];
+    const total = Number(m[1]!.replace(/\./g, "").replace(",", ".")) * (m[2] ? 1000 : 1);
+    const word = part
+      .slice(0, m.index)
+      .split(/\s+/)
+      .filter((w) => w && !/^(dün|bugün|sabah|akşam|öğlen)$/.test(w))
+      .join(" ")
+      .replace(/'?y?[ae]$/, "");
+    const name = word ? word.charAt(0).toLocaleUpperCase("tr-TR") + word.slice(1) : "Gider";
+    const supplier = suppliers.find((s) => trLower(s[2]!).split(/\s+/)[0] === trLower(name).split(/\s+/)[0]);
+    const category = /tesisat|usta|tamir|elektrikçi|temizlik/.test(part)
+      ? "services"
+      : /süt|simit|kahve|şeker|çay|un\b|meyve/.test(part)
+        ? "ingredients"
+        : /bardak|peçete|deterjan|poşet/.test(part)
+          ? "supplies"
+          : /kira/.test(part)
+            ? "rent"
+            : /fatura|internet|doğalgaz|su /.test(part)
+              ? "utilities"
+              : "other";
+    return [
+      {
+        supplier: supplier ? Number(supplier[1]) : null,
+        supplierName: supplier ? null : name,
+        date: /dün/.test(lower) ? yesterday : today,
+        dueDate: null,
+        paid: paidOf(part) ?? everyPaid,
+        lines: [{ name: category === "services" ? "İşçilik" : name, quantity: null, unit: null, total, category, stockItem: null, stockQuantity: null }],
+      } satisfies QuickReading["expenses"][number],
+    ];
+  });
+  return {
+    expenses,
+    doubts: expenses.length ? ["Demo: not gerçekten okunmadı; tutar, gün ve ödeme şekli basit kurallarla çıkarıldı."] : ["Bunda bir tutar bulamadım."],
+  };
 }

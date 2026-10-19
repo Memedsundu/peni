@@ -151,27 +151,38 @@ export class BillService {
   /**
    * "Fatura ekle". Stock lines add their amount to the item and set its price, unless a
    * newer bill already priced it. The same `key` twice adds it once. `paid` marks it paid
-   * on the spot, which needs "bills.manage". A number the supplier's bills already have
-   * stops it (piece 25's duplicate guard) unless `allowDuplicate` says it's another bill.
+   * on the spot, which needs "bills.manage": today unless `paidOn` says another day since
+   * the bill's, and by the café's credit card too (piece 28, "debts.card"). A number the
+   * supplier's bills already have stops it (piece 25's duplicate guard) unless
+   * `allowDuplicate` says it's another bill.
    */
   async add(
     ctx: StaffContext,
     input: BillInput & {
       key: string;
-      paid?: { method: BillPayMethod; from?: "drawer" | "reserve" };
+      paid?: { method: "cash" | "card" | "bank" | "credit"; from?: "drawer" | "reserve"; paidOn?: string };
       allowDuplicate?: boolean;
       /** The scan it was confirmed from; only the assistant sets it. */
       documentId?: string | null;
     },
   ): Promise<BillDTO> {
     this.require(ctx, "bills.add");
-    if (input.paid) this.require(ctx, "bills.manage");
+    if (input.paid) {
+      this.require(ctx, "bills.manage");
+      this.requireFor(ctx, input.paid.method);
+    }
     const cafeId = ctx.cafe.id;
     const existing = await this.store.findBillByKey(cafeId, input.key);
     if (existing) return this.dto(ctx, existing);
     const today = await this.today(cafeId);
     const fields = await this.fields(ctx, input, today, null);
     await this.money.assertOpen(cafeId, fields.date);
+    const paidOn = input.paid?.paidOn ?? today;
+    if (input.paid) {
+      if (!validDate(paidOn) || paidOn > today || paidOn < fields.date) throw new AppError("PAID_ON_INVALID", "Check the day it was paid", 400);
+      await this.money.assertOpen(cafeId, paidOn);
+      if (input.paid.method === "credit" && !(await this.debts.getCard(cafeId))) throw new AppError("CARD_NOT_SET", "Set up the credit card first", 409);
+    }
     if (!input.allowDuplicate && (await this.sameNumber(cafeId, fields.supplierId, fields.number))) {
       throw new AppError("BILL_DUPLICATE", "This supplier already has a bill with this number", 409);
     }
@@ -198,10 +209,10 @@ export class BillService {
       const again = await this.store.findBillByKey(cafeId, input.key);
       if (again) return again;
       // The money moves first: an empty drawer stops it before anything is written.
-      const account = input.paid ? await this.money.accountFor(ctx, input.paid.method, input.paid.from, today) : null;
-      const payment = input.paid ? this.payment(ctx, bill, bill.totalKurus, input.paid.method, today, account) : null;
+      const account = input.paid ? await this.money.accountFor(ctx, input.paid.method, input.paid.from, paidOn) : null;
+      const payment = input.paid ? this.payment(ctx, bill, bill.totalKurus, input.paid.method, paidOn, account) : null;
       if (payment) {
-        await this.money.post(ctx, { source: `bill_payment:${payment.id}`, account, amountKurus: -payment.amountKurus, kind: "bill", day: today, label: await this.label(bill) });
+        await this.money.post(ctx, { source: `bill_payment:${payment.id}`, account, amountKurus: -payment.amountKurus, kind: "bill", day: paidOn, label: await this.label(bill) });
       }
       await this.store.saveBill(bill);
       if (payment) await this.store.addPayment(payment);

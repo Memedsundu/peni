@@ -14,6 +14,7 @@ import type {
   Job,
   JobStatus,
   LineMatch,
+  QuickEntry,
   StoredDocument,
 } from "@peni/core";
 import type { Db } from "./db";
@@ -28,6 +29,7 @@ const toDraft = (r: DraftRow): Draft =>
     proposal: r.proposal as unknown as BillProposal,
     duplicateOf: (r.duplicateOf as unknown as DuplicateRef | null) ?? null,
     outcome: (r.outcome as unknown as CheckOutcome | null) ?? null,
+    entry: (r.entry as unknown as QuickEntry | null) ?? null,
   }) as Draft;
 const toJob = (r: JobRow): Job => ({
   ...r,
@@ -86,6 +88,7 @@ export class PrismaAssistantStore implements AssistantStore {
       proposal: json(draft.proposal),
       duplicateOf: draft.duplicateOf ? json(draft.duplicateOf) : Prisma.DbNull,
       outcome: draft.outcome ? json(draft.outcome) : Prisma.DbNull,
+      entry: draft.entry ? json(draft.entry) : Prisma.DbNull,
     };
     await this.db().aiDraft.upsert({ where: { id: draft.id }, create: data, update: data });
   }

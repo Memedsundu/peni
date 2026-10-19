@@ -195,10 +195,10 @@ export function MyUploads({ t, lang, data }: { t: T; lang: Lang; data: UploadsDT
       {data.uploads.map((u) => (
         <li key={u.jobId} className="flex flex-wrap items-center justify-between gap-3 py-4">
           <span className="flex min-w-0 flex-col gap-1">
-            <span className="truncate text-lg font-medium">{u.title ?? (u.documentName || t("drDocument"))}</span>
+            <span className="truncate text-lg font-medium">{u.title ?? (u.source === "note" ? `“${u.documentName}”` : u.documentName || t("drDocument"))}</span>
             <span className="text-sm text-muted">
               {when(u.at, lang)}
-              {u.title && u.documentName ? ` · ${u.documentName}` : ""}
+              {u.title && u.documentName ? ` · ${u.source === "note" ? `“${u.documentName}”` : u.documentName}` : ""}
             </span>
           </span>
           <span
@@ -206,8 +206,8 @@ export function MyUploads({ t, lang, data }: { t: T; lang: Lang; data: UploadsDT
             className={`flex items-center gap-2 text-sm ${u.state === "failed" || u.state === "notBill" ? "text-red" : u.state === "saved" ? "text-green" : "text-muted"}`}
           >
             {u.state === "reading" && <span className="size-3 animate-pulse rounded-full bg-green" aria-hidden="true" />}
-            {t(`up_${u.state}` as TextKey)}
-            {u.state === "failed" && u.error ? `: ${u.error}` : ""}
+            {u.state === "notBill" && u.source === "note" ? t("qeNoExpense") : t(`up_${u.state}` as TextKey)}
+            {(u.state === "failed" || (u.state === "notBill" && u.source === "note")) && u.error ? `: ${u.error}` : ""}
           </span>
         </li>
       ))}

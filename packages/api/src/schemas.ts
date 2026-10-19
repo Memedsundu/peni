@@ -336,16 +336,29 @@ const lender = z.object({ memberId: z.string().min(1).max(100).nullable().option
 /** Cash comes out of the drawer or the reserve (piece 20); left out, the drawer when it's open. */
 const cashFrom = z.enum(["drawer", "reserve"]);
 
+/**
+ * Paid in full as it's added: cash, card or bank, or the café's credit card (piece 28, which
+ * needs "debts.card"). `paidOn` is today unless said, never before the bill's date.
+ */
+const paidNow = z.object({ method: z.enum(["cash", "card", "bank", "credit"]), from: cashFrom.optional(), paidOn: billDay.optional() });
+
 /** `allowDuplicate`: the supplier already has a bill with this number, and this is another one anyway (piece 25). */
 export const addBillSchema = z.object({
   key: actionKey,
   ...billFields,
-  paid: z.object({ method: payMethod, from: cashFrom.optional() }).optional(),
+  paid: paidNow.optional(),
   allowDuplicate: z.boolean().optional(),
 });
 
 /** "Onayla": a draft bill as the person checked it; it's added in their name. */
-export const confirmDraftSchema = z.object({ ...billFields, allowDuplicate: z.boolean().optional() });
+export const confirmDraftSchema = z.object({ ...billFields, allowDuplicate: z.boolean().optional(), paid: paidNow.optional() });
+
+/** Quick entry (piece 28): a line typed, or said and read back, for the assistant to draft expenses from. */
+export const quickEntrySchema = z.object({
+  key: actionKey,
+  text: z.string().trim().min(1, "Bir şey yaz").max(500, "En çok 500 karakter"),
+  voice: z.boolean().optional(),
+});
 
 export const dismissDraftSchema = z.object({ reason: optionalText(200) });
 
@@ -681,5 +694,6 @@ export type AlertEmailInput = z.input<typeof alertEmailSchema>;
 export type ConfirmDraftInput = z.input<typeof confirmDraftSchema>;
 export type DismissDraftInput = z.input<typeof dismissDraftSchema>;
 export type CheckDraftInput = z.input<typeof checkDraftSchema>;
+export type QuickEntryInput = z.input<typeof quickEntrySchema>;
 export type CheckSampleInput = z.input<typeof checkSampleSchema>;
 export type InboxSettingsInput = z.input<typeof inboxSettingsSchema>;
