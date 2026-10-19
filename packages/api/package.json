@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Peni HTTP contract: zod schemas, DTO types and a typed fetch client shared by web and mobile.",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./customer-text": "./src/customer-text.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
