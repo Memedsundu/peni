@@ -13,6 +13,7 @@ import type {
   StaffDashboardDTO,
   StaffMeDTO,
   StaffSessionDTO,
+  StaffMenuDTO,
   TeamDTO,
   TillDTO,
   TillDeviceDTO,
@@ -28,6 +29,10 @@ import type {
   EmailVerifyInput,
   PinSignInInput,
   SaveRolesInput,
+  AddProductInput,
+  MenuCategoryInput,
+  MenuOrderInput,
+  UpdateProductInput,
   StaffSignInInput,
   UpdateStaffInput,
   SendGiftInput,
@@ -187,6 +192,24 @@ export function createPeniClient(options: PeniClientOptions) {
         call<{ devices: TillDeviceDTO[] }>("POST", `/staff/${slug(cafeSlug)}/devices/${slug(deviceId)}/revoke`, {}, true),
       roles: (cafeSlug: string) => call<RolesDTO>("GET", `/staff/${slug(cafeSlug)}/roles`, undefined, true),
       saveRoles: (cafeSlug: string, input: SaveRolesInput) => call<RolesDTO>("POST", `/staff/${slug(cafeSlug)}/roles`, input, true),
+      /** Menü: every change answers with the whole menu. Needs "menu.edit". */
+      menu: {
+        get: (cafeSlug: string) => call<StaffMenuDTO>("GET", `/staff/${slug(cafeSlug)}/menu`, undefined, true),
+        addCategory: (cafeSlug: string, input: MenuCategoryInput) =>
+          call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/categories`, input, true),
+        renameCategory: (cafeSlug: string, categoryId: string, input: MenuCategoryInput) =>
+          call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/categories/${slug(categoryId)}`, input, true),
+        /** Only an empty category (CATEGORY_NOT_EMPTY otherwise). */
+        deleteCategory: (cafeSlug: string, categoryId: string) =>
+          call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/categories/${slug(categoryId)}/delete`, {}, true),
+        addProduct: (cafeSlug: string, input: AddProductInput) =>
+          call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products`, input, true),
+        /** Send only what changes; `removed` takes it off the menu or brings it back. */
+        updateProduct: (cafeSlug: string, productId: string, input: UpdateProductInput) =>
+          call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products/${slug(productId)}`, input, true),
+        reorder: (cafeSlug: string, input: MenuOrderInput) =>
+          call<StaffMenuDTO>("POST", `/staff/${slug(cafeSlug)}/menu/order`, input, true),
+      },
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>
         call<{ balancePeni: number }>("POST", `/staff/${slug(cafeSlug)}/askida/till`, input, true),

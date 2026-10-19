@@ -62,6 +62,41 @@ export const updateProfileSchema = z.object({
   profileVisible: z.boolean().optional(),
 });
 
+// ─────────────────────────────────────────────── menu (plan piece 5)
+
+const menuName = z.string().trim().min(1, "Bir ad yaz").max(60);
+/** Kuruş, so 85,50 TL is 8550. Up to 100.000 TL. */
+const priceKurus = z.number().int().min(0).max(10_000_000);
+const menuDescription = z.string().trim().max(280).nullable();
+const imageUrl = z.string().trim().url().startsWith("https://").max(2000).nullable();
+
+export const menuCategorySchema = z.object({ name: menuName });
+
+export const addProductSchema = z.object({
+  name: menuName,
+  categoryId: z.string().min(1),
+  priceKurus,
+  available: z.boolean().optional(),
+  description: menuDescription.optional(),
+  imageUrl: imageUrl.optional(),
+});
+
+/** Send only what changes. `removed: true` takes it off the menu; `false` brings it back. */
+export const updateProductSchema = z.object({
+  name: menuName.optional(),
+  categoryId: z.string().min(1).optional(),
+  priceKurus: priceKurus.optional(),
+  available: z.boolean().optional(),
+  description: menuDescription.optional(),
+  imageUrl: imageUrl.optional(),
+  removed: z.boolean().optional(),
+});
+
+/** Categories top to bottom, or one category's products top to bottom. */
+export const menuOrderSchema = z
+  .object({ categoryIds: z.array(z.string().min(1)).max(100).optional(), productIds: z.array(z.string().min(1)).max(500).optional() })
+  .refine((o) => o.categoryIds || o.productIds, "Sıralama yok");
+
 // ─────────────────────────────────────────────── staff (plan piece 2)
 
 export const staffRoleSchema = z.enum(["owner", "manager", "chef", "barista"]);
@@ -134,6 +169,10 @@ export type SendGiftInput = z.input<typeof sendGiftSchema>;
 export type DonateAskidaInput = z.input<typeof donateAskidaSchema>;
 export type TillDonationInput = z.input<typeof tillDonationSchema>;
 export type MemberLookupInput = z.input<typeof memberLookupSchema>;
+export type MenuCategoryInput = z.input<typeof menuCategorySchema>;
+export type AddProductInput = z.input<typeof addProductSchema>;
+export type UpdateProductInput = z.input<typeof updateProductSchema>;
+export type MenuOrderInput = z.input<typeof menuOrderSchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
 
 export type StaffSignInInput = z.input<typeof staffSignInSchema>;

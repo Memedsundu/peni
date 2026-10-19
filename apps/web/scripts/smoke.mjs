@@ -181,6 +181,21 @@ assert.equal(again.phone, null);
 assert.equal(again.memberId, picked[0].memberId);
 step("Ayşe finds Nazlı (no phone) in Moda's member list and by her Peni kodu, treats her 20 peni, and can send again from recents");
 
+// 5c. Menü: Leyla adds a product, changes its price, takes it off and back; Ece can't edit.
+let menu = (await call("GET", "/staff/moda/menu", { headers: STAFF })).json;
+const cold = menu.categories.find((c) => c.name === "Soğuk");
+assert.ok(cold, "Moda has a Soğuk category");
+menu = (await call("POST", "/staff/moda/menu/products", { headers: STAFF, body: { name: "Soğuk Demleme", categoryId: cold.id, priceKurus: 14_000 } })).json;
+const brew = menu.products.find((p) => p.name === "Soğuk Demleme");
+assert.equal((await call("POST", `/staff/moda/menu/products/${brew.productId}`, { headers: STAFF, body: { priceKurus: 14_500 } })).json.products.find((p) => p.productId === brew.productId).priceKurus, 14_500);
+assert.equal((await call("GET", "/cafes/moda")).json.menu.find((m) => m.productId === brew.productId).priceKurus, 14_500, "customers see the new price");
+assert.equal((await call("POST", "/staff/moda/menu/categories", { headers: STAFF, body: { name: "soğuk" } })).json.error.code, "CATEGORY_EXISTS");
+assert.equal((await call("POST", "/staff/moda/menu/categories", { headers: await staffSignIn("ece@moda.test"), body: { name: "Kahvaltı" } })).json.error.code, "FORBIDDEN");
+menu = (await call("POST", `/staff/moda/menu/products/${brew.productId}`, { headers: STAFF, body: { removed: true } })).json;
+assert.deepEqual(menu.removed.map((p) => p.productId), [brew.productId]);
+assert.ok(!(await call("GET", "/cafes/moda")).json.menu.some((m) => m.productId === brew.productId), "removed products leave the customer page");
+step("Leyla adds Soğuk Demleme, raises its price, which customers see at once, then takes it off the menu; Ece can't edit the menu");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

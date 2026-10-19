@@ -1,5 +1,5 @@
 import { defaultSettings, startOfLocalDay } from "@peni/core";
-import type { Cafe, Post, StaffMember, StaffRole } from "@peni/core";
+import type { Cafe, MenuItem, Post, StaffMember, StaffRole } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -86,7 +86,7 @@ export async function seed(app: PeniApp): Promise<void> {
     hue: null,
   });
 
-  await app.menu.setMenu("cafe_moda", [
+  await seedMenu(app, "cafe_moda", [
     { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 3_000, available: true, description: "İnce belli bardakta" },
     { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 9_000, available: true, description: "Yanında lokum" },
     { productId: "filtre", name: "Filtre Kahve", category: "Sıcak", priceKurus: 8_500, available: true, description: "Bu hafta Etiyopya Yirgacheffe" },
@@ -95,7 +95,7 @@ export async function seed(app: PeniApp): Promise<void> {
     { productId: "simit", name: "Simit", category: "Yiyecek", priceKurus: 2_500, available: true, description: "Sabah fırından" },
     { productId: "cheesecake", name: "San Sebastian", category: "Tatlı", priceKurus: 18_000, available: true, description: null },
   ]);
-  await app.menu.setMenu("cafe_kuzguncuk", [
+  await seedMenu(app, "cafe_kuzguncuk", [
     { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 2_500, available: true, description: "Demlikte, tavşan kanı" },
     { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 8_000, available: true, description: null },
     { productId: "sahlep", name: "Salep", category: "Sıcak", priceKurus: 10_000, available: true, description: "Tarçınlı" },
@@ -413,4 +413,18 @@ function mulberry32(seed: number): () => number {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
   };
+}
+
+/** Categories in the order they first appear, products in the order given. */
+async function seedMenu(app: PeniApp, cafeId: string, items: (Omit<MenuItem, "categoryId" | "sortOrder">)[]): Promise<void> {
+  const ids = new Map<string, string>();
+  for (const [i, item] of items.entries()) {
+    let categoryId = ids.get(item.category);
+    if (!categoryId) {
+      categoryId = `cat_${cafeId.replace(/^cafe_/, "")}_${ids.size + 1}`;
+      ids.set(item.category, categoryId);
+      await app.menu.saveCategory({ id: categoryId, cafeId, name: item.category, sortOrder: ids.size - 1 });
+    }
+    await app.menu.saveProduct(cafeId, { ...item, categoryId, sortOrder: i });
+  }
 }
