@@ -190,6 +190,7 @@ const TEXT = {
 
   // Kasa: the drawer
   drawer: { tr: "Kasa", en: "Drawer" },
+  tasks: { tr: "Görevler", en: "Tasks" },
   drawerOpen: { tr: "Kasa açık", en: "The drawer is open" },
   drawerClosed: { tr: "Kasa kapalı", en: "The drawer is closed" },
   drawerClosedSell: { tr: "Kasa kapalı. Nakit almak için önce kasayı aç.", en: "The drawer is closed. Open it before taking cash." },

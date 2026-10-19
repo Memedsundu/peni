@@ -10,6 +10,8 @@ export const field = "w-full rounded-2xl border border-line bg-paper px-4 py-3 t
 
 /** The panel's pages, in the order the nav shows them, and who may open each. */
 const PAGES = [
+  // Everyone has a Bugün: alerts as far as their role sees, and today's tasks.
+  { key: "bugun", href: "/panel/bugun", label: "navToday", can: () => true },
   { key: "menu", href: "/panel/menu", label: "menu", can: (c: StaffCafeAccessDTO) => has(c, "menu.edit") || has(c, "menu.recipes") },
   { key: "faturalar", href: "/panel/faturalar", label: "bills", can: (c: StaffCafeAccessDTO) => has(c, "bills.view") },
   { key: "borclar", href: "/panel/borclar", label: "debts", can: (c: StaffCafeAccessDTO) => has(c, "debts.view") },
@@ -20,6 +22,7 @@ const PAGES = [
   { key: "vardiyalar", href: "/panel/vardiyalar", label: "shifts", can: (c: StaffCafeAccessDTO) => has(c, "shifts.view") },
   // Everyone sees their own hours and pay; some see everyone's.
   { key: "puantaj", href: "/panel/puantaj", label: "pay", can: () => true },
+  { key: "gorevler", href: "/panel/gorevler", label: "navTasks", can: (c: StaffCafeAccessDTO) => has(c, "tasks.view") },
   { key: "topluluk", href: "/panel/topluluk", label: "community", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },
 ] as const satisfies readonly { key: string; href: string; label: TextKey; can: (c: StaffCafeAccessDTO) => boolean }[];
 
@@ -113,6 +116,10 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
   } else body = children({ cafe, t, lang, signedOut: () => setMe("signed-out") });
 
   const nav = cafe ? PAGES.filter((p) => p.can(cafe)) : [];
+  // On a phone the nav scrolls; keep this page's tab in view.
+  useEffect(() => {
+    document.querySelector<HTMLElement>('nav a[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [nav.length]);
   return (
     <main className={`mx-auto flex min-h-dvh w-full flex-col gap-8 px-4 pt-5 pb-16 sm:px-6 ${wide ? "max-w-4xl" : "max-w-2xl"}`}>
       <header className="flex flex-col gap-3">
@@ -141,7 +148,7 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
                 key={p.key}
                 href={`${p.href}?kafe=${encodeURIComponent(cafe!.slug)}`}
                 aria-current={p.key === page ? "page" : undefined}
-                className={`flex min-h-11 items-center rounded-full px-4 text-sm font-semibold ${p.key === page ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}
+                className={`flex min-h-11 shrink-0 items-center rounded-full px-4 text-sm font-semibold whitespace-nowrap ${p.key === page ? "bg-ink text-paper" : "text-muted hover:text-ink"}`}
               >
                 {t(p.label)}
               </a>

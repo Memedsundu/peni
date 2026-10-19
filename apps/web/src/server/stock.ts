@@ -110,6 +110,16 @@ export class StockService {
       .sort(worstFirst);
   }
 
+  /** Items recipes use that have no price yet, so product costs come out short (piece 22's alerts). */
+  async noCost(cafeId: string): Promise<{ id: string; name: string }[]> {
+    const [items, recipes, products] = await Promise.all([this.store.listItems(cafeId), this.store.listRecipes(cafeId), this.menu.listMenu(cafeId)]);
+    const usedBy = usedByNames(recipes, products);
+    return items
+      .filter((i) => !i.archivedAt && i.costKurus === null && usedBy.has(i.id))
+      .map((i) => ({ id: i.id, name: i.name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "tr"));
+  }
+
   /** "Malzeme ekle", with what is there now. The same `key` twice adds it once. */
   async addItem(
     ctx: StaffContext,

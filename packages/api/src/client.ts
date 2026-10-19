@@ -39,6 +39,10 @@ import type {
   MoneyDTO,
   MonthsDTO,
   PayMonthDTO,
+  TaskDayDTO,
+  TaskListDTO,
+  TaskListsDTO,
+  TodayDTO,
   ShiftWeekDTO,
 } from "./dto";
 import { errorMessageTr } from "./messages";
@@ -102,6 +106,10 @@ import type {
   RepayLenderInput,
   AddShiftInput,
   ClosePayInput,
+  AddTaskListInput,
+  SaveTaskListInput,
+  CheckTaskInput,
+  AlertEmailInput,
   CopyWeekInput,
   PayoutInput,
   PublishWeekInput,
@@ -404,6 +412,22 @@ export function createPeniClient(options: PeniClientOptions) {
           call<PayMonthDTO>("POST", `/staff/${slug(cafeSlug)}/pay/closes/${slug(closeId)}/reopen`, input, true),
         /** The month's hours and pay as a CSV file for Excel; a link the browser opens. */
         exportUrl: (cafeSlug: string, month: string) => `${base}/staff/${slug(cafeSlug)}/pay/export?month=${encodeURIComponent(month)}`,
+      },
+      /** Bugün (piece 22): what needs doing and today's tasks; everyone sees what their role covers. */
+      today: {
+        get: (cafeSlug: string) => call<TodayDTO>("GET", `/staff/${slug(cafeSlug)}/today`, undefined, true),
+        /** The morning email for the viewer, on or off. */
+        email: (cafeSlug: string, input: AlertEmailInput) => call<TodayDTO>("POST", `/staff/${slug(cafeSlug)}/today/email`, input, true),
+      },
+      /** Görevler (piece 22). "tasks.view" sees and ticks today's; "tasks.edit" other days and the lists. */
+      tasks: {
+        day: (cafeSlug: string, day?: string) => call<TaskDayDTO>("GET", `/staff/${slug(cafeSlug)}/tasks${day ? `?day=${encodeURIComponent(day)}` : ""}`, undefined, true),
+        check: (cafeSlug: string, input: CheckTaskInput) => call<TaskDayDTO>("POST", `/staff/${slug(cafeSlug)}/tasks/check`, input, true),
+        lists: (cafeSlug: string) => call<TaskListsDTO>("GET", `/staff/${slug(cafeSlug)}/tasks/lists`, undefined, true),
+        addList: (cafeSlug: string, input: AddTaskListInput) => call<TaskListDTO>("POST", `/staff/${slug(cafeSlug)}/tasks/lists`, input, true),
+        saveList: (cafeSlug: string, listId: string, input: SaveTaskListInput) =>
+          call<TaskListDTO>("POST", `/staff/${slug(cafeSlug)}/tasks/lists/${slug(listId)}`, input, true),
+        removeList: (cafeSlug: string, listId: string) => call<TaskListsDTO>("POST", `/staff/${slug(cafeSlug)}/tasks/lists/${slug(listId)}/remove`, {}, true),
       },
       /** Tedarikçiler (piece 18). Viewing needs "suppliers.view"; changes "suppliers.edit". */
       suppliers: {
