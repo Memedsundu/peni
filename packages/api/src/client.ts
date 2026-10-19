@@ -1,6 +1,7 @@
 import type {
   AuthProvidersDTO,
   CafeDetailDTO,
+  CafeMembersDTO,
   CafeSummaryDTO,
   FullWalletDTO,
   GiftDTO,
@@ -23,6 +24,7 @@ import type {
   AppleSignInInput,
   ChangePasswordInput,
   DonateAskidaInput,
+  MemberLookupInput,
   EmailVerifyInput,
   PinSignInInput,
   SaveRolesInput,
@@ -125,11 +127,14 @@ export function createPeniClient(options: PeniClientOptions) {
       comment: (cafeSlug: string, postId: string, body: string) =>
         call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/comments`, { body }),
       /**
-       * Gift recipient check: "Mehmet K." or 404 (RECIPIENT_NOT_MEMBER). Rate-limited
-       * per customer (LOOKUP_LIMITED). [G6]
+       * Gift recipient check by phone or Peni kodu: "Mehmet K." or 404 (RECIPIENT_NOT_MEMBER).
+       * Rate-limited per customer (LOOKUP_LIMITED). [G6, D28]
        */
-      lookupMember: (cafeSlug: string, phone: string) =>
-        call<MemberLookupDTO>("POST", `/cafes/${slug(cafeSlug)}/members/lookup`, { phone }),
+      lookupMember: (cafeSlug: string, by: MemberLookupInput) =>
+        call<MemberLookupDTO>("POST", `/cafes/${slug(cafeSlug)}/members/lookup`, by),
+      /** Members who show their profile, to pick whom to treat; `q` searches names. [D28] */
+      members: (cafeSlug: string, q?: string) =>
+        call<CafeMembersDTO>("GET", `/cafes/${slug(cafeSlug)}/members${q ? `?q=${encodeURIComponent(q)}` : ""}`),
       /** Public `text/calendar` link for a Peni masası; open it with `Linking`. [G22] */
       icsUrl: (cafeSlug: string, postId: string) =>
         `${base}/api/v1/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/ics`,

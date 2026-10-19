@@ -189,26 +189,61 @@ describe("sign-in and profile (G18, G19)", () => {
 
 describe("gifts (G6, G11, G15, G16, G17)", () => {
   it("looks up a recipient as 'Mehmet K.', only at the same café, and not oneself", async () => {
-    expect(await app.lookupMember(ayse(), "moda", DEMO_CUSTOMERS.mehmet.phone)).toEqual({ firstName: "Mehmet", lastInitial: "K" });
-    await expect(app.lookupMember(ayse(), "kuzguncuk", DEMO_CUSTOMERS.mehmet.phone)).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER", status: 404 });
-    await expect(app.lookupMember(ayse(), "moda", "+905559999999")).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });
-    await expect(app.lookupMember(ayse(), "moda", DEMO_CUSTOMERS.ayse.phone)).rejects.toMatchObject({ code: "GIFT_INVALID" });
-    await expect(app.lookupMember(mehmet(), "kuzguncuk", DEMO_CUSTOMERS.ayse.phone)).rejects.toMatchObject({ code: "NOT_A_MEMBER" });
-    await expect(app.lookupMember(ayse(), "kuzguncuk", DEMO_NEIGHBOURS.oguz.phone)).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" }); // blocked there
+    expect(await app.lookupMember(ayse(), "moda", { phone: DEMO_CUSTOMERS.mehmet.phone })).toEqual({ firstName: "Mehmet", lastInitial: "K" });
+    await expect(app.lookupMember(ayse(), "kuzguncuk", { phone: DEMO_CUSTOMERS.mehmet.phone })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER", status: 404 });
+    await expect(app.lookupMember(ayse(), "moda", { phone: "+905559999999" })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });
+    await expect(app.lookupMember(ayse(), "moda", { phone: DEMO_CUSTOMERS.ayse.phone })).rejects.toMatchObject({ code: "GIFT_INVALID" });
+    await expect(app.lookupMember(mehmet(), "kuzguncuk", { phone: DEMO_CUSTOMERS.ayse.phone })).rejects.toMatchObject({ code: "NOT_A_MEMBER" });
+    await expect(app.lookupMember(ayse(), "kuzguncuk", { phone: DEMO_NEIGHBOURS.oguz.phone })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" }); // blocked there
   });
 
   it("rate-limits lookups to 20 an hour per customer", async () => {
-    for (let i = 0; i < 20; i++) await app.lookupMember(ayse(), "moda", DEMO_CUSTOMERS.mehmet.phone).catch(() => undefined);
-    await expect(app.lookupMember(ayse(), "moda", DEMO_CUSTOMERS.mehmet.phone)).rejects.toMatchObject({ code: "LOOKUP_LIMITED", status: 429 });
-    expect(await app.lookupMember(mehmet(), "moda", DEMO_CUSTOMERS.ayse.phone)).toMatchObject({ firstName: "Ayşe" });
+    for (let i = 0; i < 20; i++) await app.lookupMember(ayse(), "moda", { phone: DEMO_CUSTOMERS.mehmet.phone }).catch(() => undefined);
+    await expect(app.lookupMember(ayse(), "moda", { phone: DEMO_CUSTOMERS.mehmet.phone })).rejects.toMatchObject({ code: "LOOKUP_LIMITED", status: 429 });
+    expect(await app.lookupMember(mehmet(), "moda", { phone: DEMO_CUSTOMERS.ayse.phone })).toMatchObject({ firstName: "Ayşe" });
     tick(HOUR + MIN);
-    expect(await app.lookupMember(ayse(), "moda", DEMO_CUSTOMERS.mehmet.phone)).toMatchObject({ firstName: "Mehmet" });
+    expect(await app.lookupMember(ayse(), "moda", { phone: DEMO_CUSTOMERS.mehmet.phone })).toMatchObject({ firstName: "Mehmet" });
+  });
+
+  it("finds a recipient by Peni kodu, typed any way, only at that café (D28)", async () => {
+    const code = (await modaFor(mehmet())).membership!.memberCode;
+    expect(await app.lookupMember(ayse(), "moda", { code: code.replace("-", " ").toLowerCase() })).toEqual({ firstName: "Mehmet", lastInitial: "K" });
+    await expect(app.lookupMember(ayse(), "moda", { code: "BCD-FGH" })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });
+    await expect(app.lookupMember(ayse(), "moda", { code: "not a code" })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });
+    await expect(app.lookupMember(ayse(), "moda", { code: (await modaFor(ayse())).membership!.memberCode })).rejects.toMatchObject({ code: "GIFT_INVALID" });
+    const kuzguncukCode = (await app.cafeDetail("kuzguncuk", ayse())).membership!.memberCode;
+    await expect(app.lookupMember(mehmet(), "moda", { code: kuzguncukCode })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });
+    const sent = await app.sendGift(ayse(), { cafeSlug: "moda", toCode: code, peni: 10, idempotencyKey: "by-code-1" });
+    expect(sent.status).toBe("pending");
+    expect((await app.wallet(mehmet())).gifts.some((g) => g.id === sent.id)).toBe(true);
+  });
+
+  it("lists the café's members who show their profile, by name, and sends to a picked one (D28)", async () => {
+    const { members } = await app.cafeMembers(ayse(), "moda");
+    const names = members.map((m) => `${m.firstName} ${m.lastInitial}.`);
+    expect(names).toContain("Mehmet K.");
+    expect(names).not.toContain("Ayşe Y.");
+    expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, "tr")));
+    for (const m of members) {
+      const c = await app.identity.getCustomer((await app.directory.getMembership(m.memberId))!.customerId);
+      expect(c!.profileVisible).toBe(true);
+    }
+    expect((await app.cafeMembers(ayse(), "moda", "meh")).members.map((m) => m.firstName)).toEqual(["Mehmet"]);
+    expect((await app.cafeMembers(ayse(), "moda", "KOÇ")).members.map((m) => m.firstName)).toEqual((await app.cafeMembers(ayse(), "moda", "koç")).members.map((m) => m.firstName));
+    await expect(app.cafeMembers(mehmet(), "kuzguncuk")).rejects.toMatchObject({ code: "NOT_A_MEMBER" });
+    const mehmetId = members.find((m) => m.firstName === "Mehmet")!.memberId;
+    const sent = await app.sendGift(ayse(), { cafeSlug: "moda", toMemberId: mehmetId, peni: 10, idempotencyKey: "by-pick-1" });
+    expect(sent.status).toBe("pending");
+    await expect(app.sendGift(mehmet(), { cafeSlug: "moda", toMemberId: mehmetId, peni: 10, idempotencyKey: "by-pick-2" })).rejects.toMatchObject({ code: "GIFT_INVALID" });
+    const elsewhere = (await app.cafeDetail("kuzguncuk", ayse())).membership!.id;
+    await expect(app.sendGift(mehmet(), { cafeSlug: "moda", toMemberId: elsewhere, peni: 10, idempotencyKey: "by-pick-3" })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });
   });
 
   it("remembers recent recipients per café, newest first, once each", async () => {
     await app.sendGift(ayse(), { cafeSlug: "moda", toPhone: DEMO_CUSTOMERS.mehmet.phone, peni: 10, idempotencyKey: "recents-1" });
     const recents = (await app.wallet(ayse())).recentRecipients;
     expect(recents[0]).toMatchObject({ cafeSlug: "moda", firstName: "Mehmet", lastInitial: "K", initials: "MK", phone: DEMO_CUSTOMERS.mehmet.phone });
+    expect(recents[0]!.memberId).toBe((await modaFor(mehmet())).membership!.id);
     expect(recents.filter((r) => r.firstName === "Mehmet")).toHaveLength(1);
   });
 

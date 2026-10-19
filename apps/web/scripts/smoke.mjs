@@ -52,7 +52,7 @@ const ayse = await signIn("cus_ayse");
 const mehmet = await signIn("cus_mehmet");
 const STAFF = await staffSignIn("leyla@moda.test");
 const dash0 = (await call("GET", "/staff/moda", { headers: STAFF })).json;
-const wallets0 = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
+const wallets0 = await Promise.all([ayse, mehmet, deniz].map(modaBalance)); // Nazlı joins later, with 0
 
 // 1. Deniz is new and has no peni; she may take from the askı.
 let cafe = (await call("GET", "/cafes/moda", { token: deniz })).json;
@@ -164,6 +164,23 @@ assert.equal(zeynep.customer.phone, null);
 assert.equal((await call("POST", "/auth/email/verify", { body: { email: newcomer, code } })).json.error.code, "CODE_EXPIRED", "a code works once");
 step("A newcomer asks for two email codes; only the newest works, once, and she lands without a name or phone");
 
+// 5b. Without a phone, friends find her by Peni kodu or from the café's member list.
+const nazli = emailSession.json.token;
+await call("POST", "/me/profile", { token: nazli, body: { displayName: "Nazlı Ekinci", profileVisible: true } });
+const nazliCode = (await call("POST", "/cafes/moda/join", { token: nazli })).json.membership.memberCode;
+const picked = (await call("GET", "/cafes/moda/members?q=naz", { token: ayse })).json.members;
+assert.deepEqual(picked.map((m) => `${m.firstName} ${m.lastInitial}.`), ["Nazlı E."]);
+assert.equal((await call("GET", "/cafes/moda/members")).status, 401, "the member list needs a sign-in");
+const byCode = await call("POST", "/cafes/moda/members/lookup", { token: ayse, body: { code: nazliCode.toLowerCase().replace("-", " ") } });
+assert.deepEqual(byCode.json, { firstName: "Nazlı", lastInitial: "E" });
+assert.equal((await call("POST", "/gifts", { token: ayse, body: { cafeSlug: "moda", toPhone: "+905320000002", toCode: nazliCode, peni: 5, idempotencyKey: key() } })).json.error.code, "VALIDATION");
+const welcome = (await call("POST", "/gifts", { token: ayse, body: { cafeSlug: "moda", toCode: nazliCode, peni: 20, message: "Hoş geldin", idempotencyKey: key() } })).json;
+assert.equal((await call("POST", `/gifts/${welcome.id}/accept`, { token: nazli })).json.status, "accepted");
+const again = (await call("GET", "/me/wallet", { token: ayse })).json.recentRecipients.find((r) => r.firstName === "Nazlı");
+assert.equal(again.phone, null);
+assert.equal(again.memberId, picked[0].memberId);
+step("Ayşe finds Nazlı (no phone) in Moda's member list and by her Peni kodu, treats her 20 peni, and can send again from recents");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
@@ -179,7 +196,7 @@ step("Profil loads and saves; the Peni masası downloads as text/calendar");
 
 // 7. The café report adds up: every change in what is owed is a change in wallets or the askı.
 const dash = (await call("GET", "/staff/moda", { headers: STAFF })).json;
-const wallets = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
+const wallets = await Promise.all([ayse, mehmet, deniz, nazli].map(modaBalance));
 const delta = (xs, ys) => ys.reduce((a, b) => a + b, 0) - xs.reduce((a, b) => a + b, 0);
 assert.equal(
   dash.report.outstandingPeni - dash0.report.outstandingPeni,
