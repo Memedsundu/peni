@@ -20,3 +20,4 @@ export * from "./staff";
 export * from "./reports";
 export * from "./stock";
 export * from "./bills";
+export * from "./debts";

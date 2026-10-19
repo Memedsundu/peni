@@ -146,6 +146,11 @@ model Cafe {
   recipes        StockRecipe[]
   suppliers      Supplier[]
   bills          Bill[]
+  checks         DebtCheck[]
+  loans          Loan[]
+  loanRepayments LoanRepayment[]
+  creditCard     CreditCard?
+  cardPayments   CardPayment[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -650,6 +655,12 @@ enum BillPayMethod {
   cash
   card
   bank
+  /// The café's credit card: owed on the card (Borçlar).
+  credit
+  /// A check written for it: owed until the bank pays it out.
+  check
+  /// Someone paid it with their own money: owed to them.
+  loan
 }
 
 /// Who the café buys from. Archived instead of deleted, so old bills keep their name.
@@ -734,10 +745,109 @@ model BillPayment {
   memberId    String
   createdAt   DateTime
 
-  bill Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  bill  Bill       @relation(fields: [billId], references: [id], onDelete: Cascade)
+  check DebtCheck?
+  loan  Loan?
 
   @@index([cafeId, paidOn])
   @@index([billId])
+}
+
+// ─────────────────────────────────────────────────────────── debts (plan piece 19)
+
+enum MoneyMethod {
+  cash
+  card
+  bank
+}
+
+/// A check the café wrote. Owed until the bank pays it out.
+model DebtCheck {
+  id            String   @id
+  cafeId        String
+  number        String
+  bankName      String?
+  payee         String?
+  supplierId    String?
+  amountKurus   Int
+  writtenOn     String
+  /// The day on the check (vade), YYYY-MM-DD.
+  dueDate       String
+  note          String?
+  /// The bill payment that wrote it; null for a check written on its own.
+  billPaymentId String?  @unique
+  cashedOn      String?
+  cashedById    String?
+  createdById   String
+  createdAt     DateTime
+
+  cafe        Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  billPayment BillPayment? @relation(fields: [billPaymentId], references: [id], onDelete: Restrict)
+
+  @@index([cafeId, dueDate])
+}
+
+/// Money someone put in for the café. Paid back oldest first, per lender.
+model Loan {
+  id             String   @id
+  cafeId         String
+  /// "member:<id>" or "name:<lower-case name>".
+  lenderKey      String
+  lenderMemberId String?
+  lenderName     String
+  amountKurus    Int
+  borrowedOn     String
+  dueDate        String?
+  note           String?
+  billPaymentId  String?  @unique
+  createdById    String
+  createdAt      DateTime
+
+  cafe        Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  billPayment BillPayment? @relation(fields: [billPaymentId], references: [id], onDelete: Restrict)
+
+  @@index([cafeId, lenderKey, borrowedOn])
+}
+
+model LoanRepayment {
+  id          String      @id
+  cafeId      String
+  lenderKey   String
+  amountKurus Int
+  method      MoneyMethod
+  paidOn      String
+  memberId    String
+  createdAt   DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, lenderKey, paidOn])
+}
+
+/// The café's credit card. Its charges are bill payments by "credit".
+model CreditCard {
+  cafeId       String   @id
+  name         String
+  limitKurus   Int
+  statementDay Int
+  dueDay       Int
+  updatedAt    DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+}
+
+model CardPayment {
+  id          String      @id
+  cafeId      String
+  amountKurus Int
+  method      MoneyMethod
+  paidOn      String
+  memberId    String
+  createdAt   DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, paidOn])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni

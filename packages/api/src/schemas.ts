@@ -323,6 +323,8 @@ const billFields = {
 };
 
 const payMethod = z.enum(["cash", "card", "bank"]);
+const amount = z.number().int().min(1, "Tutar yaz").max(100_000_000, "Tutarı kontrol et");
+const lender = z.object({ memberId: z.string().min(1).max(100).nullable().optional(), name: z.string().trim().max(80, "En çok 80 karakter").optional() });
 
 /** "Fatura ekle". `paid` marks it paid on the spot (needs "bills.manage"). */
 export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.object({ method: payMethod }).optional() });
@@ -330,10 +332,61 @@ export const addBillSchema = z.object({ key: actionKey, ...billFields, paid: z.o
 /** "Düzelt": the whole bill again, with the version it was read at. */
 export const correctBillSchema = z.object({ version: z.number().int().min(1), ...billFields });
 
-/** "Ödendi": the rest of it, paid today unless another day is given. */
-export const payBillSchema = z.object({ method: payMethod, paidOn: billDay.optional() });
+/**
+ * "Öde": the rest of it unless `amountKurus` says less, today unless `paidOn` says
+ * otherwise. A check needs its number and date; a loan says who paid.
+ */
+export const payBillSchema = z.object({
+  key: actionKey,
+  method: z.enum(["cash", "card", "bank", "credit", "check", "loan"]),
+  amountKurus: amount.optional(),
+  paidOn: billDay.optional(),
+  check: z.object({ number: z.string().trim().min(1, "Çek numarasını yaz").max(30), bankName: optionalText(60), dueDate: billDay }).optional(),
+  lender: lender.optional(),
+  loanDueDate: billDay.nullable().optional(),
+});
 
 export const voidBillSchema = z.object({ reason: z.string().trim().min(1, "Bir sebep yaz").max(200, "Sebep çok uzun") });
+
+// ─────────────────────────────────────────────── debts (plan piece 19)
+
+/** A check written on its own, not for a bill entered in Peni. */
+export const addCheckSchema = z.object({
+  key: actionKey,
+  number: z.string().trim().min(1, "Çek numarasını yaz").max(30),
+  bankName: optionalText(60),
+  payee: optionalText(80),
+  supplierId: z.string().min(1).max(100).nullable().optional(),
+  amountKurus: amount,
+  writtenOn: billDay.optional(),
+  dueDate: billDay,
+  note: optionalText(300),
+});
+
+/** "Tahsil edildi", or undo it. */
+export const cashCheckSchema = z.object({ cashed: z.boolean(), cashedOn: billDay.optional() });
+
+/** Money someone put in, not for a bill entered in Peni. */
+export const addLoanSchema = z.object({
+  key: actionKey,
+  lender,
+  amountKurus: amount,
+  borrowedOn: billDay.optional(),
+  dueDate: billDay.nullable().optional(),
+  note: optionalText(300),
+});
+
+/** Paid back to a lender (their key from Borçlar); pays their oldest loans first. */
+export const repayLenderSchema = z.object({ key: actionKey, lender: z.string().min(1).max(200), amountKurus: amount, method: payMethod, paidOn: billDay.optional() });
+
+export const cardSettingsSchema = z.object({
+  name: z.string().trim().min(1, "Bir ad yaz").max(80),
+  limitKurus: z.number().int().min(0).max(100_000_000_000),
+  statementDay: z.number().int().min(1).max(28),
+  dueDay: z.number().int().min(1).max(28),
+});
+
+export const payCardSchema = z.object({ key: actionKey, amountKurus: amount, method: z.enum(["cash", "bank"]), paidOn: billDay.optional() });
 
 export const billListQuerySchema = z.object({
   month: z
@@ -450,6 +503,12 @@ export type CorrectBillInput = z.input<typeof correctBillSchema>;
 export type PayBillInput = z.input<typeof payBillSchema>;
 export type VoidBillInput = z.input<typeof voidBillSchema>;
 export type BillListQuery = z.input<typeof billListQuerySchema>;
+export type AddCheckInput = z.input<typeof addCheckSchema>;
+export type CashCheckInput = z.input<typeof cashCheckSchema>;
+export type AddLoanInput = z.input<typeof addLoanSchema>;
+export type RepayLenderInput = z.input<typeof repayLenderSchema>;
+export type CardSettingsInput = z.input<typeof cardSettingsSchema>;
+export type PayCardInput = z.input<typeof payCardSchema>;
 export type CountStockInput = z.input<typeof countStockSchema>;
 export type WasteStockInput = z.input<typeof wasteStockSchema>;
 export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;

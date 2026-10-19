@@ -12,6 +12,7 @@ export const field = "w-full rounded-2xl border border-line bg-paper px-4 py-3 t
 const PAGES = [
   { key: "menu", href: "/panel/menu", label: "menu", can: (c: StaffCafeAccessDTO) => has(c, "menu.edit") || has(c, "menu.recipes") },
   { key: "faturalar", href: "/panel/faturalar", label: "bills", can: (c: StaffCafeAccessDTO) => has(c, "bills.view") },
+  { key: "borclar", href: "/panel/borclar", label: "debts", can: (c: StaffCafeAccessDTO) => has(c, "debts.view") },
   { key: "tedarikciler", href: "/panel/tedarikciler", label: "suppliers", can: (c: StaffCafeAccessDTO) => has(c, "suppliers.view") },
   { key: "stok", href: "/panel/stok", label: "stock", can: (c: StaffCafeAccessDTO) => has(c, "stock.view") },
   { key: "topluluk", href: "/panel/topluluk", label: "community", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },

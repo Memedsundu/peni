@@ -189,7 +189,10 @@ export interface RecipesDTO {
 // ─────────────────────────────────────────────── suppliers and bills (plan piece 18)
 
 export type BillCategoryDTO = "ingredients" | "supplies" | "rent" | "utilities" | "services" | "wages" | "other";
-export type BillPayMethodDTO = "cash" | "card" | "bank";
+/** cash, card (the bank card) and bank settle it; credit, check and loan move it to Borçlar. */
+export type BillPayMethodDTO = "cash" | "card" | "bank" | "credit" | "check" | "loan";
+/** How a debt is paid back. */
+export type MoneyMethodDTO = "cash" | "card" | "bank";
 /** Overdue: unpaid and past its due date in the café's time zone. */
 export type BillStateDTO = "unpaid" | "overdue" | "paid" | "voided";
 
@@ -233,12 +236,45 @@ export interface BillDTO extends BillSummaryDTO {
   version: number;
   createdBy: string | null;
   createdAt: string;
-  payments: { amountKurus: number; method: BillPayMethodDTO; paidOn: string; by: string | null }[];
+  payments: BillPaymentDTO[];
   voidedAt: string | null;
   voidedBy: string | null;
   voidReason: string | null;
   /** The viewer can correct, pay and void it ("bills.manage"). */
   canManage: boolean;
+  /** What the viewer can pay the rest with; null when nothing is left or they can't pay. */
+  payWith: PayOptionsDTO | null;
+}
+
+export interface BillPaymentDTO {
+  id: string;
+  amountKurus: number;
+  method: BillPayMethodDTO;
+  paidOn: string;
+  by: string | null;
+  /** The check it wrote, for "check". */
+  check: { id: string; number: string; dueDate: string; cashedOn: string | null } | null;
+  /** Who is owed, for "loan". */
+  lender: string | null;
+  /** Why "Geri al" can't undo it: the check was cashed, or the debt paid back. Null when it can. */
+  locked: "CHECK_CASHED" | "LOAN_REPAID" | null;
+  /** The viewer may undo it (bills.manage, plus debts.card or debts.edit for those methods). */
+  canRemove: boolean;
+}
+
+/** For the pay form. Cash, card and bank are always there. */
+export interface PayOptionsDTO {
+  leftKurus: number;
+  /** The credit card's name; null when the viewer can't use it ("debts.card") or it isn't set up. */
+  credit: string | null;
+  /** The viewer could use the card but nobody has set it up yet. */
+  creditNotSet: boolean;
+  /** Checks and loans need "debts.edit". */
+  check: boolean;
+  loan: boolean;
+  /** Who can be the lender: the team, and people named on earlier loans. */
+  team: { memberId: string; name: string }[];
+  lenderNames: string[];
 }
 
 /** `GET /staff/:slug/bills?month=2026-10` or `?show=owed`: Faturalar. Needs "bills.view". */
@@ -860,6 +896,123 @@ export interface StaffDashboardDTO {
   lowStock: Pick<StockItemDTO, "id" | "name" | "unit" | "qtyMilli" | "minMilli" | "level">[] | null;
   /** Bills still owed, for Bugün; null without "bills.view". */
   billsOwed: BillsDTO["owed"] | null;
+  /** Everything owed (bills, checks, loans, the card), for Bugün; null without "debts.view". */
+  debts: DebtsDTO["totals"] | null;
+}
+
+// ─────────────────────────────────────────────── debts (plan piece 19)
+
+export type DebtKindDTO = "bill" | "check" | "loan" | "card";
+
+/** One line of "what we owe": an open bill, a check not cashed yet, a lender, or the card. */
+export interface DebtRowDTO {
+  kind: DebtKindDTO;
+  /** The bill's or check's id, the lender's key, or "card". */
+  id: string;
+  /** Supplier, payee, lender or card name. */
+  name: string;
+  /** What it is: the bill's lines, the check's number, how many loans, the statement. */
+  detail: string | null;
+  amountKurus: number;
+  /** When it has to be paid: due date, check date, the card's statement due day. */
+  dueDate: string | null;
+  overdue: boolean;
+}
+
+export type CheckStateDTO = "open" | "due" | "cashed";
+
+export interface CheckDTO {
+  id: string;
+  number: string;
+  bankName: string | null;
+  /** Who it was written to (the supplier's name when none was typed). */
+  payee: string;
+  amountKurus: number;
+  writtenOn: string;
+  dueDate: string;
+  note: string | null;
+  /** The bill it paid, when it paid one. */
+  billId: string | null;
+  cashedOn: string | null;
+  cashedBy: string | null;
+  /** due: its date has come and the bank hasn't paid it out yet (or nobody said so). */
+  state: CheckStateDTO;
+  /** Written on its own and not cashed: "Sil" can take it away. A bill's check goes with the bill's payment. */
+  removable: boolean;
+}
+
+export interface LenderDTO {
+  /** Send this back when paying them. */
+  key: string;
+  name: string;
+  /** Set when the lender is on the team. */
+  memberId: string | null;
+  owedKurus: number;
+  borrowedKurus: number;
+  repaidKurus: number;
+  /** The earliest due date among loans not paid back yet. */
+  dueDate: string | null;
+  /** Oldest first: the order repayments pay them off in. */
+  loans: {
+    id: string;
+    amountKurus: number;
+    leftKurus: number;
+    borrowedOn: string;
+    dueDate: string | null;
+    note: string | null;
+    /** The bill it paid and what that was. */
+    billId: string | null;
+    billName: string | null;
+    /** Given on its own, and taking it away leaves no repayment without a loan. */
+    removable: boolean;
+  }[];
+  /** Newest first. */
+  repayments: { id: string; amountKurus: number; method: MoneyMethodDTO; paidOn: string; by: string | null }[];
+}
+
+export interface CardDTO {
+  name: string;
+  limitKurus: number;
+  statementDay: number;
+  dueDay: number;
+  /** Charged and not yet paid. */
+  balanceKurus: number;
+  /** Limit minus balance; below zero when over the limit. */
+  remainingKurus: number;
+  /** The last statement and its due day. */
+  lastClose: string;
+  dueDate: string;
+  /** What the last statement asks for, less what was paid since. */
+  statementKurus: number;
+  /** The part of a statement whose due day has passed. */
+  overdueKurus: number;
+  nextClose: string;
+  /** Bills paid with it, newest first (the last 30). */
+  charges: { paymentId: string; billId: string; name: string; amountKurus: number; paidOn: string }[];
+  /** Newest first. */
+  payments: { id: string; amountKurus: number; method: "cash" | "bank"; paidOn: string; by: string | null }[];
+}
+
+/** `GET /staff/:slug/debts`: Borçlar. Needs "debts.view"; the card needs "debts.card". */
+export interface DebtsDTO {
+  today: string;
+  /** Overdue first, then by due date; those with no date last. */
+  rows: DebtRowDTO[];
+  totals: { totalKurus: number; overdueKurus: number; /** Due in the next 7 days. */ weekKurus: number };
+  /** Open checks by date, then the last 60 days' cashed ones. */
+  checks: CheckDTO[];
+  /** Owed most first, then those paid back. */
+  lenders: LenderDTO[];
+  /** Null when the viewer can't see it or it isn't set up (see cardNotSet). */
+  card: CardDTO | null;
+  cardNotSet: boolean;
+  /** For the forms. */
+  team: { memberId: string; name: string }[];
+  suppliers: { id: string; name: string }[];
+  /** Checks and loans ("debts.edit"), the card ("debts.card"), paying bills ("bills.manage"). */
+  canEdit: boolean;
+  canCard: boolean;
+  canPayBills: boolean;
 }
 
 // ─────────────────────────────────────────────── staff (plan piece 2)

@@ -55,8 +55,8 @@ describe("Faturalar (plan piece 18)", () => {
 
   it("lets everyone see and add bills, and keeps correcting and paying with the manager", async () => {
     expect(await app.bills.list(ece)).toMatchObject({ canAdd: true, canManage: false, canAddSupplier: false });
-    expect(await code(app.bills.pay(ece, "bil_seed_simit", { method: "cash" }))).toBe("FORBIDDEN");
-    expect(await code(app.bills.pay(hakan, "bil_seed_simit", { method: "cash" }))).toBe("FORBIDDEN");
+    expect(await code(app.bills.pay(ece, "bil_seed_simit", { key: key(), method: "cash" }))).toBe("FORBIDDEN");
+    expect(await code(app.bills.pay(hakan, "bil_seed_simit", { key: key(), method: "cash" }))).toBe("FORBIDDEN");
     expect(await code(app.bills.add(ece, { key: key(), ...milk(10, 480), paid: { method: "cash" } }))).toBe("FORBIDDEN");
     expect(await code(app.bills.correct(ece, "bil_seed_simit", { version: 1, ...milk(1, 45) }))).toBe("FORBIDDEN");
     expect(await code(app.bills.void(hakan, "bil_seed_simit", { reason: "Yanlış" }))).toBe("FORBIDDEN");
@@ -86,18 +86,22 @@ describe("Faturalar (plan piece 18)", () => {
   it("marks a bill paid on the spot or later, and can take the payment back", async () => {
     const paidNow = await app.bills.add(murat, { key: key(), ...milk(5, 225), paid: { method: "cash" } });
     expect(paidNow).toMatchObject({ state: "paid", paidKurus: 22_500 });
-    expect(paidNow.payments).toEqual([{ amountKurus: 22_500, method: "cash", paidOn: "2026-10-16", by: "Murat Aksu" }]);
+    expect(paidNow.payments).toEqual([
+      { id: expect.any(String), amountKurus: 22_500, method: "cash", paidOn: "2026-10-16", by: "Murat Aksu", check: null, lender: null, locked: null, canRemove: true },
+    ]);
 
-    expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { method: "bank", paidOn: "2026-10-17" }))).toBe("PAID_ON_INVALID");
-    expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { method: "bank", paidOn: "2026-09-30" }))).toBe("PAID_ON_INVALID");
-    const paid = await app.bills.pay(murat, "bil_seed_elektrik", { method: "bank", paidOn: "2026-10-15" });
-    expect(paid).toMatchObject({ state: "paid", paidKurus: 385_000 });
-    // Twice is still once.
-    expect((await app.bills.pay(murat, "bil_seed_elektrik", { method: "bank" })).payments).toHaveLength(1);
+    expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { key: key(), method: "bank", paidOn: "2026-10-17" }))).toBe("PAID_ON_INVALID");
+    expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { key: key(), method: "bank", paidOn: "2026-09-30" }))).toBe("PAID_ON_INVALID");
+    const tap = key();
+    const paid = await app.bills.pay(murat, "bil_seed_elektrik", { key: tap, method: "bank", paidOn: "2026-10-15" });
+    expect(paid).toMatchObject({ state: "paid", paidKurus: 385_000, payWith: null });
+    // Twice is still once; another payment would be more than is owed.
+    expect((await app.bills.pay(murat, "bil_seed_elektrik", { key: tap, method: "bank" })).payments).toHaveLength(1);
+    expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { key: key(), method: "bank" }))).toBe("BILL_OVERPAY");
     expect((await app.bills.list(murat)).owed).toMatchObject({ count: 2, overdueCount: 0 });
     expect(await code(app.bills.void(murat, "bil_seed_elektrik", { reason: "Yanlış" }))).toBe("BILL_PAID");
 
-    const undone = await app.bills.unpay(murat, "bil_seed_elektrik");
+    const undone = await app.bills.removePayment(murat, "bil_seed_elektrik", paid.payments[0]!.id);
     expect(undone).toMatchObject({ state: "overdue", paidKurus: 0, payments: [] });
   });
 
@@ -118,7 +122,7 @@ describe("Faturalar (plan piece 18)", () => {
     expect((await app.stock.history(murat, "stk_sut")).moves[0]).toMatchObject({ reason: "bill", changeMilli: -2_000 });
 
     expect(await code(app.bills.correct(murat, bill.id, { version: 1, ...milk(9, 450) }))).toBe("BILL_CHANGED");
-    await app.bills.pay(murat, bill.id, { method: "card" });
+    await app.bills.pay(murat, bill.id, { key: key(), method: "card" });
     expect(await code(app.bills.correct(murat, bill.id, { version: 2, ...milk(9, 450) }))).toBe("BILL_PAID");
   });
 
@@ -134,7 +138,7 @@ describe("Faturalar (plan piece 18)", () => {
     const view = await app.bills.list(murat);
     expect(view.bills.find((b) => b.id === bill.id)?.state).toBe("voided");
     expect(view.owed.count).toBe(3);
-    expect(await code(app.bills.pay(murat, bill.id, { method: "cash" }))).toBe("BILL_VOIDED");
+    expect(await code(app.bills.pay(murat, bill.id, { key: key(), method: "cash" }))).toBe("BILL_VOIDED");
     expect(await code(app.bills.void(murat, bill.id, { reason: " " }))).toBe("REASON_REQUIRED");
   });
 

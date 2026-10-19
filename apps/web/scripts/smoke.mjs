@@ -426,15 +426,49 @@ const corrected = (await call("POST", `/staff/moda/bills/${oatBill.id}`, {
 assert.equal(corrected.version, 2);
 oatNow = (await call("GET", `/staff/moda/stock/items/${oatItem[0].id}`, { headers: STAFF })).json;
 assert.deepEqual([oatNow.item.qtyMilli, oatNow.moves[0].changeMilli], [5_900, -1_000], "the correction moved the difference");
-assert.equal((await call("POST", `/staff/moda/bills/${oatBill.id}/pay`, { headers: ecePos3, body: { method: "cash" } })).json.error.code, "FORBIDDEN");
+assert.equal((await call("POST", `/staff/moda/bills/${oatBill.id}/pay`, { headers: ecePos3, body: { key: key(), method: "cash" } })).json.error.code, "FORBIDDEN");
 const owedBefore = (await call("GET", "/staff/moda", { headers: STAFF })).json.billsOwed;
-const paidBill = (await call("POST", `/staff/moda/bills/${oatBill.id}/pay`, { headers: STAFF, body: { method: "cash" } })).json;
+const paidBill = (await call("POST", `/staff/moda/bills/${oatBill.id}/pay`, { headers: STAFF, body: { key: key(), method: "cash" } })).json;
 assert.deepEqual([paidBill.state, paidBill.payments.length], ["paid", 1]);
 const owedAfter = (await call("GET", "/staff/moda", { headers: STAFF })).json.billsOwed;
 assert.deepEqual([owedBefore.count - owedAfter.count, owedBefore.totalKurus - owedAfter.totalKurus], [1, 45_000]);
 const manavPage = (await call("GET", `/staff/moda/suppliers/${manav.supplier.id}`, { headers: STAFF })).json;
 assert.deepEqual([manavPage.owedKurus, manavPage.prices[0].points[0].unitKurus], [0, 9_000]);
 step("Leyla adds a supplier (once despite a retry); Ece enters its bill for 6 L of oat milk at the till (once), which adds stock and sets ₺90/L; Leyla corrects it to 5 L and pays it in cash; Ece can't pay bills");
+
+// 5n. Borçlar (piece 19): Leyla pays a ₺1.000 repair bill in parts: ₺600 with a check (once
+//     despite a retry) and ₺400 out of Murat's pocket. Faturalar calls it paid; Borçlar owes
+//     the check and Murat instead. Once the check is cashed its payment can't be undone; Murat
+//     gets ₺400 back; the card takes a payment. Ece can't see Borçlar.
+const debts0 = (await call("GET", "/staff/moda/debts", { headers: STAFF })).json;
+const muratMember = debts0.team.find((m) => m.name === "Murat Aksu");
+const repair = (await call("POST", "/staff/moda/bills", {
+  headers: STAFF,
+  body: { key: key(), supplierId: null, date: today, lines: [{ itemId: null, name: "Kahve makinesi bakımı", category: "services", totalKurus: 100_000 }] },
+})).json;
+const checkPay = { key: key(), method: "check", amountKurus: 60_000, check: { number: `S${key().slice(-6)}`, bankName: "Ziraat Bankası", dueDate: today } };
+await call("POST", `/staff/moda/bills/${repair.id}/pay`, { headers: STAFF, body: checkPay });
+const halfPaid = (await call("POST", `/staff/moda/bills/${repair.id}/pay`, { headers: STAFF, body: checkPay })).json;
+assert.deepEqual([halfPaid.state, halfPaid.paidKurus, halfPaid.payWith.leftKurus], ["unpaid", 60_000, 40_000], "a retried check pays once");
+const repaired = (await call("POST", `/staff/moda/bills/${repair.id}/pay`, { headers: STAFF, body: { key: key(), method: "loan", lender: { memberId: muratMember.memberId } } })).json;
+assert.deepEqual([repaired.state, repaired.payments.map((p) => p.method)], ["paid", ["check", "loan"]]);
+let debts1 = (await call("GET", "/staff/moda/debts", { headers: STAFF })).json;
+const repairCheck = debts1.checks.find((c) => c.number === checkPay.check.number);
+const muratOwed = (d) => d.lenders.find((l) => l.memberId === muratMember.memberId).owedKurus;
+assert.deepEqual([repairCheck.state, repairCheck.billId, muratOwed(debts1) - muratOwed(debts0)], ["due", repair.id, 40_000]);
+assert.equal(debts1.totals.totalKurus - debts0.totals.totalKurus, 100_000, "the bill's ₺1.000 is owed in Borçlar instead");
+await call("POST", `/staff/moda/debts/checks/${repairCheck.id}`, { headers: STAFF, body: { cashed: true } });
+const cashedUndo = await call("POST", `/staff/moda/bills/${repair.id}/payments/${repaired.payments[0].id}/remove`, { headers: STAFF, body: {} });
+assert.deepEqual([cashedUndo.status, cashedUndo.json.error.code], [409, "CHECK_CASHED"]);
+const muratKey = debts1.lenders.find((l) => l.memberId === muratMember.memberId).key;
+debts1 = (await call("POST", "/staff/moda/debts/repayments", { headers: STAFF, body: { key: key(), lender: muratKey, amountKurus: 40_000, method: "cash" } })).json;
+assert.equal(muratOwed(debts1), muratOwed(debts0));
+const cardBefore = debts1.card.balanceKurus;
+debts1 = (await call("POST", "/staff/moda/debts/card/payments", { headers: STAFF, body: { key: key(), amountKurus: 10_000, method: "bank" } })).json;
+assert.equal(cardBefore - debts1.card.balanceKurus, 10_000);
+assert.equal((await call("GET", "/staff/moda/debts", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
+assert.deepEqual((await call("GET", "/staff/moda", { headers: STAFF })).json.debts, debts1.totals);
+step("Leyla pays a ₺1.000 repair with a check (once) and Murat's money; Borçlar owes them instead; a cashed check's payment stays; Murat is paid back; the card takes ₺100; Ece can't see Borçlar");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;

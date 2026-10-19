@@ -489,7 +489,15 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     // A voided bill no longer prices anything.
     expect((await stores.bills.lastPrice(cafeId, item.id))!.billId).toBe(late.id);
 
-    await stores.bills.removePayments(cafeId, sep.id);
+    // Paid in parts; the credit card's charges are the payments by "credit".
+    const part = { cafeId, billId: late.id, method: "credit" as const, memberId: "stf_x", createdAt: at };
+    await stores.bills.addPayment({ ...part, id: `bpy_late2_${run}`, amountKurus: 15_000, paidOn: "2026-10-05" });
+    await stores.bills.addPayment({ ...part, id: `bpy_late1_${run}`, amountKurus: 10_000, paidOn: "2026-10-03" });
+    expect((await stores.bills.listPayments(cafeId, { method: "credit" })).map((p) => p.id)).toEqual([`bpy_late1_${run}`, `bpy_late2_${run}`]);
+    expect(await stores.bills.listPayments(cafeId)).toHaveLength(3);
+    expect(await stores.bills.getPayment(cafeId, `bpy_late1_${run}`)).toMatchObject({ amountKurus: 10_000, method: "credit" });
+    expect(await stores.bills.getPayment("cafe_elsewhere", `bpy_late1_${run}`)).toBeNull();
+    await stores.bills.removePayment(cafeId, `bpy_${run}`);
     expect((await stores.bills.getBill(cafeId, sep.id))!.payments).toEqual([]);
 
     // Inside the ledger's transaction, a bill and its stock commit or roll back together.
@@ -502,5 +510,53 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     ).rejects.toThrow("no");
     expect(await stores.bills.getBill(cafeId, `bil_rollback_${run}`)).toBeNull();
     expect((await stores.stock.getItem(cafeId, item.id))!.qtyMilli).toBe(0);
+  });
+  it("keeps checks, loans with their repayments, and the credit card with its payments", async () => {
+    const payment = { id: `bpy_debt_${run}`, cafeId, billId: `bil_debt_${run}`, amountKurus: 450_000, method: "check" as const, paidOn: "2026-10-01", memberId: "stf_x", createdAt: at };
+    await stores.bills.saveBill({
+      id: payment.billId, cafeId, supplierId: null, number: null, date: "2026-10-01", dueDate: null, note: null,
+      lines: [{ itemId: null, name: "Kira", category: "rent", qtyMilli: null, totalKurus: 450_000 }],
+      totalKurus: 450_000, paidKurus: 450_000, paidAt: at, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
+      createdById: "stf_x", createdAt: at, updatedAt: at, createKey: `debt_${run}`,
+    });
+    await stores.bills.addPayment(payment);
+    const check = {
+      id: `chk_${run}`, cafeId, number: "0012345", bankName: "Ziraat", payee: "Ali Rıza Bey", supplierId: null, amountKurus: 450_000,
+      writtenOn: "2026-10-01", dueDate: "2026-10-28", note: null, billPaymentId: payment.id, cashedOn: null, cashedById: null, createdById: "stf_x", createdAt: at,
+    };
+    await stores.debts.saveCheck(check);
+    await stores.debts.saveCheck({ ...check, id: `chk2_${run}`, number: "0012346", dueDate: "2026-10-20", billPaymentId: null });
+    expect((await stores.debts.listChecks(cafeId, { open: true })).filter((c) => c.id.endsWith(run)).map((c) => c.number)).toEqual(["0012346", "0012345"]);
+    expect(await stores.debts.findCheckByPayment(cafeId, payment.id)).toEqual(check);
+    await stores.debts.saveCheck({ ...check, cashedOn: "2026-10-28", cashedById: "stf_x" });
+    expect((await stores.debts.listChecks(cafeId, { open: true })).map((c) => c.id)).not.toContain(check.id);
+    // A check written for a bill payment keeps that payment from being removed under it.
+    await expect(stores.bills.removePayment(cafeId, payment.id)).rejects.toThrow();
+    await stores.debts.removeCheck(cafeId, check.id);
+    await stores.bills.removePayment(cafeId, payment.id);
+
+    const lender = `member:stf_lender_${run}`;
+    const loan = {
+      id: `lon_${run}`, cafeId, lenderKey: lender, lenderMemberId: `stf_lender_${run}`, lenderName: "Murat Aksu", amountKurus: 54_000,
+      borrowedOn: "2026-10-10", dueDate: null, note: null, billPaymentId: null, createdById: "stf_x", createdAt: at,
+    };
+    await stores.debts.saveLoan(loan);
+    await stores.debts.saveLoan({ ...loan, id: `lon0_${run}`, borrowedOn: "2026-10-02", amountKurus: 10_000 });
+    expect((await stores.debts.listLoans(cafeId, { lenderKey: lender })).map((l) => l.id)).toEqual([`lon0_${run}`, loan.id]);
+    await stores.debts.addRepayment({ id: `lrp_${run}`, cafeId, lenderKey: lender, amountKurus: 20_000, method: "cash", paidOn: "2026-10-13", memberId: "stf_x", createdAt: at });
+    expect(await stores.debts.listRepayments(cafeId, { lenderKey: lender })).toHaveLength(1);
+    expect(await stores.debts.getRepayment(cafeId, `lrp_${run}`)).toMatchObject({ amountKurus: 20_000 });
+    await stores.debts.removeRepayment(cafeId, `lrp_${run}`);
+    await stores.debts.removeLoan(cafeId, `lon0_${run}`);
+    expect(await stores.debts.listLoans(cafeId, { lenderKey: lender })).toHaveLength(1);
+
+    const card = { cafeId, name: "Kafe kartı", limitKurus: 10_000_000, statementDay: 26, dueDay: 5, updatedAt: at };
+    await stores.debts.saveCard(card);
+    await stores.debts.saveCard({ ...card, limitKurus: 5_000_000 });
+    expect(await stores.debts.getCard(cafeId)).toMatchObject({ limitKurus: 5_000_000, statementDay: 26 });
+    await stores.debts.addCardPayment({ id: `cpy_${run}`, cafeId, amountKurus: 200_000, method: "bank", paidOn: "2026-10-12", memberId: "stf_x", createdAt: at });
+    expect(await stores.debts.listCardPayments(cafeId)).toEqual([{ id: `cpy_${run}`, cafeId, amountKurus: 200_000, method: "bank", paidOn: "2026-10-12", memberId: "stf_x", createdAt: at }]);
+    await stores.debts.removeCardPayment(cafeId, `cpy_${run}`);
+    expect(await stores.debts.getCardPayment(cafeId, `cpy_${run}`)).toBeNull();
   });
 });

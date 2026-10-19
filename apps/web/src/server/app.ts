@@ -30,7 +30,9 @@ import {
   InMemoryStockStore,
   type StockStore,
   InMemoryBillStore,
+  InMemoryDebtStore,
   type BillStore,
+  type DebtStore,
   type ImageStore,
   type ReportStore,
   InMemoryDirectory,
@@ -90,6 +92,7 @@ import { PaymentService } from "./payments";
 import { CashService } from "./cash";
 import { StockService } from "./stock";
 import { BillService } from "./bills";
+import { DebtService } from "./debts";
 import { bare, eventCapacity, eventTime, FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 
@@ -122,6 +125,7 @@ export interface PeniStores {
   reports: ReportStore;
   stock: StockStore;
   bills: BillStore;
+  debts: DebtStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -141,6 +145,7 @@ export function inMemoryStores(): PeniStores {
     reports: new InMemoryReportStore(),
     stock: new InMemoryStockStore(),
     bills: new InMemoryBillStore(),
+    debts: new InMemoryDebtStore(),
   };
 }
 
@@ -191,6 +196,9 @@ export class PeniApp {
   readonly bills: BillService;
   /** Suppliers, bills and their payments as stored; for the demo seed and the data move from Shelby. */
   readonly billStore: BillStore;
+  readonly debts: DebtService;
+  /** Checks, loans and the card as stored; for the demo seed and the data move from Shelby. */
+  readonly debtStore: DebtStore;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   readonly feed: FeedService;
@@ -241,7 +249,9 @@ export class PeniApp {
     this.stock = new StockService(stores.stock, this.menu, stores.staff, () => this.now());
     this.till.stock = this.stock;
     this.billStore = stores.bills;
-    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, (fn) => stores.ledger.atomically(fn), () => this.now());
+    this.debtStore = stores.debts;
+    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, stores.debts, (fn) => stores.ledger.atomically(fn), () => this.now());
+    this.debts = new DebtService(stores.debts, stores.bills, this.bills, this.directory, stores.staff, (fn) => stores.ledger.atomically(fn), () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
@@ -739,6 +749,7 @@ export class PeniApp {
       memberCount: members.length,
       lowStock: permissions?.has("stock.view") ? await this.stock.lowStock(cafe.id) : null,
       billsOwed: permissions?.has("bills.view") ? await this.bills.owed(cafe.id) : null,
+      debts: permissions?.has("debts.view") ? (await this.debts.overview(cafe.id, permissions)).totals : null,
     };
   }
 
