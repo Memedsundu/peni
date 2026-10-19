@@ -2,6 +2,8 @@
 
 Everything here is implemented in `packages/core` (`peni-service.ts`, `rules.ts`, `ledger.ts`) and covered by `packages/core/test`. If this document and the tests disagree, the tests are right and this document needs fixing.
 
+Some rules change as [the plan](plan.md) is built: earning moves to a one-time claim code on the customer screen (piece 10), spending moves to the member QR at the till (piece 11), and the askı loses its daily limit (piece 13).
+
 ## Units
 
 - **Money** is in kuruş (integers): 120,00 TL = `12000`.
@@ -47,7 +49,6 @@ Every operation carries an **idempotency key**, so a retried request or a webhoo
 - Earned when an order is **paid at the till**, at the café's rate (`earnRateBps`, default 5 %), and **rounded down** to whole peni.
 - It's earned **only on the money actually paid**. The part covered by peni or by the askı earns nothing.
 - Blocked members earn nothing.
-- Walk-in orders that weren't placed in the app earn too, if the till scans the member's Peni code (`membershipHint` in the Shelby webhook).
 
 ## Spending
 
@@ -55,8 +56,7 @@ Every operation carries an **idempotency key**, so a retried request or a webhoo
   - their balance
   - the eligible items (`redeemableProductIds`, default: all)
   - the café's maximum share of an order (`maxRedeemShareBps`, default 100 %)
-- Peni is **reserved when the order is submitted**. If the order is rejected, cancelled or a no-show, the peni goes back to the wallet.
-- If the order total reaches 0, Shelby records it as paid with payment method `loyalty` and posts no cash movement (see the Shelby doc).
+- Peni is **reserved against the till order**. If the order is voided, the peni goes back to the wallet.
 
 ## Gifts (*ısmarlama*)
 
@@ -71,7 +71,7 @@ The askı is a shared pool owned by no one: a modern *askıda kahve*.
 **Filling it**
 
 - **Members** leave peni (`donateToAskida`). They choose whether their name appears on the askı wall (default: no).
-- **The till**: a guest pays cash for an askı coffee and staff record it in the panel (`recordTillDonation`). In Shelby this is an ordinary sale; Peni only records the askı credit.
+- **The till**: a guest pays cash for an askı coffee and staff record it in the panel (`recordTillDonation`). The sale itself is ordinary; Peni only records the askı credit.
 - **The café** can add a matching share on top of member donations (`askidaMatchBps`, e.g. 50 %), up to a monthly cap (`askidaMatchMonthlyCapPeni`).
 
 **Taking from it**
@@ -82,17 +82,12 @@ The askı is a shared pool owned by no one: a modern *askıda kahve*.
   - `askidaClaimsPerDay` per member (default 1), per local day
   - an optional minimum membership age (`askidaMinMembershipDays`)
   - blocked members can't take from it
-- If the order is rejected or cancelled, the item goes back to the askı and doesn't count against the daily limit.
+- If the order is voided, the item goes back to the askı and doesn't count against the daily limit.
 
 **Who sees what**
 
 - The askı wall shows donations (with a name only if the donor chose that), till donations, café matching, and "someone took a tea".
-- **Takers are never named**: not on the wall, not in the API, not in reports. Staff see an "askı" tag on the order line, because they need it to ring it up.
-
-## Pickups & no-shows
-
-- Stock is deducted in Shelby when the order is paid, so a no-show means the café made the drink for nothing. The barista taps **Gelmedi**, the reserved peni and askı item are released, and the member gets a strike.
-- After `noShowStrikeLimit` (2) consecutive no-shows, **pre-ordering turns off** for that member at that café. A collected order resets the count. Staff can switch pre-ordering back on.
+- **Takers are never named**: not on the wall, not in the API, not in reports. Staff see an "askı" tag on the till line, because they need it to ring it up.
 
 ## Refunds
 

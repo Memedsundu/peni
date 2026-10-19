@@ -3,7 +3,6 @@ import type {
   CafeDetailDTO,
   CafeHue,
   CafeSummaryDTO,
-  CreateOrderRequest,
   CustomerDTO,
   FullWalletDTO,
   GiftDTO,
@@ -12,13 +11,9 @@ import type {
   MeDTO,
   MemberLookupDTO,
   MenuItemDTO,
-  OrderDTO,
-  OrderLineDTO,
-  PauseDuration,
   PostDTO,
   RecentRecipientDTO,
   RefItemDTO,
-  SessionDTO,
   StaffCafeDTO,
   StaffDashboardDTO,
   StaffReportFieldsDTO,
@@ -27,41 +22,32 @@ import type {
 } from "@peni/api";
 import {
   InMemoryDirectory,
+  InMemoryMenuStore,
   InMemoryLedgerStore,
   Ledger,
   PeniError,
   PeniService,
-  StandalonePosAdapter,
-  TERMINAL_STATUSES,
-  initialFulfillment,
   memberCode,
   normalizeMemberCode,
-  prepTimeStats,
   startOfLocalDay,
-  startOfNextLocalDay,
-  transition,
   type AskidaWallEvent,
   type CafePeniReport,
   type CafePeniSettings,
-  type FulfillmentAction,
-  type FulfillmentState,
   type Gift,
   type MenuItem,
-  type PosAdapter,
-  type PosEvent,
 } from "@peni/core";
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
-import { createHash, randomBytes, randomInt } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { buildIcs } from "./ics";
 
 /**
  * The Peni application layer: everything the HTTP routes call.
  *
  * Peni rules (wallets, gifts, askı) live in @peni/core's PeniService; this class
- * adds customers, cafés, orders, the community feed and the POS. In v0.1 it runs
- * on in-memory records seeded with demo data (see seed.ts). Postgres-backed
- * ledger and directory implementations already exist in @peni/db; moving the
- * remaining records there is the first roadmap item.
+ * adds customers, cafés, menus and the community feed. For now it runs on
+ * in-memory records seeded with demo data (see seed.ts). Postgres-backed ledger
+ * and directory implementations already exist in @peni/db; moving the remaining
+ * records there is the next piece of the plan (docs/plan.md, piece 1).
  */
 
 export class AppError extends Error {
@@ -94,10 +80,6 @@ export interface CafeRecord {
   district: string | null;
   city: string | null;
   coverImageUrl: string | null;
-  posKind: "standalone" | "shelby";
-  appOrderingPaused: boolean;
-  /** A timed pause resumes by itself at this moment. [G20] */
-  pausedUntil?: Date | null;
   /** Items that read peni as goods ("3 çay"). Defaults to the cheapest askı items. [G1] */
   referenceProductIds?: string[];
   /** The café's own colourway, once it picks one. [G9] */
@@ -110,25 +92,6 @@ export interface CustomerRecord {
   displayName: string;
   avatarUrl: string | null;
   profileVisible: boolean;
-}
-
-interface OrderRecord {
-  id: string;
-  cafeId: string;
-  customerId: string;
-  membershipId: string;
-  idempotencyKey: string;
-  posOrderId: string | null;
-  orderNumber: string | null;
-  fulfillment: FulfillmentState;
-  lines: OrderLineDTO[];
-  subtotalKurus: number;
-  peniDiscountKurus: number;
-  askidaKurus: number;
-  dueKurus: number;
-  customerNote: string | null;
-  /** Read from the ledger when the order is paid, and again after a refund. [G7] */
-  earnedPeni?: number | null;
 }
 
 export interface PostRecord {
@@ -147,32 +110,13 @@ export interface PostRecord {
   comments: { id: string; customerId: string; body: string; createdAt: Date }[];
 }
 
-interface PendingCode {
-  codeHash: string;
-  expiresAt: number;
-  attempts: number;
-}
-
-export interface Notification {
-  customerId: string;
-  template: string;
-  orderId: string;
-  at: Date;
-}
-
 export interface PeniAppOptions {
   demo: boolean;
   staffKey: string;
-  /** Defaults to the system clock. Tests move it to check pauses and day boundaries. */
+  /** Defaults to the system clock. Tests move it to check day boundaries. */
   clock?: () => Date;
 }
 
-const DEMO_CODE = "000000";
-/**
- * The name of a customer who hasn't given one yet. Never "Yeni …": a ticket reads its first
- * word as the customer's name, and "P-005 Yeni" in the board's "Yeni" column reads as a status.
- */
-const NEW_GUEST_NAME = "Misafir";
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 /** Gift recipient lookups per customer per hour. [G6] */
@@ -184,34 +128,25 @@ export class PeniApp {
   readonly directory = new InMemoryDirectory();
   readonly ledger = new Ledger(new InMemoryLedgerStore());
   readonly peni: PeniService;
-  readonly pos: StandalonePosAdapter;
+  readonly menu = new InMemoryMenuStore();
 
   readonly cafes = new Map<string, CafeRecord>();
   readonly customers = new Map<string, CustomerRecord>();
   readonly posts = new Map<string, PostRecord>();
-  readonly notifications: Notification[] = [];
-  private readonly orders = new Map<string, OrderRecord>();
   private readonly sessions = new Map<string, string>(); // token hash to customer id
-  private readonly codes = new Map<string, PendingCode>();
   private readonly memberIndex = new Map<string, string>(); // `${customerId}:${cafeId}` to membership id
   private readonly memberCodes = new Map<string, string>(); // membership id to Peni kodu
   private readonly membersByCode = new Map<string, string>(); // Peni kodu to membership id
   private readonly staffRoles = new Map<string, { cafeId: string; role: StaffRole }[]>(); // customer id to cafés
-  private readonly unnamed = new Set<string>(); // customers who have not told us their name yet
   private readonly lookups = new Map<string, number[]>(); // customer id to lookup times (ms)
   private readonly thanks = new Map<string, Date>(); // gift id to when the recipient said thanks
   private clockOverride: Date | null = null;
 
-  constructor(
-    private readonly options: PeniAppOptions,
-    /** POS per café kind. Shelby cafés get a ShelbyPosAdapter when configured. */
-    private readonly posFor: (cafe: CafeRecord) => PosAdapter = () => this.pos,
-  ) {
+  constructor(private readonly options: PeniAppOptions) {
     this.peni = new PeniService(this.ledger, this.directory, () => this.now());
-    this.pos = new StandalonePosAdapter({ clock: () => this.now() });
   }
 
-  /** The app's clock. Everything time-based (orders, ledger, pauses, codes) reads it. */
+  /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
   now(): Date {
     return this.clockOverride ? new Date(this.clockOverride) : (this.options.clock?.() ?? new Date());
   }
@@ -227,53 +162,7 @@ export class PeniApp {
     }
   }
 
-  // ─────────────────────────────────────────────── auth (phone + SMS code)
-
-  async requestCode(phone: string): Promise<{ sent: true; devCode?: string }> {
-    const code = this.options.demo ? DEMO_CODE : String(randomInt(0, 1_000_000)).padStart(6, "0");
-    this.codes.set(phone, { codeHash: sha256(code), expiresAt: this.now().getTime() + 5 * 60_000, attempts: 0 });
-    if (!this.options.demo) {
-      // TODO(sms): send through the SMS provider (see docs/roadmap.md). Never log the code.
-      throw new AppError("SMS_NOT_CONFIGURED", "SMS provider is not configured", 503);
-    }
-    return { sent: true, devCode: code };
-  }
-
-  async verifyCode(phone: string, code: string, displayName?: string): Promise<SessionDTO> {
-    const pending = this.codes.get(phone);
-    if (!pending || pending.expiresAt < this.now().getTime()) throw new AppError("CODE_INVALID", "Code expired", 401);
-    if (++pending.attempts > 5) {
-      this.codes.delete(phone);
-      throw new AppError("RATE_LIMITED", "Too many attempts", 429);
-    }
-    if (pending.codeHash !== sha256(code)) throw new AppError("CODE_INVALID", "Wrong code", 401);
-    this.codes.delete(phone);
-
-    let customer = [...this.customers.values()].find((c) => c.phone === phone);
-    if (!customer) {
-      const name = displayName?.trim();
-      customer = {
-        id: `cus_${crypto.randomUUID()}`,
-        phone,
-        displayName: name || NEW_GUEST_NAME,
-        avatarUrl: null,
-        profileVisible: false,
-      };
-      this.customers.set(customer.id, customer);
-      if (!name) this.unnamed.add(customer.id);
-    } else if (displayName?.trim() && this.unnamed.has(customer.id)) {
-      customer.displayName = displayName.trim();
-      this.unnamed.delete(customer.id);
-    }
-    const token = randomBytes(32).toString("base64url");
-    this.sessions.set(sha256(token), customer.id);
-    return {
-      token,
-      customer: toCustomerDTO(customer),
-      isNew: this.unnamed.has(customer.id),
-      staffCafes: this.staffCafesFor(customer.id),
-    };
-  }
+  // ─────────────────────────────────────────────── sessions
 
   customerForToken(token: string | null): CustomerRecord | null {
     if (!token) return null;
@@ -281,7 +170,10 @@ export class PeniApp {
     return id ? (this.customers.get(id) ?? null) : null;
   }
 
-  /** Demo only: a session for a seeded customer, so the web demo can sign in with one tap. */
+  /**
+   * Demo only: a session for a seeded customer, so the web demo can sign in with one tap.
+   * Google, Apple and email sign-in replace it (plan piece 3).
+   */
   createSessionFor(customerId: string): string {
     const token = randomBytes(32).toString("base64url");
     this.sessions.set(sha256(token), customerId);
@@ -301,10 +193,7 @@ export class PeniApp {
   /** "Adın" and "Profilim görünsün". [G18] */
   updateProfile(customer: CustomerRecord, input: { displayName?: string; profileVisible?: boolean }): MeDTO {
     const name = input.displayName?.trim();
-    if (name) {
-      customer.displayName = name;
-      this.unnamed.delete(customer.id);
-    }
+    if (name) customer.displayName = name;
     if (input.profileVisible !== undefined) customer.profileVisible = input.profileVisible;
     return this.me(customer);
   }
@@ -325,10 +214,9 @@ export class PeniApp {
   async cafeDetail(slug: string, customer: CustomerRecord | null): Promise<CafeDetailDTO> {
     const cafe = this.requireCafe(slug);
     const settings = await this.directory.getSettings(cafe.id);
-    const menu = await this.posFor(cafe).listMenu(cafe.id);
+    const menu = await this.menu.listMenu(cafe.id);
     const membershipId = customer ? this.memberIndex.get(`${customer.id}:${cafe.id}`) : undefined;
     const membership = membershipId ? await this.directory.getMembership(membershipId) : null;
-    const prep = this.prepStats(cafe.id);
 
     return {
       ...(await this.cafeSummary(cafe, customer)),
@@ -342,14 +230,10 @@ export class PeniApp {
         ? {
             id: membership.id,
             balancePeni: await this.peni.walletBalance(membership.id),
-            preorderEnabled: membership.preorderEnabled,
             joinedAt: membership.joinedAt.toISOString(),
-            noShowStrikes: membership.consecutiveNoShows,
             memberCode: this.memberCodeFor(membership.id),
           }
         : null,
-      medianPrepMinutes: prep?.medianMinutes ?? null,
-      prepMinutesRange: prep ? { low: prep.lowMinutes, high: prep.highMinutes } : null,
     };
   }
 
@@ -366,15 +250,7 @@ export class PeniApp {
     const id = `mem_${crypto.randomUUID()}`;
     this.memberIndex.set(key, id);
     this.memberCodeFor(id);
-    await this.directory.saveMembership({
-      id,
-      cafeId,
-      customerId,
-      joinedAt,
-      blocked: false,
-      preorderEnabled: true,
-      consecutiveNoShows: 0,
-    });
+    await this.directory.saveMembership({ id, cafeId, customerId, joinedAt, blocked: false });
     return id;
   }
 
@@ -430,7 +306,7 @@ export class PeniApp {
       if (!key.startsWith(`${customer.id}:`)) continue;
       const cafe = this.cafeById(key.slice(customer.id.length + 1));
       const settings = await this.directory.getSettings(cafe.id);
-      const menu = await this.posFor(cafe).listMenu(cafe.id);
+      const menu = await this.menu.listMenu(cafe.id);
       cafes.push({
         cafeSlug: cafe.slug,
         cafeName: cafe.name,
@@ -452,7 +328,6 @@ export class PeniApp {
 
       for (const entry of await this.peni.memberHistory(membershipId)) {
         const gift = entry.giftId ? await this.directory.getGift(entry.giftId) : null;
-        const order = entry.orderId ? this.orders.get(entry.orderId) : undefined;
         ledger.push({
           id: entry.id,
           at: entry.at.toISOString(),
@@ -460,8 +335,7 @@ export class PeniApp {
           cafeName: cafe.name,
           kind: entry.kind,
           peni: entry.peni,
-          orderId: order?.id ?? null,
-          orderNumber: order?.orderNumber ?? null,
+          orderId: entry.orderId,
           giftId: entry.giftId,
           counterpartName: gift
             ? this.nameForMembership(entry.kind === "gift_in" ? gift.fromMembershipId : gift.toMembershipId)
@@ -538,7 +412,7 @@ export class PeniApp {
     if (!gift) throw new AppError("NOT_FOUND", "Gift not found", 404);
     const cafe = this.cafeById(gift.cafeId);
     const settings = await this.directory.getSettings(cafe.id);
-    const refItems = refItemsFor(cafe, settings, await this.posFor(cafe).listMenu(cafe.id));
+    const refItems = refItemsFor(cafe, settings, await this.menu.listMenu(cafe.id));
     const viewerMembership = viewer ? this.memberIndex.get(`${viewer.id}:${cafe.id}`) : undefined;
     return {
       id: gift.id,
@@ -588,239 +462,25 @@ export class PeniApp {
       idempotencyKey: input.idempotencyKey,
     });
     const settings = await this.directory.getSettings(cafe.id);
-    const menu = await this.posFor(cafe).listMenu(cafe.id);
+    const menu = await this.menu.listMenu(cafe.id);
     return { balancePeni: (await this.askida(cafe, settings, menu, { wallSize: 0 })).balancePeni };
-  }
-
-  // ─────────────────────────────────────────────── orders
-
-  async createOrder(customer: CustomerRecord, input: CreateOrderRequest) {
-    const cafe = this.requireCafe(input.cafeSlug);
-    const membershipId = this.requireMembershipId(customer.id, cafe.id);
-    const membership = (await this.directory.getMembership(membershipId))!;
-    if (membership.blocked) throw new PeniError("MEMBERSHIP_BLOCKED", "Membership is blocked");
-    if (!membership.preorderEnabled) throw new PeniError("PREORDER_DISABLED", "Pre-ordering is off for this member");
-
-    const replay = [...this.orders.values()].find(
-      (o) => o.customerId === customer.id && o.idempotencyKey === input.idempotencyKey,
-    );
-    if (replay) return this.orderDTO(replay);
-
-    const pos = this.posFor(cafe);
-    this.refreshPause(cafe);
-    if (cafe.appOrderingPaused || !(await pos.isAcceptingOrders(cafe.id))) {
-      throw new PeniError("ORDERING_CLOSED", "Café is not taking app orders right now");
-    }
-
-    // Prices always come from the café's menu, never from the client.
-    const menu = new Map((await pos.listMenu(cafe.id)).map((m) => [m.productId, m]));
-    const lines: OrderLineDTO[] = [];
-    for (const l of input.lines) {
-      const item = menu.get(l.productId);
-      if (!item || !item.available) throw new AppError("VALIDATION", `${l.productId} is not available`);
-      lines.push({
-        productId: item.productId,
-        name: item.name,
-        unitPriceKurus: item.priceKurus,
-        quantity: l.quantity,
-        note: l.note?.trim() || null,
-        fromAskida: false,
-      });
-    }
-
-    const orderId = `ord_${crypto.randomUUID()}`;
-    let askidaKurus = 0;
-    let peniDiscountKurus = 0;
-    try {
-      if (input.askidaProductId) {
-        const idx = lines.findIndex((l) => l.productId === input.askidaProductId);
-        if (idx < 0) throw new AppError("VALIDATION", "The askı item must be part of the order");
-        const line = lines[idx]!;
-        // One unit comes from the askı; split it out if the customer ordered more.
-        if (line.quantity > 1) {
-          line.quantity -= 1;
-          lines.splice(idx + 1, 0, { ...line, quantity: 1, fromAskida: true });
-        } else {
-          line.fromAskida = true;
-        }
-        const claim = await this.peni.claimFromAskida({
-          membershipId,
-          orderId,
-          productId: line.productId,
-          unitPriceKurus: line.unitPriceKurus,
-        });
-        askidaKurus = claim.discountKurus;
-      }
-
-      if (input.usePeni > 0) {
-        const redemption = await this.peni.redeemForOrder({
-          membershipId,
-          orderId,
-          lines: lines.filter((l) => !l.fromAskida),
-          requestedPeni: input.usePeni,
-        });
-        peniDiscountKurus = redemption.discountKurus;
-      }
-
-      const subtotalKurus = lines.reduce((s, l) => s + l.unitPriceKurus * l.quantity, 0);
-      const ref = await pos.createPendingOrder({
-        cafeId: cafe.id,
-        peniOrderId: orderId,
-        customerDisplayName: customer.displayName,
-        lines: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitPriceKurus: l.unitPriceKurus, note: l.note })),
-        customerNote: input.customerNote?.trim() || null,
-        peniDiscountKurus,
-        askidaKurus,
-      });
-
-      const order: OrderRecord = {
-        id: orderId,
-        cafeId: cafe.id,
-        customerId: customer.id,
-        membershipId,
-        idempotencyKey: input.idempotencyKey,
-        posOrderId: ref.posOrderId,
-        orderNumber: ref.orderNumber,
-        fulfillment: initialFulfillment(this.now()),
-        lines,
-        subtotalKurus,
-        peniDiscountKurus,
-        askidaKurus,
-        dueKurus: subtotalKurus - peniDiscountKurus - askidaKurus,
-        customerNote: input.customerNote?.trim() || null,
-        earnedPeni: null,
-      };
-      this.orders.set(order.id, order);
-      return this.orderDTO(order);
-    } catch (error) {
-      // Anything reserved for this order goes back: askı item to the pool, peni to the wallet.
-      await this.peni.releaseOrder(cafe.id, orderId, "order_failed");
-      throw error;
-    }
-  }
-
-  ordersFor(customer: CustomerRecord): OrderDTO[] {
-    return [...this.orders.values()]
-      .filter((o) => o.customerId === customer.id)
-      .sort((a, b) => b.fulfillment.submittedAt.getTime() - a.fulfillment.submittedAt.getTime())
-      .map((o) => this.orderDTO(o));
-  }
-
-  orderFor(customer: CustomerRecord, orderId: string): OrderDTO {
-    const order = this.orders.get(orderId);
-    if (!order || order.customerId !== customer.id) throw new AppError("NOT_FOUND", "Order not found", 404);
-    return this.orderDTO(order);
-  }
-
-  async cancelOrder(customer: CustomerRecord, orderId: string): Promise<OrderDTO> {
-    const order = this.orders.get(orderId);
-    if (!order || order.customerId !== customer.id) throw new AppError("NOT_FOUND", "Order not found", 404);
-    return this.applyTransition(order, "cancel", "customer");
-  }
-
-  async staffTransition(slug: string, orderId: string, action: FulfillmentAction, reason?: string) {
-    const cafe = this.requireCafe(slug);
-    const order = this.orders.get(orderId);
-    if (!order || order.cafeId !== cafe.id) throw new AppError("NOT_FOUND", "Order not found", 404);
-    if (action === "collect" && cafe.posKind === "shelby") {
-      throw new AppError("INVALID_TRANSITION", "Shelby cafés close orders from the till; Shelby notifies Peni when paid");
-    }
-    return this.applyTransition(order, action, "staff", reason);
-  }
-
-  /**
-   * Pauses or resumes app orders [G20]. `true` pauses with no end and `false` (or
-   * null) resumes, as before; `{ minutes }` and `"end_of_day"` resume by themselves.
-   */
-  async setPaused(slug: string, pause: boolean | PauseDuration | null) {
-    const cafe = this.requireCafe(slug);
-    const now = this.now();
-    if (pause === false || pause === null) {
-      cafe.appOrderingPaused = false;
-      cafe.pausedUntil = null;
-    } else if (pause === true) {
-      cafe.appOrderingPaused = true;
-      cafe.pausedUntil = null;
-    } else if (pause === "end_of_day") {
-      const { timeZone } = await this.directory.getSettings(cafe.id);
-      cafe.appOrderingPaused = true;
-      cafe.pausedUntil = startOfNextLocalDay(now, timeZone);
-    } else {
-      cafe.appOrderingPaused = true;
-      cafe.pausedUntil = new Date(now.getTime() + pause.minutes * 60_000);
-    }
-    return { appOrderingPaused: cafe.appOrderingPaused, pausedUntil: cafe.pausedUntil?.toISOString() ?? null };
-  }
-
-  /** Webhook from the POS (Shelby). Safe to receive twice. */
-  async handlePosEvent(event: PosEvent): Promise<void> {
-    const order = [...this.orders.values()].find(
-      (o) => o.posOrderId === event.posOrderId || (event.peniOrderId && o.id === event.peniOrderId),
-    );
-    if (event.type === "order.paid") {
-      if (order) {
-        if (!TERMINAL_STATUSES.includes(order.fulfillment.status)) {
-          await this.applyTransition(order, "collect", "system", undefined, event.paidTotalKurus);
-        }
-        return;
-      }
-      // A walk-in order at the till: the member showed their Peni kodu (or the till sent the membership id).
-      const hint = event.membershipHint;
-      if (hint) {
-        const membershipId = "membershipId" in hint ? hint.membershipId : this.membershipForCode(hint.memberCode);
-        if (!membershipId) throw new AppError("NOT_FOUND", "Unknown Peni kodu", 404);
-        await this.peni.earnForPaidOrder({
-          membershipId,
-          orderId: `pos:${event.posOrderId}`,
-          paidTotalKurus: event.paidTotalKurus,
-        });
-      }
-      return;
-    }
-    if (event.type === "order.refunded") {
-      const cafeId = order?.cafeId ?? null;
-      if (cafeId) {
-        await this.peni.refundOrder(cafeId, order!.id);
-        order!.earnedPeni = await this.peni.earnedForOrder(order!.id);
-      }
-      return;
-    }
-    if (event.type === "order.cancelled" && order && !TERMINAL_STATUSES.includes(order.fulfillment.status)) {
-      const action = order.fulfillment.status === "ready" ? "no_show" : "reject";
-      await this.applyTransition(order, action, action === "no_show" ? "system" : "staff", "Kasada iptal edildi");
-    }
   }
 
   // ─────────────────────────────────────────────── staff dashboard
 
   async staffDashboard(slug: string): Promise<StaffDashboardDTO> {
     const cafe = this.requireCafe(slug);
-    this.refreshPause(cafe);
     const settings = await this.directory.getSettings(cafe.id);
-    const menu = await this.posFor(cafe).listMenu(cafe.id);
+    const menu = await this.menu.listMenu(cafe.id);
     const now = this.now();
     const since = new Date(now.getTime() - 30 * DAY_MS);
     const previousSince = new Date(now.getTime() - 60 * DAY_MS);
     const report = await this.peni.cafeReport(cafe.id, since);
     const previous = await this.peni.cafeReport(cafe.id, previousSince, since);
-    const orders = [...this.orders.values()]
-      .filter((o) => o.cafeId === cafe.id)
-      .filter((o) => !TERMINAL_STATUSES.includes(o.fulfillment.status) || this.closedRecently(o.fulfillment.closedAt))
-      .sort((a, b) => a.fulfillment.submittedAt.getTime() - b.fulfillment.submittedAt.getTime())
-      .map((o) => this.orderDTO(o));
     const members = [...this.directory.memberships.values()].filter((m) => m.cafeId === cafe.id);
 
     return {
-      cafe: {
-        id: cafe.id,
-        slug: cafe.slug,
-        name: cafe.name,
-        posKind: cafe.posKind,
-        acceptingOrders: !cafe.appOrderingPaused && (await this.posFor(cafe).isAcceptingOrders(cafe.id)),
-        appOrderingPaused: cafe.appOrderingPaused,
-        pausedUntil: cafe.pausedUntil?.toISOString() ?? null,
-      },
-      orders,
+      cafe: { id: cafe.id, slug: cafe.slug, name: cafe.name },
       askida: await this.askida(cafe, settings, menu),
       report: {
         ...report,
@@ -885,44 +545,9 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── internals
 
-  private async applyTransition(
-    order: OrderRecord,
-    action: FulfillmentAction,
-    actor: "customer" | "staff" | "system",
-    reason?: string,
-    paidTotalKurus?: number,
-  ): Promise<OrderDTO> {
-    const cafe = this.cafeById(order.cafeId);
-    const result = transition(order.fulfillment, action, actor, this.now(), reason);
-    order.fulfillment = result.state;
-
-    if (result.releaseReservations) {
-      // Discounts stay on the record as history; the ledger reversal is what returns the peni.
-      await this.peni.releaseOrder(order.cafeId, order.id, action);
-      if (order.posOrderId) await this.posFor(cafe).cancelPendingOrder(order.posOrderId, reason ?? action);
-    }
-    if (action === "no_show") await this.peni.recordPickupOutcome(order.membershipId, "no_show");
-    if (action === "collect") {
-      await this.peni.recordPickupOutcome(order.membershipId, "collected");
-      // Peni is earned on what the guest actually paid, never on the part covered by peni or the askı.
-      await this.peni.earnForPaidOrder({
-        membershipId: order.membershipId,
-        orderId: order.id,
-        paidTotalKurus: paidTotalKurus ?? order.dueKurus,
-      });
-      order.earnedPeni = await this.peni.earnedForOrder(order.id);
-    }
-    if (result.notify) {
-      // TODO(push): deliver through Expo push to the customer's devices.
-      this.notifications.push({ customerId: order.customerId, template: result.notify, orderId: order.id, at: this.now() });
-    }
-    return this.orderDTO(order);
-  }
-
   private async cafeSummary(cafe: CafeRecord, customer: CustomerRecord | null): Promise<CafeSummaryDTO> {
-    this.refreshPause(cafe);
     const settings = await this.directory.getSettings(cafe.id);
-    const menu = await this.posFor(cafe).listMenu(cafe.id);
+    const menu = await this.menu.listMenu(cafe.id);
     const reference = askidaReference(cafe, settings, menu);
     const snap = await this.peni.askidaSnapshot(cafe.id, reference?.priceKurus ?? 100);
     const membershipId = customer ? this.memberIndex.get(`${customer.id}:${cafe.id}`) : undefined;
@@ -933,7 +558,6 @@ export class PeniApp {
       district: cafe.district,
       city: cafe.city,
       coverImageUrl: cafe.coverImageUrl,
-      acceptingOrders: !cafe.appOrderingPaused && (await this.posFor(cafe).isAcceptingOrders(cafe.id)),
       askidaItemsAvailable: reference ? snap.itemsAvailable : 0,
       isMember: !!membershipId,
       balancePeni: membershipId ? await this.peni.walletBalance(membershipId) : null,
@@ -1026,42 +650,6 @@ export class PeniApp {
     return next ? { postId: next.id, startsAt: next.eventStartsAt!.toISOString(), title: postTitle(next) } : null;
   }
 
-  /** Accept-to-ready time over collected orders of the last 30 days. Null below 20 orders. [G14] */
-  private prepStats(cafeId: string) {
-    const since = this.now().getTime() - 30 * DAY_MS;
-    return prepTimeStats(
-      [...this.orders.values()]
-        .filter((o) => o.cafeId === cafeId && (o.fulfillment.closedAt?.getTime() ?? 0) >= since)
-        .map((o) => o.fulfillment),
-    );
-  }
-
-  private orderDTO(o: OrderRecord): OrderDTO {
-    const cafe = this.cafeById(o.cafeId);
-    const f = o.fulfillment;
-    return {
-      id: o.id,
-      cafeSlug: cafe.slug,
-      cafeName: cafe.name,
-      orderNumber: o.orderNumber,
-      status: f.status,
-      customerName: this.customers.get(o.customerId)?.displayName ?? "Misafir",
-      lines: o.lines,
-      subtotalKurus: o.subtotalKurus,
-      peniDiscountKurus: o.peniDiscountKurus,
-      askidaKurus: o.askidaKurus,
-      dueKurus: o.subtotalKurus - o.peniDiscountKurus - o.askidaKurus,
-      customerNote: o.customerNote,
-      rejectionReason: f.rejectionReason,
-      submittedAt: f.submittedAt.toISOString(),
-      acceptedAt: f.acceptedAt?.toISOString() ?? null,
-      readyAt: f.readyAt?.toISOString() ?? null,
-      closedAt: f.closedAt?.toISOString() ?? null,
-      earnedPeni: f.status === "collected" ? (o.earnedPeni ?? null) : null,
-      memberCode: this.memberCodeFor(o.membershipId),
-    };
-  }
-
   private async giftDTO(g: Gift, viewerMembershipId: string): Promise<GiftDTO> {
     const cafe = this.cafeById(g.cafeId);
     const direction = g.toMembershipId === viewerMembershipId ? "in" : "out";
@@ -1118,18 +706,6 @@ export class PeniApp {
     }
     recent.push(now);
     this.lookups.set(customerId, recent);
-  }
-
-  /** A timed pause that has run out resumes on the next read. [G20] */
-  private refreshPause(cafe: CafeRecord): void {
-    if (cafe.appOrderingPaused && cafe.pausedUntil && cafe.pausedUntil <= this.now()) {
-      cafe.appOrderingPaused = false;
-      cafe.pausedUntil = null;
-    }
-  }
-
-  private closedRecently(d: Date | null): boolean {
-    return !!d && this.now().getTime() - d.getTime() < 12 * HOUR_MS;
   }
 
   private staffCafesFor(customerId: string): StaffCafeDTO[] {

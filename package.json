@@ -14,9 +14,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint",
     "db:generate": "pnpm --filter @peni/db generate",
-    "db:migrate": "pnpm --filter @peni/db migrate",
-    "brand:css": "node --experimental-strip-types packages/brand/scripts/build-css.ts",
-    "brand:assets": "pnpm --filter @peni/brand make-assets"
+    "db:migrate": "pnpm --filter @peni/db migrate"
   },
   "devDependencies": {
     "turbo": "2.11.8",

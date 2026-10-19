@@ -1,7 +1,7 @@
 /**
  * Turkish copy for error codes returned by the API (and NETWORK from the client).
- * Unknown codes fall back to the server message. Wording follows §9 and §11 of
- * docs/design-system.md: sen, short, no blame, no exclamation marks.
+ * Unknown codes fall back to the server message. Wording: sen, short, no blame,
+ * no exclamation marks.
  */
 export const errorMessagesTr: Record<string, string> = {
   NETWORK: "Bağlantı kurulamadı. Tekrar dene.",
@@ -26,29 +26,11 @@ export const errorMessagesTr: Record<string, string> = {
   ASKIDA_TOO_NEW: "Askıdan almak için üyeliğinin biraz daha eski olması gerekiyor.",
   PRODUCT_NOT_ELIGIBLE: "Bu ürün askıdan alınamıyor.",
   EVENT_FULL: "Masa doldu.",
-  INVALID_TRANSITION: "Sipariş bu aşamada değiştirilemez.",
-  ORDERING_CLOSED: "Kafe şu an uygulamadan sipariş almıyor. Kasaya uğrayabilirsin.",
-  PREORDER_DISABLED:
-    "Son iki siparişin teslim alınmadığı için burada önden sipariş şimdilik kapalı. Kafeye uğradığında baristaya söylemen yeterli; yeniden açabilir.",
-  CODE_INVALID: "Kod tutmadı. Tekrar dener misin?",
-  RATE_LIMITED: "Çok fazla hatalı deneme oldu. Yeni bir kod iste.",
-  SMS_NOT_CONFIGURED: "Şu an SMS gönderemiyoruz. Biraz sonra tekrar dene.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {
   return errorMessagesTr[code] ?? fallback ?? "Bir şeyler ters gitti. Tekrar dene.";
 }
-
-/** Status words (§11). The fiş headline per status is longer copy, written in the screen. */
-export const fulfillmentLabelsTr = {
-  submitted: "İletildi",
-  accepted: "Hazırlanıyor",
-  ready: "Hazır",
-  collected: "Teslim edildi",
-  rejected: "Kafe yetişemedi",
-  cancelled: "İptal edildi",
-  no_show: "Teslim alınmadı",
-} as const;
 
 /** Kept for existing screens; new UI uses `formatTL` from `@peni/brand`. */
 export function formatKurus(kurus: number): string {

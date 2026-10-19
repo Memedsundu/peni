@@ -25,7 +25,6 @@ describe.each(times)("seed at %s", (iso) => {
     expect(d.askida.myEligibility.status).toBe("ok");
     expect(d.askida.itemsAvailable).toBeGreaterThan(0);
     expect(d.askida.claimedLast7Days).toBeGreaterThanOrEqual(3);
-    expect(d.medianPrepMinutes).not.toBeNull();
     expect((await moda(DEMO_CUSTOMERS.ayse.id)).membership!.balancePeni).toBeGreaterThanOrEqual(100);
     expect((await moda(DEMO_CUSTOMERS.mehmet.id)).membership!.balancePeni).toBeGreaterThanOrEqual(40);
     expect((await moda(DEMO_CUSTOMERS.mehmet.id)).askida.myEligibility.status).toBe("claimed_today");
@@ -33,7 +32,6 @@ describe.each(times)("seed at %s", (iso) => {
     const q = d.posts.find((p) => p.kind === "question")!;
     expect(q.comments.length).toBe(4);
     for (const cm of q.comments) expect(new Date(cm.createdAt).getTime()).toBeLessThanOrEqual(now.getTime());
-    expect((await app.staffDashboard("moda")).orders.map((o) => o.status).filter((st) => st !== "collected" && st !== "no_show")).toEqual(["ready", "accepted", "submitted"]);
     const kuz = await app.cafeDetail("kuzguncuk", c(DEMO_CUSTOMERS.deniz.id));
     expect(kuz.askida.myEligibility).toEqual({ status: "too_new", daysLeft: 3 });
     const w = await app.wallet(c(DEMO_CUSTOMERS.ayse.id));

@@ -15,7 +15,7 @@ datasource db {
 /// A person using the customer app. Not tied to any café — they join cafés through Membership.
 model Customer {
   id                  String    @id @default(cuid())
-  /// E.164, e.g. +905321234567. Login is phone number + SMS code.
+  /// E.164, e.g. +905321234567. Only the demo sign-in uses it now; Google, Apple and email sign-in replace it (plan piece 3).
   phone               String    @unique
   displayName         String
   avatarUrl           String?
@@ -25,24 +25,12 @@ model Customer {
   createdAt           DateTime  @default(now())
   deletionRequestedAt DateTime?
 
-  memberships  Membership[]
-  sessions     CustomerSession[]
-  devices      CustomerDevice[]
-  comments     PostComment[]
-  reactions    PostReaction[]
-  rsvps        EventRsvp[]
-}
-
-model PhoneVerification {
-  id         String    @id @default(cuid())
-  phone      String
-  codeHash   String
-  attempts   Int       @default(0)
-  expiresAt  DateTime
-  consumedAt DateTime?
-  createdAt  DateTime  @default(now())
-
-  @@index([phone, createdAt])
+  memberships Membership[]
+  sessions    CustomerSession[]
+  devices     CustomerDevice[]
+  comments    PostComment[]
+  reactions   PostReaction[]
+  rsvps       EventRsvp[]
 }
 
 model CustomerSession {
@@ -80,36 +68,23 @@ model CustomerDevice {
 
 // ─────────────────────────────────────────────────────────── cafés
 
-enum PosKind {
-  /// Menu, open/closed state and payment come from Shelby.
-  shelby
-  /// No POS integration: menu lives in Peni, staff mark orders paid in the Peni panel.
-  standalone
-}
-
 model Cafe {
-  id                String   @id @default(cuid())
-  slug              String   @unique
-  name              String
-  address           String?
-  district          String?
-  city              String?
-  latitude          Float?
-  longitude         Float?
-  coverImageUrl     String?
-  timeZone          String   @default("Europe/Istanbul")
-  posKind           PosKind  @default(standalone)
-  /// Shelby's Cafe.id when posKind = shelby.
-  shelbyCafeId      String?  @unique
-  /// Barista's "pause app orders" switch for rush hours.
-  appOrderingPaused Boolean  @default(false)
-  createdAt         DateTime @default(now())
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  name          String
+  address       String?
+  district      String?
+  city          String?
+  latitude      Float?
+  longitude     Float?
+  coverImageUrl String?
+  timeZone      String   @default("Europe/Istanbul")
+  createdAt     DateTime @default(now())
 
   settings    CafeSettings?
   staff       StaffMember[]
   menu        MenuItem[]
   memberships Membership[]
-  orders      AppOrder[]
   posts       CafePost[]
 }
 
@@ -130,7 +105,6 @@ model CafeSettings {
   askidaMinMembershipDays   Int      @default(0)
   askidaMatchBps            Int      @default(0)
   askidaMatchMonthlyCapPeni Int      @default(0)
-  noShowStrikeLimit         Int      @default(2)
   updatedAt                 DateTime @updatedAt
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
@@ -143,14 +117,12 @@ enum StaffRole {
 }
 
 model StaffMember {
-  id           String    @id @default(cuid())
-  cafeId       String
-  name         String
-  email        String
-  role         StaffRole
-  /// Shelby User.id, for cafés that sign in to the Peni panel through Shelby.
-  shelbyUserId String?
-  createdAt    DateTime  @default(now())
+  id        String    @id @default(cuid())
+  cafeId    String
+  name      String
+  email     String
+  role      StaffRole
+  createdAt DateTime  @default(now())
 
   cafe  Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   posts CafePost[]
@@ -158,11 +130,11 @@ model StaffMember {
   @@unique([cafeId, email])
 }
 
-/// Standalone cafés edit this directly; for Shelby cafés it is a read cache of Shelby's menu.
+/// What a café sells. Edited in the Menü section of the café panel.
 model MenuItem {
   id          String  @id @default(cuid())
   cafeId      String
-  /// Stable product id (Shelby product id for Shelby cafés).
+  /// Stable product id.
   productId   String
   name        String
   category    String
@@ -180,17 +152,14 @@ model MenuItem {
 // ─────────────────────────────────────────────────────────── membership & peni
 
 model Membership {
-  id                 String   @id @default(cuid())
-  cafeId             String
-  customerId         String
-  joinedAt           DateTime @default(now())
-  blocked            Boolean  @default(false)
-  preorderEnabled    Boolean  @default(true)
-  consecutiveNoShows Int      @default(0)
+  id         String   @id @default(cuid())
+  cafeId     String
+  customerId String
+  joinedAt   DateTime @default(now())
+  blocked    Boolean  @default(false)
 
-  cafe     Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  customer Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  orders   AppOrder[]
+  cafe     Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([customerId, cafeId])
   @@index([cafeId])
@@ -273,61 +242,6 @@ model Gift {
   @@index([status, expiresAt])
 }
 
-// ─────────────────────────────────────────────────────────── app orders
-
-enum FulfillmentStatus {
-  submitted
-  accepted
-  ready
-  collected
-  rejected
-  cancelled
-  no_show
-}
-
-model AppOrder {
-  id                String            @id @default(cuid())
-  cafeId            String
-  membershipId      String
-  /// The order's id in the POS (Shelby Order.id, or standalone_<id>).
-  posOrderId        String?           @unique
-  orderNumber       String?
-  status            FulfillmentStatus @default(submitted)
-  subtotalKurus     Int
-  peniDiscountKurus Int               @default(0)
-  askidaKurus       Int               @default(0)
-  /// What the till charges: subtotal − peni − askı.
-  dueKurus          Int
-  customerNote      String?           @db.VarChar(200)
-  rejectionReason   String?
-  submittedAt       DateTime          @default(now())
-  acceptedAt        DateTime?
-  readyAt           DateTime?
-  closedAt          DateTime?
-
-  cafe       Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  membership Membership     @relation(fields: [membershipId], references: [id])
-  lines      AppOrderLine[]
-
-  @@index([cafeId, status, submittedAt])
-  @@index([membershipId, submittedAt])
-}
-
-model AppOrderLine {
-  id             String  @id @default(cuid())
-  orderId        String
-  productId      String
-  /// Snapshot of the name at order time.
-  name           String
-  unitPriceKurus Int
-  quantity       Int
-  note           String? @db.VarChar(100)
-  /// Paid by the askı pool rather than the customer.
-  fromAskida     Boolean @default(false)
-
-  order AppOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-}
-
 // ─────────────────────────────────────────────────────────── community (the penny university side)
 
 enum PostKind {
@@ -341,17 +255,17 @@ enum PostKind {
 
 /// Only café staff create posts. Members comment, react and RSVP.
 model CafePost {
-  id             String    @id @default(cuid())
-  cafeId         String
-  authorId       String
-  kind           PostKind  @default(post)
-  body           String    @db.VarChar(2000)
-  imageUrls      String[]  @default([])
-  pinned         Boolean   @default(false)
-  eventStartsAt  DateTime?
-  eventCapacity  Int?
-  publishedAt    DateTime  @default(now())
-  hiddenAt       DateTime?
+  id            String    @id @default(cuid())
+  cafeId        String
+  authorId      String
+  kind          PostKind  @default(post)
+  body          String    @db.VarChar(2000)
+  imageUrls     String[]  @default([])
+  pinned        Boolean   @default(false)
+  eventStartsAt DateTime?
+  eventCapacity Int?
+  publishedAt   DateTime  @default(now())
+  hiddenAt      DateTime?
 
   cafe      Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   author    StaffMember    @relation(fields: [authorId], references: [id])

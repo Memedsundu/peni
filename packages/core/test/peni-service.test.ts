@@ -11,7 +11,7 @@ describe("earning", () => {
     expect(await t.service.walletBalance("ayse")).toBe(11);
   });
 
-  it("does not pay twice when the till webhook is delivered twice", async () => {
+  it("does not pay twice when the till reports the same payment twice", async () => {
     const t = setup();
     await t.member("ayse");
     await t.service.earnForPaidOrder({ membershipId: "ayse", orderId: "o1", paidTotalKurus: 20_000 });
@@ -287,16 +287,5 @@ describe("café report", () => {
     expect(r.redeemedPeni).toBe(100);
     // 200 issued + 30 cash − 30 claimed − 100 redeemed = 100 still out there (40 wallet + 60 askı)
     expect(r.outstandingPeni).toBe(100);
-  });
-});
-
-describe("no-shows", () => {
-  it("switches pre-ordering off after two in a row, and a pickup resets the count", async () => {
-    const t = setup({ noShowStrikeLimit: 2 });
-    await t.member("ayse");
-    expect((await t.service.recordPickupOutcome("ayse", "no_show")).preorderEnabled).toBe(true);
-    await t.service.recordPickupOutcome("ayse", "collected");
-    expect((await t.service.recordPickupOutcome("ayse", "no_show")).preorderEnabled).toBe(true);
-    expect((await t.service.recordPickupOutcome("ayse", "no_show")).preorderEnabled).toBe(false);
   });
 });

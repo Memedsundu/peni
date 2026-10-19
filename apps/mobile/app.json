@@ -22,7 +22,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-foreground.png",
         "monochromeImage": "./assets/adaptive-monochrome.png",
-        "backgroundColor": "#F4EEE2"
+        "backgroundColor": "#FFFFFF"
       }
     },
     "web": {
@@ -36,10 +36,10 @@
         {
           "image": "./assets/splash-icon.png",
           "imageWidth": 160,
-          "backgroundColor": "#F4EEE2",
+          "backgroundColor": "#FFFFFF",
           "dark": {
             "image": "./assets/splash-icon.png",
-            "backgroundColor": "#14110E"
+            "backgroundColor": "#111111"
           }
         }
       ]

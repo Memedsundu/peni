@@ -1,7 +1,5 @@
 // Response shapes. Dates are ISO strings; money is kuruş; peni is whole numbers.
 
-export type FulfillmentStatus = "submitted" | "accepted" | "ready" | "collected" | "rejected" | "cancelled" | "no_show";
-
 export interface CustomerDTO {
   id: string;
   phone: string;
@@ -89,7 +87,6 @@ export interface CafeSummaryDTO {
   district: string | null;
   city: string | null;
   coverImageUrl: string | null;
-  acceptingOrders: boolean;
   askidaItemsAvailable: number;
   isMember: boolean;
   /** The viewer's balance here; null when not a member or signed out. [G1] */
@@ -106,10 +103,7 @@ export interface CafeSummaryDTO {
 export interface MembershipDTO {
   id: string;
   balancePeni: number;
-  preorderEnabled: boolean;
   joinedAt: string;
-  /** Consecutive orders not picked up. Pre-ordering switches off at the café's limit (2). [G5] */
-  noShowStrikes: number;
   /** Peni kodu for the till, e.g. "M7K-42Q". Encode exactly this string in the QR code. [G7b] */
   memberCode: string;
 }
@@ -151,10 +145,6 @@ export interface CafeDetailDTO extends CafeSummaryDTO {
   askida: AskidaDTO;
   posts: PostDTO[];
   membership: MembershipDTO | null;
-  /** Median accept-to-ready time over the last 30 days; null below 20 collected orders. [G14] */
-  medianPrepMinutes: number | null;
-  /** The usual range around it (interquartile), for "genelde 5–8 dk"; null with the median. [G14] */
-  prepMinutesRange: { low: number; high: number } | null;
 }
 
 export interface GiftDTO {
@@ -231,9 +221,8 @@ export interface LedgerEntryDTO {
   cafeName: string;
   kind: LedgerEntryKind;
   peni: number;
+  /** The till order this line belongs to, for earn, redeem and refund lines. */
   orderId: string | null;
-  /** "P-003"; null for walk-in purchases at the till. */
-  orderNumber: string | null;
   giftId: string | null;
   /** The other person of a gift line (display name, as in GiftDTO). */
   counterpartName: string | null;
@@ -269,39 +258,6 @@ export interface WalletDTO {
 /** What `GET /me/wallet` actually returns: both history arrays are always there. */
 export type FullWalletDTO = WalletDTO & { recentRecipients: RecentRecipientDTO[]; ledger: LedgerEntryDTO[] };
 
-export interface OrderLineDTO {
-  productId: string;
-  name: string;
-  unitPriceKurus: number;
-  quantity: number;
-  note: string | null;
-  fromAskida: boolean;
-}
-
-export interface OrderDTO {
-  id: string;
-  cafeSlug: string;
-  cafeName: string;
-  orderNumber: string | null;
-  status: FulfillmentStatus;
-  customerName: string;
-  lines: OrderLineDTO[];
-  subtotalKurus: number;
-  peniDiscountKurus: number;
-  askidaKurus: number;
-  dueKurus: number;
-  customerNote: string | null;
-  rejectionReason: string | null;
-  submittedAt: string;
-  acceptedAt: string | null;
-  readyAt: string | null;
-  closedAt: string | null;
-  /** Peni this order put in the wallet; null until it is collected (or when it earned nothing). [G7] */
-  earnedPeni: number | null;
-  /** The customer's Peni kodu at this café ("Peni kodun: M7K-42Q"). [G7b] */
-  memberCode: string | null;
-}
-
 export interface StaffReportFieldsDTO {
   sinceIso: string;
   issuedPeni: number;
@@ -319,14 +275,7 @@ export interface StaffDashboardDTO {
     id: string;
     slug: string;
     name: string;
-    /** Shelby cafés close orders from the Shelby till, not from the Peni panel. */
-    posKind: "standalone" | "shelby";
-    acceptingOrders: boolean;
-    appOrderingPaused: boolean;
-    /** Auto-resume time; null while not paused or paused with no end. [G20] */
-    pausedUntil: string | null;
   };
-  orders: OrderDTO[];
   askida: AskidaDTO;
   report: StaffReportFieldsDTO & {
     /**

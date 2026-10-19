@@ -9,9 +9,6 @@ export interface Membership {
   joinedAt: Date;
   /** Removed from the café's community by staff. Cannot earn, spend or take from the askı. */
   blocked: boolean;
-  /** Pre-ordering from the app. Switched off automatically after repeated no-shows. */
-  preorderEnabled: boolean;
-  consecutiveNoShows: number;
 }
 
 export type GiftStatus = "pending" | "accepted" | "declined" | "expired";

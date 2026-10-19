@@ -18,8 +18,6 @@ export function setup(overrides: Partial<CafePeniSettings> = {}) {
       customerId: `cust_${id}`,
       joinedAt: new Date("2026-09-01T00:00:00Z"),
       blocked: false,
-      preorderEnabled: true,
-      consecutiveNoShows: 0,
       ...extra,
     };
     await directory.saveMembership(m);

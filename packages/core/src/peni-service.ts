@@ -83,7 +83,7 @@ export interface CafePeniReport {
 }
 
 /**
- * Every peni rule lives here. Callers (web API, Shelby webhook, jobs) never
+ * Every peni rule lives here. Callers (web API, the till, jobs) never
  * touch the ledger directly.
  */
 export class PeniService {
@@ -173,7 +173,7 @@ export class PeniService {
     );
   }
 
-  /** Reserves peni against an app order when it is submitted. Released again if the order is not paid. */
+  /** Reserves peni against an order at the till. Released again if the order is not paid. */
   async redeemForOrder(input: {
     membershipId: string;
     orderId: string;
@@ -204,7 +204,7 @@ export class PeniService {
   }
 
   /**
-   * An app order that will never be paid (rejected, cancelled, no-show):
+   * An order that will never be paid (voided at the till):
    * peni spent on it goes back to the wallet and askı items go back to the askı.
    */
   async releaseOrder(cafeId: string, orderId: string, reason: string): Promise<LedgerTransaction[]> {
@@ -557,25 +557,6 @@ export class PeniService {
       }
     }
     return events.sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
-  }
-
-  // ---------------------------------------------------------------- pickups
-
-  /** Tracks no-shows. After `noShowStrikeLimit` in a row, pre-ordering is switched off for that member. */
-  async recordPickupOutcome(membershipId: string, outcome: "collected" | "no_show"): Promise<Membership> {
-    const membership = await this.requireMembership(membershipId);
-    const settings = await this.directory.getSettings(membership.cafeId);
-    const updated: Membership =
-      outcome === "collected"
-        ? { ...membership, consecutiveNoShows: 0 }
-        : {
-            ...membership,
-            consecutiveNoShows: membership.consecutiveNoShows + 1,
-            preorderEnabled:
-              membership.preorderEnabled && membership.consecutiveNoShows + 1 < settings.noShowStrikeLimit,
-          };
-    await this.directory.saveMembership(updated);
-    return updated;
   }
 
   // ---------------------------------------------------------------- reporting
