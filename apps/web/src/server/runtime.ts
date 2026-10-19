@@ -15,13 +15,14 @@ const globalForPeni = globalThis as unknown as { peniApp?: Promise<PeniApp>; pen
  * Customer sign-in reads GOOGLE_CLIENT_IDS and APPLE_CLIENT_IDS (comma-separated:
  * the web client and each app's) and RESEND_API_KEY with EMAIL_FROM. Without
  * Resend, the demo keeps sign-in emails in an outbox instead of sending them.
+ * PENI_PUBLIC_URL is the site's address for links in emails (gift emails need it).
  */
 export function getApp(): Promise<PeniApp> {
   globalForPeni.peniApp ??= (async () => {
     const demo = process.env.PENI_DEMO !== "0";
     const url = process.env.DATABASE_URL;
     const stores = url ? createPrismaStores(createPrismaClient(url)) : inMemoryStores();
-    const app = new PeniApp({ demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) } }, stores);
+    const app = new PeniApp({ demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) }, publicUrl: process.env.PENI_PUBLIC_URL || undefined }, stores);
     if (demo && (await app.identity.listCafes()).length === 0) await seed(app);
     return app;
   })();

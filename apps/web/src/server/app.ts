@@ -72,6 +72,7 @@ import {
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifier } from "./customer-auth";
+import { giftEmail } from "./gift-email";
 import { AppError } from "./errors";
 import { buildIcs } from "./ics";
 import { MenuService } from "./menu";
@@ -133,6 +134,8 @@ export interface PeniAppOptions {
   clock?: () => Date;
   /** Which terminal each till pays with. Manual everywhere until the till bridge (D24). */
   terminals?: PaymentTerminals;
+  /** The site's own address ("https://peni.app"), for links in emails. Without it no gift email goes out. */
+  publicUrl?: string;
 }
 
 const HOUR_MS = 3_600_000;
@@ -443,14 +446,45 @@ export class PeniApp {
     const from = await this.requireMembershipId(customer.id, cafe.id);
     const to = await this.recipientAt(cafe, recipientRef(input));
     if (to.id === from) throw new PeniError("GIFT_INVALID", "You cannot send a gift to yourself");
+    const key = `${customer.id}:${input.idempotencyKey}`;
+    const retried = !!(await this.ledger.findByIdempotencyKey(`gift:${key}`));
     const gift = await this.peni.sendGift({
       fromMembershipId: from,
       toMembershipId: to.id,
       peni: input.peni,
       message: input.message,
-      idempotencyKey: `${customer.id}:${input.idempotencyKey}`,
+      idempotencyKey: key,
     });
+    if (!retried) await this.tellRecipient(gift, cafe);
     return this.giftDTO(gift, from);
+  }
+
+  /**
+   * Emails the recipient the gift's link, when they have an address and the site's own
+   * address is set (PENI_PUBLIC_URL, never the request's Host). A failed email never
+   * fails the gift: the sender can still share the link.
+   */
+  private async tellRecipient(gift: Gift, cafe: Cafe): Promise<void> {
+    const email = this.options.auth?.email;
+    const base = this.options.publicUrl;
+    if (!email || !base) return;
+    const to = await this.customerForMembership(gift.toMembershipId);
+    if (!to?.email) return;
+    try {
+      await email.send(
+        giftEmail({
+          to: to.email,
+          fromName: firstNameAndInitial(await this.nameForMembership(gift.fromMembershipId)) || "Bir arkadaşın",
+          peni: gift.peni,
+          cafeName: cafe.name,
+          message: gift.message,
+          link: `${base.replace(/\/+$/, "")}/hediye/${encodeURIComponent(gift.id)}`,
+          expiresInHours: Math.round((gift.expiresAt.getTime() - gift.createdAt.getTime()) / HOUR_MS),
+        }),
+      );
+    } catch (error) {
+      console.error("Gift email not sent", gift.id, error);
+    }
   }
 
   async resolveGift(customer: CustomerRecord, giftId: string, action: "accept" | "decline"): Promise<GiftDTO> {
@@ -495,6 +529,7 @@ export class PeniApp {
     const settings = await this.directory.getSettings(cafe.id);
     const refItems = refItemsFor(cafe, settings, await this.menu.listMenu(cafe.id));
     const viewerMembership = viewer ? (await this.directory.findMembership(viewer.id, cafe.id))?.id : undefined;
+    const party = viewerMembership === gift.toMembershipId || viewerMembership === gift.fromMembershipId;
     return {
       id: gift.id,
       cafeSlug: cafe.slug,
@@ -514,6 +549,8 @@ export class PeniApp {
             : viewerMembership
               ? "member"
               : "guest",
+      hue: cafe.hue as CafeHue | null,
+      gift: party ? await this.giftDTO(gift, viewerMembership!) : null,
     };
   }
 

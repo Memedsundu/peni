@@ -74,7 +74,7 @@ export function CafeLine({ name }: { name: string }) {
   );
 }
 
-function Amount({ peni, goods, caption }: { peni: number; goods: string | null; caption: string }) {
+export function Amount({ peni, goods, caption }: { peni: number; goods: string | null; caption: string }) {
   return (
     <div className="flex flex-col gap-1">
       <p className="font-serif text-7xl leading-none text-[var(--cafe)] tabular">

@@ -447,6 +447,9 @@ export interface GiftPreviewDTO {
   expiresAt: string;
   /** Who is looking, for the CTA: guest = signed in but not a member of the café. */
   viewer: "signed_out" | "recipient" | "sender" | "member" | "guest";
+  hue: CafeHue | null;
+  /** The whole gift, message included, only for its sender and its recipient. */
+  gift: GiftDTO | null;
 }
 
 /** `POST /cafes/:slug/members/lookup`: only "Mehmet K.", only for members of that café. [G6] */
