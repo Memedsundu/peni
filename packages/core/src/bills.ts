@@ -62,6 +62,18 @@ export interface BillLine {
   totalKurus: Kurus;
 }
 
+/**
+ * The KDV printed on a bill, one entry per rate (piece 25): read off scanned documents, or
+ * typed in. Lines stay KDV included; this is what the mali müşavir needs on top.
+ */
+export interface BillKdv {
+  ratePct: number;
+  amountKurus: Kurus;
+}
+
+/** Today's 1, 10 and 20, and the 8 and 18 older bills show. */
+export const KDV_RATES: readonly number[] = [1, 8, 10, 18, 20];
+
 export interface BillPayment {
   id: string;
   cafeId: string;
@@ -89,6 +101,10 @@ export interface Bill {
   note: string | null;
   lines: BillLine[];
   totalKurus: Kurus;
+  /** Empty when nobody entered it. */
+  kdv: BillKdv[];
+  /** The scan it was confirmed from (piece 25); null for a bill typed in. */
+  documentId: string | null;
   /** What has been paid so far, in one payment or several. */
   paidKurus: Kurus;
   /** When the last of it was paid; null while anything is owed. */
@@ -199,6 +215,11 @@ export function supplierProblem(s: Pick<Supplier, "name" | "phone" | "email" | "
 /** "tr12 0006 …" → "TR120006…"; spaces in a tax number or phone are dropped the same way. */
 export function compactIban(raw: string): string {
   return raw.replace(/\s/g, "").toUpperCase();
+}
+
+/** "A-20511", "a 20511" and "A20511" are the same bill number. */
+export function billNumberKey(n: string | null | undefined): string {
+  return (n ?? "").toLocaleUpperCase("tr-TR").replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 /** A calendar date "YYYY-MM-DD" that exists. */

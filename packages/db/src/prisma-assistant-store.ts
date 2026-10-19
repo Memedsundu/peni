@@ -7,18 +7,21 @@ import type {
   Draft,
   DraftKind,
   DraftStatus,
+  DuplicateRef,
   Job,
   JobStatus,
+  LineMatch,
   StoredDocument,
 } from "@peni/core";
 import type { Db } from "./db";
-import type { AiDraft as DraftRow, AiEvent as EventRow, Job as JobRow, Prisma } from "./generated/client";
+import { Prisma, type AiDraft as DraftRow, type AiEvent as EventRow, type Job as JobRow } from "./generated/client";
 
 const toDraft = (r: DraftRow): Draft => ({
   ...r,
   kind: r.kind as DraftKind,
   status: r.status as DraftStatus,
   proposal: r.proposal as unknown as BillProposal,
+  duplicateOf: (r.duplicateOf as unknown as DuplicateRef | null) ?? null,
 });
 const toJob = (r: JobRow): Job => ({
   ...r,
@@ -28,6 +31,8 @@ const toJob = (r: JobRow): Job => ({
 });
 const toEvent = (r: EventRow): AiEvent => ({ ...r, kind: r.kind as AiEventKind });
 const json = (v: unknown) => v as Prisma.InputJsonValue;
+/** Everything about a document but its bytes. */
+const INFO = { id: true, cafeId: true, name: true, contentType: true, size: true, sha256: true, uploadedBy: true, createdAt: true } as const;
 
 export class PrismaAssistantStore implements AssistantStore {
   constructor(private readonly db: Db) {}
@@ -43,13 +48,28 @@ export class PrismaAssistantStore implements AssistantStore {
     return r ? { ...r, contentType: r.contentType as DocumentType, bytes: new Uint8Array(r.bytes) } : null;
   }
 
+  async getDocumentInfo(cafeId: string, id: string): Promise<Omit<StoredDocument, "bytes"> | null> {
+    const r = await this.db().cafeDocument.findFirst({ where: { id, cafeId }, select: INFO });
+    return r ? { ...r, contentType: r.contentType as DocumentType } : null;
+  }
+
+  async findDocuments(cafeId: string, sha256: string): Promise<Omit<StoredDocument, "bytes">[]> {
+    const rows = await this.db().cafeDocument.findMany({ where: { cafeId, sha256 }, orderBy: { createdAt: "desc" }, select: INFO });
+    return rows.map((r) => ({ ...r, contentType: r.contentType as DocumentType }));
+  }
+
   async saveDraft(draft: Draft): Promise<void> {
-    const data = { ...draft, proposal: json(draft.proposal) };
+    const data = { ...draft, proposal: json(draft.proposal), duplicateOf: draft.duplicateOf ? json(draft.duplicateOf) : Prisma.DbNull };
     await this.db().aiDraft.upsert({ where: { id: draft.id }, create: data, update: data });
   }
 
   async getDraft(cafeId: string, id: string): Promise<Draft | null> {
     const r = await this.db().aiDraft.findFirst({ where: { id, cafeId } });
+    return r ? toDraft(r) : null;
+  }
+
+  async getDraftByDocument(cafeId: string, documentId: string): Promise<Draft | null> {
+    const r = await this.db().aiDraft.findFirst({ where: { cafeId, documentId }, orderBy: { createdAt: "desc" } });
     return r ? toDraft(r) : null;
   }
 
@@ -120,5 +140,24 @@ export class PrismaAssistantStore implements AssistantStore {
       _sum: { inputTokens: true, outputTokens: true },
     });
     return { calls: r._count._all, inputTokens: r._sum.inputTokens ?? 0, outputTokens: r._sum.outputTokens ?? 0 };
+  }
+
+  async listLineMatches(cafeId: string): Promise<LineMatch[]> {
+    const rows = await this.db().aiLineMatch.findMany({ where: { cafeId } });
+    return rows.map(({ supplierKey, ...r }) => ({ ...r, supplierId: supplierKey || null }));
+  }
+
+  async saveLineMatch(match: LineMatch): Promise<void> {
+    const { supplierId, ...rest } = match;
+    const data = { ...rest, supplierKey: supplierId ?? "" };
+    await this.db().aiLineMatch.upsert({
+      where: { cafeId_supplierKey_readKey: { cafeId: match.cafeId, supplierKey: data.supplierKey, readKey: match.readKey } },
+      create: data,
+      update: data,
+    });
+  }
+
+  async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void> {
+    await this.db().aiLineMatch.deleteMany({ where: { cafeId, supplierKey: supplierId ?? "", readKey } });
   }
 }

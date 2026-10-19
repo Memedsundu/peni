@@ -1,4 +1,4 @@
-import type { Bill, BillPayMethod, BillPayment, BillQuery, BillStore, LastPrice, Supplier } from "@peni/core";
+import type { Bill, BillKdv, BillPayMethod, BillPayment, BillQuery, BillStore, LastPrice, Supplier } from "@peni/core";
 import type { Db } from "./db";
 import { Prisma, type PrismaClient, type BillLine as LineRow, type BillPayment as PaymentRow, type Bill as BillRow } from "./generated/client";
 
@@ -17,6 +17,8 @@ function toBill(r: BillRow & { lines: LineRow[]; payments: PaymentRow[] }): Bill
     note: r.note,
     lines: r.lines.map((l) => ({ itemId: l.itemId, name: l.name, category: l.category, qtyMilli: l.qtyMilli, totalKurus: l.totalKurus })),
     totalKurus: r.totalKurus,
+    kdv: (r.kdv as unknown as BillKdv[] | null) ?? [],
+    documentId: r.documentId,
     paidKurus: r.paidKurus,
     paidAt: r.paidAt,
     payments: r.payments.map(toPayment),
@@ -89,7 +91,8 @@ export class PrismaBillStore implements BillStore {
   }
 
   async saveBill(bill: Bill): Promise<void> {
-    const { lines, payments: _payments, ...details } = bill;
+    const { lines, payments: _payments, kdv, ...rest } = bill;
+    const details = { ...rest, kdv: kdv as unknown as Prisma.InputJsonValue };
     const run = async (tx: Tx) => {
       await tx.bill.upsert({ where: { id: bill.id }, create: details, update: details });
       await tx.billLine.deleteMany({ where: { billId: bill.id } });

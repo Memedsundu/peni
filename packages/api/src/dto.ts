@@ -259,6 +259,15 @@ export interface BillDTO extends BillSummaryDTO {
   payWith: PayOptionsDTO | null;
   /** The bill's month is closed (piece 20): it can't be corrected, voided or paid on that month any more. */
   closed: boolean;
+  /** The KDV printed on it, per rate (piece 25); empty when nobody entered it. */
+  kdv: BillKdvDTO[];
+  /** The scan it was confirmed from (piece 25). */
+  document: DocumentRefDTO | null;
+}
+
+export interface BillKdvDTO {
+  ratePct: number;
+  amountKurus: number;
 }
 
 export interface BillPaymentDTO {
@@ -317,6 +326,10 @@ export interface BillsDTO {
   canManage: boolean;
   /** Can add a supplier from the bill form ("suppliers.edit"). */
   canAddSupplier: boolean;
+  /** Can send a photo or PDF for the assistant to read ("bills.add", with the assistant on). */
+  canScan: boolean;
+  /** Can see Taslaklar, where scans wait to be checked ("assistant.use"). */
+  canSeeDrafts: boolean;
 }
 
 export interface SupplierSummaryDTO {
@@ -1564,7 +1577,34 @@ export interface BillProposalDTO {
   dueDate: string | null;
   /** The total printed on the document, to compare the lines with. */
   totalKurus: number | null;
-  lines: { itemId: string | null; name: string; category: BillCategoryDTO; qtyMilli: number | null; totalKurus: number }[];
+  lines: ProposalLineDTO[];
+  /** The KDV printed on it, per rate (piece 25). */
+  kdv: BillKdvDTO[];
+}
+
+export interface ProposalLineDTO {
+  /** The stock item it was matched to (piece 25), or null for an expense line. */
+  itemId: string | null;
+  name: string;
+  category: BillCategoryDTO;
+  /** Stock lines: thousandths of the item's unit; null when it couldn't be worked out. */
+  qtyMilli: number | null;
+  totalKurus: number;
+  /** The line as printed: "SÜT 1 LT", 24, "adet". */
+  readName: string;
+  readQtyMilli: number | null;
+  readUnit: string | null;
+  /** "learned": a person confirmed this line before; "model": the assistant's guess. */
+  matchedBy: "model" | "learned" | null;
+}
+
+/** An earlier bill or draft a new one looks like (piece 25). */
+export interface DuplicateRefDTO {
+  kind: "bill" | "draft";
+  id: string;
+  title: string;
+  /** The same file, the same bill number, or the same supplier, day and total. */
+  why: "file" | "number" | "dayTotal";
 }
 
 export interface DocumentRefDTO {
@@ -1595,6 +1635,35 @@ export interface DraftDTO {
   /** Fields changed before confirming. */
   changed: string[];
   dismissReason: string | null;
+  /** It may repeat this; confirming needs `allowDuplicate`. */
+  duplicateOf: DuplicateRefDTO | null;
+}
+
+/**
+ * `POST /staff/:slug/documents`: either it's being read, or the same file came before and
+ * nothing was done (send `?again=1` to read it anyway).
+ */
+export interface UploadDTO {
+  reading: ReadingDTO | null;
+  duplicate: { at: string; name: string; title: string | null; draftId: string | null; billId: string | null } | null;
+}
+
+/**
+ * `GET /staff/:slug/documents/mine`: what the viewer sent in the last day and what became
+ * of it, for the till and Faturalar ("bills.add").
+ */
+export interface UploadsDTO {
+  ai: "on" | "demo" | "off";
+  uploads: {
+    jobId: string;
+    documentName: string;
+    at: string;
+    /** Still reading, couldn't be read, not a bill, waiting to be checked, saved as a bill, or dismissed. */
+    state: "reading" | "failed" | "notBill" | "waiting" | "saved" | "dismissed";
+    /** The draft's title, once there is one. */
+    title: string | null;
+    error: string | null;
+  }[];
 }
 
 /** A document being read, or one that couldn't become a draft. */

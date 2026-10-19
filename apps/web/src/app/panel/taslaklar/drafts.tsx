@@ -1,19 +1,16 @@
 "use client";
 
 import { PeniApiError, type AiLogDTO, type DraftDTO, type DraftsDTO, type ReadingDTO } from "@peni/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
 import { Field, Segmented } from "../controls";
 import { billHref, BillForm } from "../faturalar/bills";
-import { shrinkPhoto } from "../photos";
+import { Repeats, ScanInput, useScan } from "../scan";
 import { PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
 
 type Tab = "waiting" | "history" | "log";
-/** A bill photo keeps more than a feed photo, so its small print stays readable. */
-const BILL_PHOTO_SIDE = 2400;
-const MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Taslaklar (plan piece 24): a bill or receipt goes in, the assistant reads it, and the
@@ -110,36 +107,16 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
   );
 }
 
-/** The drop zone: a photo is shrunk first, a PDF goes as it is. */
+/** The drop zone: several bills at once; one sent before says what became of it. */
 function Upload({ t, lang, slug, onUploaded }: { t: T; lang: Lang; slug: string; onUploaded: () => void }) {
-  const input = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const scan = useScan(slug, lang, t, onUploaded);
   const [over, setOver] = useState(false);
-
-  const send = async (files: FileList | null) => {
-    const file = files?.[0];
-    if (!file) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const pdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-      if (!pdf && !file.type.startsWith("image/")) throw new PeniApiError("DOCUMENT_TYPE", 415, "Not a photo or PDF");
-      const body = pdf ? file : await shrinkPhoto(file, BILL_PHOTO_SIDE);
-      if (body.size > MAX_BYTES) throw new PeniApiError("DOCUMENT_TOO_LARGE", 413, "Too large");
-      await api.staff.drafts.upload(slug, body, file.name);
-      onUploaded();
-    } catch (e) {
-      setError(e instanceof PeniApiError ? errorText(e, lang) : t("drFailed"));
-    } finally {
-      setBusy(false);
-      if (input.current) input.current.value = "";
-    }
-  };
 
   return (
     <div className="flex flex-col gap-2">
-      <label
+      <ScanInput
+        busy={scan.busy}
+        onFiles={(f) => void scan.send(f)}
         className={`flex cursor-pointer flex-col items-center gap-2 rounded-3xl border-2 border-dashed px-6 py-8 text-center transition-colors ${over ? "border-ink bg-tile" : "border-line"}`}
         onDragOver={(e) => {
           e.preventDefault();
@@ -149,7 +126,7 @@ function Upload({ t, lang, slug, onUploaded }: { t: T; lang: Lang; slug: string;
         onDrop={(e) => {
           e.preventDefault();
           setOver(false);
-          void send(e.dataTransfer.files);
+          void scan.send([...e.dataTransfer.files]);
         }}
       >
         <svg
@@ -166,18 +143,11 @@ function Upload({ t, lang, slug, onUploaded }: { t: T; lang: Lang; slug: string;
           <path d="M6 2h9l5 5v15H6z" />
           <path d="M14 2v6h6M9 13h8M9 17h5" />
         </svg>
-        <span className="text-lg font-medium">{busy ? t("drUploading") : t("drUpload")}</span>
+        <span className="text-lg font-medium">{scan.busy ? t("drUploading") : t("drUpload")}</span>
         <span className="text-sm text-muted">{t("drUploadHint")}</span>
-        <input
-          ref={input}
-          type="file"
-          accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/*"
-          className="sr-only"
-          disabled={busy}
-          onChange={(e) => void send(e.target.files)}
-        />
-      </label>
-      {error && <Notice tone="red">{error}</Notice>}
+      </ScanInput>
+      {scan.error && <Notice tone="red">{scan.error}</Notice>}
+      <Repeats t={t} lang={lang} slug={slug} scan={scan} links={{ drafts: true, bills: true }} />
     </div>
   );
 }
@@ -197,6 +167,7 @@ function Waiting({ t, lang, data, onOpen }: { t: T; lang: Lang; data: DraftsDTO;
               {when(d.createdAt, lang)}
               {d.document?.name ? ` · ${d.document.name}` : ""}
               {d.doubts.length > 0 && <span className="text-red"> · {fill(t("drNotes"), { n: d.doubts.length })}</span>}
+              {d.duplicateOf && <span className="font-semibold text-red"> · {t(d.duplicateOf.kind === "bill" ? "dupBillShort" : "dupDraftShort")}</span>}
             </span>
           </span>
           <Button kind="primary" size="sm" onClick={() => onOpen(d.id)}>

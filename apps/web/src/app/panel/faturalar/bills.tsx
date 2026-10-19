@@ -10,6 +10,7 @@ import {
   type BillStateDTO,
   type BillSummaryDTO,
   type DraftDTO,
+  type ProposalLineDTO,
   type StockUnitDTO,
 } from "@peni/api";
 import { formatTL } from "@peni/brand/format";
@@ -19,6 +20,7 @@ import { Button, Notice, Sheet } from "../../kasa/ui";
 import { bigInput, bigUnit, formatDay, formatMonth, formatQty, parseBig, parseTL, shiftMonth, tlInput } from "../amounts";
 import { Field, Segmented, Stat, useSave } from "../controls";
 import { METHOD, PaymentLine, PayForm } from "../pay";
+import { useScanButton } from "../scan";
 import { field, PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
 
@@ -76,6 +78,7 @@ function BillsPage({ cafe, t, lang, signedOut, billId, adding }: PanelProps & { 
 
   const thisMonth = data?.today.slice(0, 7) ?? "";
   const shown = view.show === "month" ? (view.month ?? thisMonth) : thisMonth;
+  const scan = useScanButton({ t, lang, slug: cafe.slug, canSeeDrafts: !!data?.canSeeDrafts });
 
   return (
     <>
@@ -98,12 +101,16 @@ function BillsPage({ cafe, t, lang, signedOut, billId, adding }: PanelProps & { 
               />
               {data.month && <Stat label={fill(t("statMonth"), { month: formatMonth(data.month, lang) })} value={formatTL(data.monthTotalKurus)} />}
             </dl>
-            {data.canAdd && (
-              <Button kind="primary" onClick={() => setOpen({ kind: "add" })}>
-                {t("addBill")}
-              </Button>
-            )}
+            <span className="flex flex-wrap gap-2">
+              {data.canScan && scan.button}
+              {data.canAdd && (
+                <Button kind="primary" onClick={() => setOpen({ kind: "add" })}>
+                  {t("addBill")}
+                </Button>
+              )}
+            </span>
           </section>
+          {scan.notices}
 
           <nav className="flex flex-wrap items-center gap-2" aria-label={t("bills")}>
             <span className={`flex items-center rounded-full border ${view.show === "month" ? "border-ink" : "border-line"}`}>
@@ -357,8 +364,24 @@ function BillSheet({
                   {formatTL(bill.totalKurus)}
                 </td>
               </tr>
+              {bill.kdv.map((k) => (
+                <tr key={k.ratePct} className="text-sm text-muted">
+                  <td className="pb-1">{fill(t("kdvLine"), { rate: k.ratePct })}</td>
+                  <td className="pb-1 text-right tabular">{formatTL(k.amountKurus)}</td>
+                </tr>
+              ))}
             </tfoot>
           </table>
+          {bill.document && (
+            <a href={bill.document.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 self-start text-sm font-semibold underline underline-offset-4">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M6 2h9l5 5v15H6z" />
+                <path d="M14 2v6h6" />
+              </svg>
+              {t("billDocument")}
+              {bill.document.name ? <span className="font-normal text-muted">· {bill.document.name}</span> : null}
+            </a>
+          )}
           {bill.note && <p className="leading-normal">{bill.note}</p>}
           <p className="text-sm text-muted">{fill(t("addedBy"), { name: bill.createdBy ?? "", when: when(bill.createdAt, lang) })}</p>
 
@@ -425,11 +448,26 @@ function BillSheet({
   );
 }
 
-type LineForm = { key: number; kind: "stock" | "other"; itemId: string; qty: string; total: string; name: string; category: BillCategoryDTO };
+type LineForm = {
+  key: number;
+  kind: "stock" | "other";
+  itemId: string;
+  qty: string;
+  total: string;
+  name: string;
+  category: BillCategoryDTO;
+  /** The draft line it came from (piece 25), so the assistant learns what it was. */
+  from: number | null;
+  read: ProposalLineDTO | null;
+};
+type KdvForm = { key: number; rate: number; amount: string };
 
 let lineKeys = 0;
-const stockLine = (): LineForm => ({ key: ++lineKeys, kind: "stock", itemId: "", qty: "", total: "", name: "", category: "ingredients" });
-const otherLine = (): LineForm => ({ key: ++lineKeys, kind: "other", itemId: "", qty: "", total: "", name: "", category: "rent" });
+const blank = { itemId: "", qty: "", total: "", name: "", from: null, read: null };
+const stockLine = (): LineForm => ({ key: ++lineKeys, kind: "stock", ...blank, category: "ingredients" });
+const otherLine = (): LineForm => ({ key: ++lineKeys, kind: "other", ...blank, category: "rent" });
+/** Today's rates first; 8 and 18 still show up on older bills. */
+const KDV_CHOICES = [20, 10, 1, 18, 8];
 
 /**
  * "Fatura ekle", or "Düzelt" when given the bill. Given a draft (piece 24), it's the
@@ -471,7 +509,7 @@ export function BillForm({
   const [paid, setPaid] = useState<"no" | (typeof QUICK_METHODS)[number]>("no");
   const [lines, setLines] = useState<LineForm[]>(() =>
     (bill ?? proposal)
-      ? (bill ?? proposal)!.lines.map((l) => ({
+      ? (bill ?? proposal)!.lines.map((l, i) => ({
           key: ++lineKeys,
           kind: l.itemId ? "stock" : "other",
           itemId: l.itemId ?? "",
@@ -479,9 +517,17 @@ export function BillForm({
           total: tlInput(l.totalKurus),
           name: l.itemId ? "" : l.name,
           category: l.category,
+          from: proposal ? i : null,
+          read: proposal ? proposal.lines[i]! : null,
         }))
       : [data.items.length ? stockLine() : otherLine()],
   );
+  const [kdv, setKdv] = useState<KdvForm[]>(() =>
+    (bill?.kdv ?? proposal?.kdv ?? []).map((k) => ({ key: ++lineKeys, rate: k.ratePct, amount: tlInput(k.amountKurus) })),
+  );
+  // A bill that looks already entered is saved only with a yes (piece 25).
+  const [askDuplicate, setAskDuplicate] = useState(!!draft?.duplicateOf);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
   const save = useSave<BillDTO | DraftDTO>(lang, (r) => ("proposal" in r ? onConfirmed?.(r) : onDone?.(r)));
 
   // A bill being corrected may name a supplier or item that was removed since; keep them choosable.
@@ -499,21 +545,36 @@ export function BillForm({
       const item = items.find((i) => i.id === l.itemId);
       const qtyMilli = parseBig(l.qty);
       const ok = !!item && qtyMilli !== null && qtyMilli > 0 && totalKurus !== null;
-      return { ok, item, qtyMilli, totalKurus, line: ok ? { itemId: item!.id, qtyMilli: qtyMilli!, totalKurus: totalKurus! } : null };
+      const from = l.from !== null ? { from: l.from } : {};
+      return { ok, item, qtyMilli, totalKurus, line: ok ? { itemId: item!.id, qtyMilli: qtyMilli!, totalKurus: totalKurus!, ...from } : null };
     }
+    const from = l.from !== null ? { from: l.from } : {};
     const ok = !!l.name.trim() && totalKurus !== null;
     return {
       ok,
       item: undefined,
       qtyMilli: null,
       totalKurus,
-      line: ok ? { itemId: null, name: l.name.trim(), category: l.category, totalKurus: totalKurus! } : null,
+      line: ok ? { itemId: null, name: l.name.trim(), category: l.category, totalKurus: totalKurus!, ...from } : null,
     };
   });
   const total = parsed.reduce((s, p) => s + (p.totalKurus ?? 0), 0);
   const chosen = parsed.flatMap((p) => (p.item ? [p.item.id] : []));
   const duplicate = new Set(chosen).size !== chosen.length;
-  const ready = parsed.every((p) => p.ok) && total > 0 && !duplicate && (supplierId !== "__new" || newName.trim()) && date && (!dueDate || dueDate >= date);
+  const kdvParsed = kdv.map((k) => ({ ratePct: k.rate, amountKurus: parseTL(k.amount) }));
+  const kdvOk =
+    kdvParsed.every((k) => k.amountKurus !== null && k.amountKurus > 0) &&
+    new Set(kdv.map((k) => k.rate)).size === kdv.length &&
+    kdvParsed.reduce((sum, k) => sum + (k.amountKurus ?? 0), 0) < Math.max(total, 1);
+  const ready =
+    parsed.every((p) => p.ok) &&
+    total > 0 &&
+    !duplicate &&
+    kdvOk &&
+    (!askDuplicate || allowDuplicate) &&
+    (supplierId !== "__new" || newName.trim()) &&
+    date &&
+    (!dueDate || dueDate >= date);
   const set = (k: number, patch: Partial<LineForm>) => setLines((ls) => ls.map((l) => (l.key === k ? { ...l, ...patch } : l)));
 
   const submit = () =>
@@ -531,17 +592,25 @@ export function BillForm({
         dueDate: paid === "no" ? dueDate || null : null,
         note: note.trim() || null,
         lines: parsed.map((p) => p.line!),
+        kdv: kdvParsed.map((k) => ({ ratePct: k.ratePct, amountKurus: k.amountKurus! })),
       };
-      if (draft) return api.staff.drafts.confirm(slug, draft.id, fields);
-      return bill
-        ? api.staff.bills.correct(slug, bill.id, { version: bill.version, ...fields })
-        : api.staff.bills.add(slug, { key: key.current, ...fields, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
+      const yes = allowDuplicate ? { allowDuplicate: true } : {};
+      try {
+        if (draft) return await api.staff.drafts.confirm(slug, draft.id, { ...fields, ...yes });
+        return bill
+          ? await api.staff.bills.correct(slug, bill.id, { version: bill.version, ...fields })
+          : await api.staff.bills.add(slug, { key: key.current, ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
+      } catch (e) {
+        if (e instanceof PeniApiError && e.code === "BILL_DUPLICATE") setAskDuplicate(true);
+        throw e;
+      }
     });
 
   const Frame = draft ? InPage : Sheet;
   return (
     <Frame title={draft ? t("draftCheck") : bill ? t("correctingBill") : t("addBill")} onClose={onClose} labelClose={t("close")} wide>
       {bill && <p className="-mt-2 text-sm text-muted">{t("correctHelp")}</p>}
+      {draft?.duplicateOf && <DuplicateOf t={t} slug={slug} of={draft.duplicateOf} />}
       <label className="flex flex-col gap-2 text-sm text-muted">
         {t("billSupplier")}
         <select className={`${field} min-h-12`} value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
@@ -647,6 +716,35 @@ export function BillForm({
                 >
                   ×
                 </Button>
+                {l.read && (
+                  <span className="order-6 col-span-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm text-muted @lg:order-none @lg:col-span-4">
+                    <span>
+                      {fill(t("readAs"), { name: readLine(l.read, lang) })}
+                      {l.kind === "stock" && l.read.itemId === l.itemId && l.read.matchedBy && (
+                        <span className={l.read.matchedBy === "model" ? "text-ink" : ""}>
+                          {" · "}
+                          {t(l.read.matchedBy === "learned" ? "readLearned" : "readModel")}
+                        </span>
+                      )}
+                    </span>
+                    {items.length > 0 && (
+                      <button
+                        type="button"
+                        className="min-h-9 cursor-pointer font-semibold text-ink underline underline-offset-4"
+                        onClick={() =>
+                          set(
+                            l.key,
+                            l.kind === "stock"
+                              ? { kind: "other", itemId: "", qty: "", name: l.read!.readName, category: l.category === "supplies" ? "supplies" : "ingredients" }
+                              : { kind: "stock", name: "" },
+                          )
+                        }
+                      >
+                        {t(l.kind === "stock" ? "makeExpense" : "makeStock")}
+                      </button>
+                    )}
+                  </span>
+                )}
                 {unitKurus !== null && item && (
                   <span className="order-5 col-span-3 text-sm text-muted @lg:order-none @lg:col-span-4">
                     {fill(t("perUnit"), { price: formatTL(unitKurus), unit: unitLabel(item.unit, lang) })}
@@ -672,6 +770,54 @@ export function BillForm({
         {duplicate && <Notice tone="red">{t("lineDuplicate")}</Notice>}
       </section>
 
+      <section className="flex flex-col gap-3">
+        {kdv.length > 0 && <h3 className="text-sm text-muted">{t("kdvOptional")}</h3>}
+        {kdv.map((k, i) => (
+          <div key={k.key} className="grid grid-cols-[7rem_1fr_auto] gap-2">
+            <select
+              className={`${field} min-h-12`}
+              value={k.rate}
+              aria-label={t("kdvRate")}
+              onChange={(e) => setKdv((ks) => ks.map((x) => (x.key === k.key ? { ...x, rate: Number(e.target.value) } : x)))}
+            >
+              {KDV_CHOICES.map((r) => (
+                <option key={r} value={r}>
+                  %{r}
+                </option>
+              ))}
+            </select>
+            <span className="relative flex items-center">
+              <input
+                className={`${field} min-h-12 pr-10 text-right tabular ${k.amount.trim() && kdvParsed[i]!.amountKurus === null ? "border-red" : ""}`}
+                inputMode="decimal"
+                value={k.amount}
+                placeholder="0"
+                aria-label={t("kdvAmount")}
+                onChange={(e) => setKdv((ks) => ks.map((x) => (x.key === k.key ? { ...x, amount: e.target.value } : x)))}
+              />
+              <span className="pointer-events-none absolute right-4 text-muted">₺</span>
+            </span>
+            <Button kind="bare" size="sm" aria-label={t("kdvRemove")} onClick={() => setKdv((ks) => ks.filter((x) => x.key !== k.key))}>
+              ×
+            </Button>
+          </div>
+        ))}
+        {kdv.length > 0 && !kdvOk && kdvParsed.every((k) => k.amountKurus !== null) && <Notice tone="red">{t("kdvTooMuch")}</Notice>}
+        {kdv.length < KDV_CHOICES.length && (
+          <div>
+            <Button
+              kind="quiet"
+              size="sm"
+              onClick={() =>
+                setKdv((ks) => [...ks, { key: ++lineKeys, rate: KDV_CHOICES.find((r) => !ks.some((k) => k.rate === r)) ?? 20, amount: "" }])
+              }
+            >
+              + {kdv.length ? t("kdvAdd") : t("kdvOptional")}
+            </Button>
+          </div>
+        )}
+      </section>
+
       {!bill && !draft && data.canManage && (
         <Segmented
           label={t("paidQuestion")}
@@ -690,6 +836,12 @@ export function BillForm({
 
       <div className="sticky -bottom-6 -mx-6 -mb-6 flex flex-col gap-3 bg-paper px-6 pt-3 pb-6">
         {save.error && <Notice tone="red">{save.error}</Notice>}
+        {askDuplicate && (
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+            <input type="checkbox" className="size-5 accent-ink" checked={allowDuplicate} onChange={(e) => setAllowDuplicate(e.target.checked)} />
+            {t("dupAllow")}
+          </label>
+        )}
         <div className="flex items-center justify-between gap-4">
           <span className="flex flex-col">
             <span className="text-sm text-muted">
@@ -716,6 +868,27 @@ function InPage({ title, children }: { title: string; onClose: () => void; child
       {children}
     </section>
   );
+}
+
+/** The bill or draft a draft looks like (piece 25), with a link to look. */
+function DuplicateOf({ t, slug, of }: { t: T; slug: string; of: NonNullable<DraftDTO["duplicateOf"]> }) {
+  const href = of.kind === "bill" ? billHref(slug, of.id) : `/panel/taslaklar?kafe=${encodeURIComponent(slug)}&taslak=${encodeURIComponent(of.id)}`;
+  return (
+    <p role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl bg-red-soft px-4 py-3 text-sm text-red">
+      <span>
+        {fill(t(of.kind === "bill" ? "dupBill" : "dupDraft"), { title: of.title })} {t(`dup_${of.why}`)}
+      </span>
+      <a href={href} target="_blank" rel="noreferrer" className="font-semibold underline underline-offset-4">
+        {t("dupOpen")}
+      </a>
+    </p>
+  );
+}
+
+/** "SÜT 1 LT · 24 adet": the line as the document printed it. */
+function readLine(l: ProposalLineDTO, lang: Lang) {
+  const qty = l.readQtyMilli !== null ? (l.readQtyMilli / 1000).toLocaleString(lang === "tr" ? "tr-TR" : "en-GB", { maximumFractionDigits: 3 }) : null;
+  return [l.readName, qty && [qty, l.readUnit].filter(Boolean).join(" ")].filter(Boolean).join(" · ");
 }
 
 export const billHref = (slug: string, billId: string) => `/panel/faturalar?kafe=${encodeURIComponent(slug)}&fatura=${encodeURIComponent(billId)}`;

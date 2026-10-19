@@ -46,7 +46,8 @@ import type {
   AiLogDTO,
   DraftDTO,
   DraftsDTO,
-  ReadingDTO,
+  UploadDTO,
+  UploadsDTO,
   TodayDTO,
   ShiftWeekDTO,
 } from "./dto";
@@ -443,8 +444,14 @@ export function createPeniClient(options: PeniClientOptions) {
       drafts: {
         list: (cafeSlug: string) => call<DraftsDTO>("GET", `/staff/${slug(cafeSlug)}/drafts`, undefined, true),
         /** A photo or PDF of a bill; the assistant reads it in the background. */
-        upload: (cafeSlug: string, file: Blob, name = "") =>
-          call<ReadingDTO>("POST", `/staff/${slug(cafeSlug)}/documents${name ? `?name=${encodeURIComponent(name)}` : ""}`, file, true),
+        upload: (cafeSlug: string, file: Blob, name = "", opts: { again?: boolean } = {}) => {
+          const q = new URLSearchParams();
+          if (name) q.set("name", name);
+          if (opts.again) q.set("again", "1");
+          return call<UploadDTO>("POST", `/staff/${slug(cafeSlug)}/documents${q.size ? `?${q}` : ""}`, file, true);
+        },
+        /** What the viewer sent lately and what became of it ("bills.add"): for the till and Faturalar. */
+        mine: (cafeSlug: string) => call<UploadsDTO>("GET", `/staff/${slug(cafeSlug)}/documents/mine`, undefined, true),
         /** Adds the bill as checked, in the confirmer's name. Once only. */
         confirm: (cafeSlug: string, draftId: string, input: ConfirmDraftInput) =>
           call<DraftDTO>("POST", `/staff/${slug(cafeSlug)}/drafts/${encodeURIComponent(draftId)}/confirm`, input, true),
