@@ -49,6 +49,7 @@ Every operation carries an **idempotency key**, so a retried request or a webhoo
 - Earned when an order is **paid at the till**, at the café's rate (`earnRateBps`, default 5 %), and **rounded down** to whole peni.
 - It's earned **only on the money actually paid**. The part covered by peni or by the askı earns nothing.
 - Blocked members earn nothing.
+- **The claim (piece 7):** when the till records a payment, the server makes a one-time claim for that order: a QR token and a 4-digit code, shown on the customer screen with the peni it's worth. Codes are unique per café and day, and a claim is open until the end of the café's day. Nothing is credited when the claim is made; the customer takes it in the app (piece 10), and the ledger then posts `earn:<orderId>`, so one order can never pay out twice. Refunding the order cancels a claim nobody took. No claim is made when the café has peni off or the order earns nothing.
 
 ## Spending
 

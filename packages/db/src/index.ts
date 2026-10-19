@@ -1,5 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/client";
+import { PrismaClaimStore } from "./prisma-claim-store";
 import { PrismaCommunityStore } from "./prisma-community-store";
 import { PrismaDirectory } from "./prisma-directory";
 import { PrismaIdentityStore } from "./prisma-identity-store";
@@ -16,6 +17,7 @@ export { PrismaIdentityStore } from "./prisma-identity-store";
 export { PrismaCommunityStore } from "./prisma-community-store";
 export { PrismaMenuStore } from "./prisma-menu-store";
 export { PrismaOrderStore } from "./prisma-order-store";
+export { PrismaClaimStore } from "./prisma-claim-store";
 export { PrismaStaffStore } from "./prisma-staff-store";
 
 export function createPrismaClient(connectionString = process.env.DATABASE_URL): PrismaClient {
@@ -38,6 +40,7 @@ export function createPrismaStores(prisma: PrismaClient) {
     community: new PrismaCommunityStore(db),
     menu: new PrismaMenuStore(db),
     orders: new PrismaOrderStore(db),
+    claims: new PrismaClaimStore(db),
     staff: new PrismaStaffStore(db),
   };
 }

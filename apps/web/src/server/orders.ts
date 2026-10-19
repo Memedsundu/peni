@@ -1,6 +1,12 @@
 import type { OrderDTO, OrderListDTO, TillMenuDTO } from "@peni/api";
 import {
+  calculateEarn,
+  claimIsOpen,
   localDateKey,
+  randomClaimCode,
+  startOfNextLocalDay,
+  type ClaimStore,
+  type PeniClaim,
   orderProblem,
   orderTotals,
   lineTotal,
@@ -14,7 +20,7 @@ import {
   type Permission,
   type StaffStore,
 } from "@peni/core";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { AppError } from "./errors";
 import type { StaffContext } from "./staff";
 
@@ -31,6 +37,7 @@ type LineInput = { productId: string; quantity: number; discountPercent?: number
 export class OrderService {
   constructor(
     private readonly orders: OrderStore,
+    private readonly claims: ClaimStore,
     private readonly menu: MenuStore,
     private readonly staff: StaffStore,
     private readonly directory: PeniDirectory,
@@ -126,7 +133,7 @@ export class OrderService {
   async pay(ctx: StaffContext, id: string, input: { method: PaymentMethod; payKey: string; tenderedKurus?: number }): Promise<OrderDTO> {
     this.require(ctx, "till.use");
     const order = await this.find(ctx, id);
-    if (order.status === "paid" && order.payKey === input.payKey) return this.dto(ctx, order);
+    if (order.status === "paid" && order.payKey === input.payKey) return this.withClaim(ctx, order, await this.issueClaim(order));
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
     let tenderedKurus: number | null = null;
     let changeKurus: number | null = null;
@@ -146,7 +153,52 @@ export class OrderService {
       payKey: input.payKey,
     };
     await this.orders.saveOrder(paid);
-    return this.dto(ctx, paid);
+    return this.withClaim(ctx, paid, await this.issueClaim(paid));
+  }
+
+  /**
+   * The peni the customer can take for a paid order (plan piece 7): a QR token and a
+   * 4-digit code for the customer screen, open until the end of the café's day. Nothing
+   * is credited here; the app claims it (piece 10). No claim when the café has peni off
+   * or the order earns nothing.
+   */
+  private async issueClaim(order: Order): Promise<PeniClaim | null> {
+    const existing = await this.claims.getClaimByOrder(order.cafeId, order.id);
+    if (existing) return existing;
+    const settings = await this.directory.getSettings(order.cafeId);
+    const peni = calculateEarn(order.totalKurus, settings);
+    if (peni === 0) return null;
+    const now = this.now();
+    const businessDay = localDateKey(now, settings.timeZone);
+    const used = await this.claims.codesUsed(order.cafeId, businessDay);
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const code = randomClaimCode(() => randomInt(10_000) / 10_000);
+      if (used.has(code)) continue;
+      const claim: PeniClaim = {
+        id: `clm_${randomUUID()}`,
+        cafeId: order.cafeId,
+        orderId: order.id,
+        businessDay,
+        code,
+        token: randomBytes(16).toString("base64url"),
+        peni,
+        createdAt: now,
+        expiresAt: startOfNextLocalDay(now, settings.timeZone),
+        claimedAt: null,
+        claimedByMembershipId: null,
+        cancelledAt: null,
+      };
+      // Another till took the code a moment ago: try again with a fresh one.
+      if (await this.claims.saveClaim(claim)) return claim;
+      used.add(code);
+    }
+    throw new AppError("CLAIM_CODE_BUSY", "No free peni code right now", 503);
+  }
+
+  private async withClaim(ctx: StaffContext, order: Order, claim: PeniClaim | null): Promise<OrderDTO> {
+    const dto = await this.dto(ctx, order);
+    const open = claim && claimIsOpen(claim, this.now());
+    return { ...dto, claim: open ? { code: claim.code, token: claim.token, peni: claim.peni, expiresAt: claim.expiresAt.toISOString() } : null };
   }
 
   /** "İptal": an order that was never paid. Needs a reason. */
@@ -173,6 +225,10 @@ export class OrderService {
       refundKurus: order.totalKurus,
     };
     await this.orders.saveOrder(next);
+    // A claim nobody took yet goes with the money. Peni already claimed is taken back
+    // with the refund once claiming exists (piece 10).
+    const claim = await this.claims.getClaimByOrder(ctx.cafe.id, order.id);
+    if (claim && claimIsOpen(claim, this.now())) await this.claims.saveClaim({ ...claim, cancelledAt: this.now() });
     return this.dto(ctx, next);
   }
 
@@ -271,6 +327,7 @@ export class OrderService {
       canVoid: o.status === "open" && ctx.permissions.has("till.correct"),
       canRefund: o.status === "paid" && ctx.permissions.has("till.correct"),
       canDelete: ctx.permissions.has("till.delete"),
+      claim: null,
     };
   }
 

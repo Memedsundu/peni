@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { PeniApp } from "./app";
+import { inMemoryStores, PeniApp, type PeniStores } from "./app";
 import { DEMO_STAFF, DEMO_STAFF_PASSWORD, seed } from "./seed";
 import type { StaffContext } from "./staff";
 
 let app: PeniApp;
+let stores: PeniStores;
 let now: Date;
 let leyla: StaffContext;
 let ece: StaffContext;
@@ -25,7 +26,8 @@ async function eceAtTill(): Promise<StaffContext> {
 
 beforeEach(async () => {
   now = new Date("2026-10-16T09:00:00Z");
-  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now });
+  stores = inMemoryStores();
+  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now }, stores);
   await seed(app);
   leyla = await at("leyla");
   ece = await eceAtTill();
@@ -145,5 +147,45 @@ describe("the till's orders (plan piece 6)", () => {
     const o = await order(atTill, [{ productId: "cay", quantity: 1 }]);
     expect(o.canDelete).toBe(false);
     expect(await code(app.till.remove(atTill, o.id, { reason: "Deneme" }))).toBe("NEEDS_PASSWORD");
+  });
+
+  describe("peni for the customer screen (plan piece 7)", () => {
+    it("makes a one-time claim when an order is paid: a 4-digit code, a QR token and the peni at the café's rate", async () => {
+      const o = await order(ece, [{ productId: "latte", quantity: 2, discountPercent: 10 }, { productId: "simit", quantity: 1 }]);
+      const payKey = key();
+      const paid = await app.till.pay(ece, o.id, { method: "card", payKey });
+      // ₺241 at 5 % is ₺12,05: 12 peni, rounded down.
+      expect(paid.claim).toMatchObject({ peni: 12, expiresAt: "2026-10-16T21:00:00.000Z" }); // midnight in Istanbul
+      expect(paid.claim!.code).toMatch(/^\d{4}$/);
+      expect(paid.claim!.token).toMatch(/^[\w-]{22}$/);
+      // A retried payment shows the same claim; other views never carry it.
+      expect((await app.till.pay(ece, o.id, { method: "card", payKey })).claim).toEqual(paid.claim);
+      expect((await app.till.get(ece, o.id)).claim).toBeNull();
+      expect((await app.till.list(ece)).orders[0]!.claim).toBeNull();
+    });
+
+    it("gives every claim of the day its own code", async () => {
+      const codes = new Set<string>();
+      for (let i = 0; i < 40; i++) {
+        const o = await order(ece, [{ productId: "cay", quantity: 1 }]);
+        codes.add((await app.till.pay(ece, o.id, { method: "cash", payKey: key() })).claim!.code);
+      }
+      expect(codes.size).toBe(40);
+    });
+
+    it("makes no claim when the order earns nothing or the café has peni off", async () => {
+      const cheap = await order(ece, [{ productId: "cay", quantity: 1 }], 100);
+      expect((await app.till.pay(ece, cheap.id, { method: "cash", payKey: key() })).claim).toBeNull();
+      await app.directory.saveSettings({ ...(await app.directory.getSettings("cafe_moda")), peniEnabled: false });
+      const o = await order(ece, [{ productId: "latte", quantity: 1 }]);
+      expect((await app.till.pay(ece, o.id, { method: "cash", payKey: key() })).claim).toBeNull();
+    });
+
+    it("cancels a claim nobody took when the order is refunded", async () => {
+      const o = await order(ece, [{ productId: "latte", quantity: 1 }]);
+      await app.till.pay(ece, o.id, { method: "card", payKey: key() });
+      await app.till.refund(await at("murat"), o.id, { reason: "Soğuk geldi" });
+      expect((await stores.claims.getClaimByOrder("cafe_moda", o.id))!.cancelledAt).toEqual(now);
+    });
   });
 });

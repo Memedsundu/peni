@@ -5,6 +5,7 @@ import { formatPercent, formatTL } from "@peni/brand/format";
 import { lineTotal, orderTotals, QUICK_DISCOUNTS, type OrderLine } from "@peni/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
+import { displayLink, type DisplayLine, type DisplayState } from "./display";
 import type { TillProps } from "./till";
 import { Button, Keypad, Notice, Photo, Sheet } from "./ui";
 
@@ -30,7 +31,7 @@ const signature = (lines: { productId: string; quantity: number; discountPercent
  * right. Totals are worked out here with the same rule as the server, for speed; the server's
  * numbers are the ones that count, and a mismatch stops the payment for a second look.
  */
-export function Sell({ t, slug, onError }: TillProps) {
+export function Sell({ t, slug, onError, deviceId }: TillProps & { deviceId: string }) {
   const [menu, setMenu] = useState<TillMenuDTO | null>(null);
   const [tab, setTab] = useState<string | null>(null);
   const [cart, setCart] = useState<Cart>(emptyCart);
@@ -57,16 +58,56 @@ export function Sell({ t, slug, onError }: TillProps) {
 
   const totals = useMemo(() => orderTotals(cart.lines, cart.discountPercent), [cart.lines, cart.discountPercent]);
 
+  // What the customer screen shows: the order as it's entered, then the paid order and its peni.
+  const shown = useMemo<DisplayState>(() => {
+    const line = (l: Pick<OrderLine, "name" | "quantity" | "discountPercent"> & { totalKurus: number }): DisplayLine => ({
+      name: l.name,
+      quantity: l.quantity,
+      discountPercent: l.discountPercent,
+      totalKurus: l.totalKurus,
+    });
+    if (paid) {
+      return {
+        kind: "paid",
+        number: paid.number,
+        lines: paid.lines.map(line),
+        discountKurus: paid.discountKurus,
+        totalKurus: paid.totalKurus,
+        method: paid.paymentMethod ?? "card",
+        changeKurus: paid.changeKurus,
+        claim: paid.claim,
+      };
+    }
+    if (cart.lines.length === 0) return { kind: "idle" };
+    return { kind: "order", lines: cart.lines.map((l) => line({ ...l, totalKurus: lineTotal(l) })), ...totals };
+  }, [paid, cart.lines, totals]);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
+  const screen = useRef<ReturnType<typeof displayLink> | null>(null);
+  useEffect(() => {
+    const link = displayLink(deviceId, { hello: () => link.send({ type: "state", state: shownRef.current }) });
+    screen.current = link;
+    return () => {
+      link.send({ type: "state", state: { kind: "idle" } });
+      link.close();
+    };
+  }, [deviceId]);
+  useEffect(() => {
+    screen.current?.send({ type: "state", state: shown });
+  }, [shown]);
+
   const edit = (change: (c: Cart) => Partial<Cart>) => {
     setError(null);
     setCart((c) => ({ ...c, ...change(c) }));
   };
-  const add = (p: TillMenuDTO["categories"][number]["products"][number]) =>
+  const add = (p: TillMenuDTO["categories"][number]["products"][number]) => {
+    setPaid(null);
     edit((c) => {
       const existing = c.lines.find((l) => l.productId === p.productId);
       if (existing) return { lines: c.lines.map((l) => (l === existing ? { ...l, quantity: Math.min(99, l.quantity + 1) } : l)) };
       return { lines: [...c.lines, { productId: p.productId, name: p.name, unitPriceKurus: p.priceKurus, quantity: 1, discountPercent: 0 }] };
     });
+  };
   const setQuantity = (productId: string, quantity: number) =>
     edit((c) => ({
       lines: quantity <= 0 ? c.lines.filter((l) => l.productId !== productId) : c.lines.map((l) => (l.productId === productId ? { ...l, quantity: Math.min(99, quantity) } : l)),
@@ -293,6 +334,11 @@ function PaidView({ t, order, onNext }: { t: TillProps["t"]; order: OrderDTO; on
       <p className="tabular text-base text-muted">
         #{order.number} · {order.paymentMethod === "cash" ? t("cash") : t("card")} · {formatTL(order.totalKurus)}
       </p>
+      {order.claim && (
+        <p className="text-base text-muted">
+          {t("peniOnScreen")}: <strong className="tabular text-ink">{order.claim.code}</strong> · {order.claim.peni} peni
+        </p>
+      )}
       {order.changeKurus !== null && order.changeKurus > 0 && (
         <p className="tabular text-lg">
           {t("changeToGive")}: <strong className="font-serif text-3xl font-normal">{formatTL(order.changeKurus)}</strong>
