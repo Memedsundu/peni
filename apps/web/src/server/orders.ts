@@ -19,6 +19,7 @@ import {
   type Payment,
   type PaymentMethod,
   type PeniDirectory,
+  type PeniService,
   type Permission,
   type StaffStore,
 } from "@peni/core";
@@ -47,6 +48,7 @@ export class OrderService {
     private readonly directory: PeniDirectory,
     private readonly payments: PaymentService,
     private readonly cash: CashService,
+    private readonly peni: PeniService,
     private readonly now: () => Date,
   ) {
     // However a payment gets approved, by the barista or later by the terminal, its order moves on.
@@ -224,10 +226,9 @@ export class OrderService {
       refundReason: payment.reason,
       refundKurus: payment.amountKurus,
     });
-    // A claim nobody took yet goes with the money. Peni already claimed is taken back
-    // with the refund once claiming exists (piece 10).
-    const claim = await this.claims.getClaimByOrder(order.cafeId, order.id);
-    if (claim && claimIsOpen(claim, this.now())) await this.claims.saveClaim({ ...claim, cancelledAt: this.now() });
+    // Peni go with the money: a code nobody used closes, peni already taken come back out
+    // of the wallet (as much as is left in it).
+    await this.peni.refundOrder(order.cafeId, order.id);
   }
 
   /**
@@ -264,7 +265,7 @@ export class OrderService {
   /**
    * The peni the customer can take for a paid order (plan piece 7): a QR token and a
    * 4-digit code for the customer screen, open until the end of the café's day. Nothing
-   * is credited here; the app claims it (piece 10). No claim when the café has peni off
+   * is credited here; the customer takes it (piece 10, `PeniApp.takeClaim`). No claim when the café has peni off
    * or the order earns nothing.
    */
   private async issueClaim(order: Order): Promise<PeniClaim | null> {

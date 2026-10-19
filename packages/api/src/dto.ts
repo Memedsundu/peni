@@ -384,6 +384,29 @@ export interface GiftDTO {
   thankedAt: string | null;
 }
 
+/**
+ * A paid order's peni, as its QR link or typed code shows it (plan piece 10).
+ * "taken": someone else took it. "yours": the viewer did.
+ */
+export type ClaimStateDTO = "open" | "yours" | "taken" | "expired" | "cancelled";
+
+/** `GET /claims/:token` (public) and `POST /claims`. */
+export interface ClaimDTO {
+  cafeSlug: string;
+  cafeName: string;
+  hue: CafeHue | null;
+  peni: number;
+  /** "1 çay": the peni read as goods, or null below one item. */
+  goods: string | null;
+  state: ClaimStateDTO;
+  /** The end of the café's day. */
+  expiresAt: string;
+  /** Once it's the viewer's: their balance at the café. */
+  balancePeni: number | null;
+  /** Signed in and wasn't a member of the café before taking it. */
+  joined: boolean;
+}
+
 /** `GET /gifts/:id/preview`, public: what a shared link may show. [G11] */
 export interface GiftPreviewDTO {
   id: string;

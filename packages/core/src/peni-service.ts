@@ -1,3 +1,4 @@
+import { claimState, InMemoryClaimStore, type ClaimStore, type PeniClaim } from "./claims";
 import type { Gift, Membership, PeniDirectory } from "./directory";
 import { PeniError } from "./errors";
 import { account, type Ledger, type LedgerTransaction } from "./ledger";
@@ -91,6 +92,7 @@ export class PeniService {
     private readonly ledger: Ledger,
     private readonly directory: PeniDirectory,
     private readonly clock: Clock = () => new Date(),
+    private readonly claims: ClaimStore = new InMemoryClaimStore(),
   ) {}
 
   // ---------------------------------------------------------------- wallet
@@ -173,6 +175,44 @@ export class PeniService {
     );
   }
 
+  /**
+   * The customer scanned the QR or typed the code (plan piece 10): the claim's peni go
+   * to their wallet at this café, once. The amount was fixed when the order was paid, so
+   * a rate change later doesn't touch it. Taking it again is a no-op for the same member
+   * and refused for anyone else.
+   */
+  async takeClaim(claimId: string, membershipId: string): Promise<{ claim: PeniClaim; already: boolean }> {
+    const membership = await this.requireActiveMembership(membershipId);
+    return this.ledger.atomically(async () => {
+      const claim = await this.claims.getClaim(claimId);
+      if (!claim) throw new PeniError("NOT_FOUND", "No such peni code");
+      if (claim.cafeId !== membership.cafeId) throw new PeniError("CROSS_CAFE", "This code is for another café");
+      const now = this.clock();
+      const state = claimState(claim, now);
+      if (state === "claimed") {
+        if (claim.claimedByMembershipId === membership.id) return { claim, already: true };
+        throw new PeniError("CLAIM_TAKEN", "Someone already took these peni");
+      }
+      if (state === "cancelled") throw new PeniError("CLAIM_CANCELLED", "This sale was refunded");
+      if (state === "expired") throw new PeniError("CLAIM_EXPIRED", "This code closed at the end of the day");
+
+      await this.ledger.post({
+        cafeId: claim.cafeId,
+        kind: "earn",
+        entries: [
+          { account: account.issuance(claim.cafeId), delta: -claim.peni },
+          { account: account.member(membership.id), delta: claim.peni },
+        ],
+        idempotencyKey: `earn:${claim.orderId}`,
+        meta: { orderId: claim.orderId, claimId: claim.id },
+        createdAt: now,
+      });
+      const taken = { ...claim, claimedAt: now, claimedByMembershipId: membership.id };
+      await this.claims.saveClaim(taken);
+      return { claim: taken, already: false };
+    });
+  }
+
   /** Reserves peni against an order at the till. Released again if the order is not paid. */
   async redeemForOrder(input: {
     membershipId: string;
@@ -220,10 +260,14 @@ export class PeniService {
 
   /**
    * A paid order was refunded at the till. Spent peni and askı items are given
-   * back; earned peni is taken back, but only as much as is still in the wallet.
+   * back; earned peni is taken back, but only as much as is still in the wallet; a peni
+   * code nobody used yet is closed.
    */
   async refundOrder(cafeId: string, orderId: string): Promise<LedgerTransaction[]> {
     return this.ledger.atomically(async () => {
+      // Nobody took the peni yet: the code closes with the money, under the same lock as taking it.
+      const claim = await this.claims.getClaimByOrder(cafeId, orderId);
+      if (claim && claimState(claim, this.clock()) === "open") await this.claims.saveClaim({ ...claim, cancelledAt: this.clock() });
       const related = (await this.ledger.query({ cafeId, kinds: ["earn", "redeem", "askida_claim"] })).filter(
         (t) => t.meta.orderId === orderId,
       );

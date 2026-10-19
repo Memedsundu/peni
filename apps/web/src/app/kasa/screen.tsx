@@ -111,7 +111,9 @@ export function CustomerScreen() {
               <Qr value={`${window.location.origin}/p/${state.claim.token}`} size={240} label={t("peniQr")} />
               <div className="flex flex-col gap-4">
                 <h2 className="font-serif text-[44px] font-normal leading-[1.05]">{t("takePeni")}</h2>
-                <p className="text-lg leading-normal text-muted">{t("scanHelp")}</p>
+                <p className="text-lg leading-normal text-muted">
+                  {t("scanHelp")} <span className="font-medium text-ink">{window.location.host}/p</span>
+                </p>
                 <div aria-label={state.claim.code.split("").join(" ")} className="tabular text-[56px] font-semibold tracking-[0.2em]">
                   {state.claim.code}
                 </div>
