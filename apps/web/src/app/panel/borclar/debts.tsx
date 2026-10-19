@@ -33,7 +33,7 @@ type Open =
   | { kind: "cardSettings" }
   | null;
 
-const KIND: Record<DebtKindDTO, TextKey> = { bill: "kindBill", check: "kindCheck", loan: "kindLoan", card: "kindCard" };
+const KIND: Record<DebtKindDTO, TextKey> = { bill: "kindBill", check: "kindCheck", loan: "kindLoan", card: "kindCard", wages: "kindWages" };
 const MONEY: MoneyMethodDTO[] = ["cash", "card", "bank"];
 
 /**
@@ -69,7 +69,9 @@ function DebtsPage({ cafe, t, lang, signedOut }: PanelProps) {
     // Once per café.
   }, [cafe.slug]);
 
-  const openRow = (r: DebtRowDTO) =>
+  const openRow = (r: DebtRowDTO) => {
+    // Wages are paid on Puantaj ve maaş, by person and month.
+    if (r.kind === "wages") return window.location.assign(`/panel/puantaj?kafe=${encodeURIComponent(cafe.slug)}`);
     setOpen(
       r.kind === "bill"
         ? { kind: "bill", id: r.id }
@@ -79,6 +81,7 @@ function DebtsPage({ cafe, t, lang, signedOut }: PanelProps) {
             ? { kind: "lender", key: r.id }
             : { kind: "card" },
     );
+  };
   const sheet = { t, lang, slug: cafe.slug, onClose: () => setOpen(null), onSaved: setData };
 
   return (

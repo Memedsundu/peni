@@ -44,18 +44,21 @@ describe("Nakit ve banka (plan piece 20)", () => {
     expect(view.started).toEqual({ on: "2026-09-28", by: "Leyla Kara" });
     // ₺12.000 less the milk (₺860), the week's deposit (₺5.000) and Murat's ₺200.
     expect(view.reserveKurus).toBe(594_000);
-    // ₺85.000 less the card payment (₺2.000), plus the deposit, less the bank's fee.
-    expect(view.bankKurus).toBe(8_795_250);
+    // ₺185.000 less the card payment (₺2.000) and last month's wages (₺101.760), plus the deposit, less the bank's fee.
+    expect(view.bankKurus).toBe(8_619_250);
     expect(view.drawer).toEqual({ balanceKurus: null, open: false, sessionId: null });
-    expect(view.totalKurus).toBe(594_000 + 8_795_250);
+    expect(view.totalKurus).toBe(594_000 + 8_619_250);
     expect(view.lines.map((l) => [l.day, l.account, l.kind, l.amountKurus, l.counterpart, l.label ?? l.note])).toEqual([
       ["2026-10-14", "bank", "correction", -4_750, null, "Ekstrede hesap işletim ücreti"],
       ["2026-10-13", "reserve", "repayment", -20_000, null, "Murat Aksu"],
       ["2026-10-07", "bank", "transfer", 500_000, "reserve", "Haftalık yatırma"],
       ["2026-10-07", "reserve", "transfer", -500_000, "bank", "Haftalık yatırma"],
       ["2026-10-04", "bank", "card", -200_000, null, "İş kartı"],
+      ["2026-10-02", "bank", "wages", -2_460_000, null, "Ece Tan"],
+      ["2026-10-02", "bank", "wages", -3_140_000, null, "Hakan Usta"],
+      ["2026-10-02", "bank", "wages", -4_576_000, null, "Murat Aksu"],
       ["2026-09-30", "reserve", "bill", -86_000, null, "Moda Süt"],
-      ["2026-09-28", "bank", "opening", 8_500_000, null, null],
+      ["2026-09-28", "bank", "opening", 18_500_000, null, null],
       ["2026-09-28", "reserve", "opening", 1_200_000, null, null],
     ]);
     expect(view.lines.find((l) => l.kind === "bill")!.billId).toBe("bil_seed_sut1");
@@ -69,7 +72,7 @@ describe("Nakit ve banka (plan piece 20)", () => {
     await sell("turk", "card");
     await sell("latte", "card");
     const view = await app.money.get(murat);
-    expect(view.bankKurus).toBe(8_795_250 + 9_000 + 12_000);
+    expect(view.bankKurus).toBe(8_619_250 + 9_000 + 12_000);
     expect(view.drawer).toMatchObject({ balanceKurus: 50_000 + 12_000, open: true });
     expect(view.lines.filter((l) => l.kind === "sales").map((l) => [l.account, l.amountKurus])).toEqual([
       ["bank", 21_000],
@@ -86,13 +89,13 @@ describe("Nakit ve banka (plan piece 20)", () => {
 
     const byBank = await app.bills.pay(murat, "bil_seed_elektrik", { key: key(), method: "bank", amountKurus: 50_000 });
     expect(byBank.payments.at(-1)).toMatchObject({ method: "bank", account: "bank" });
-    expect((await app.money.get(murat)).bankKurus).toBe(8_795_250 - 50_000);
+    expect((await app.money.get(murat)).bankKurus).toBe(8_619_250 - 50_000);
 
     // Undone while the drawer is still open: the move goes with it.
     await app.bills.removePayment(murat, "bil_seed_elektrik", elektrik.payments.at(-1)!.id);
     await app.bills.removePayment(murat, "bil_seed_elektrik", byBank.payments.at(-1)!.id);
     expect(await drawerMoves()).toEqual([]);
-    expect((await app.money.get(murat)).bankKurus).toBe(8_795_250);
+    expect((await app.money.get(murat)).bankKurus).toBe(8_619_250);
 
     // More than the drawer holds can't come out of it; the reserve can pay instead.
     expect(await code(app.bills.pay(murat, "bil_seed_elektrik", { key: key(), method: "cash", from: "drawer" }))).toBe("ok");
@@ -118,11 +121,11 @@ describe("Nakit ve banka (plan piece 20)", () => {
   it("takes a check out of the bank on the day it is cashed, and puts it back when that is undone", async () => {
     await app.debts.cashCheck(murat, "chk_seed_kira", { cashed: true, cashedOn: "2026-10-15" });
     let view = await app.money.get(murat);
-    expect(view.bankKurus).toBe(8_795_250 - 4_500_000);
+    expect(view.bankKurus).toBe(8_619_250 - 4_500_000);
     expect(view.lines[0]).toMatchObject({ day: "2026-10-15", account: "bank", kind: "check", amountKurus: -4_500_000, label: "0048213" });
     await app.debts.cashCheck(murat, "chk_seed_kira", { cashed: false });
     view = await app.money.get(murat);
-    expect(view.bankKurus).toBe(8_795_250);
+    expect(view.bankKurus).toBe(8_619_250);
   });
 
   it("pays people back and the credit card from where the money is, the reserve for managers only", async () => {
@@ -137,9 +140,9 @@ describe("Nakit ve banka (plan piece 20)", () => {
 
     const card = await app.debts.payCard(murat, { key: key(), amountKurus: 70_000, method: "bank" });
     expect(card.card!.payments[0]).toMatchObject({ amountKurus: 70_000, account: "bank" });
-    expect((await app.money.get(murat)).bankKurus).toBe(8_795_250 - 70_000);
+    expect((await app.money.get(murat)).bankKurus).toBe(8_619_250 - 70_000);
     await app.debts.removeCardPayment(murat, card.card!.payments[0]!.id);
-    expect((await app.money.get(murat)).bankKurus).toBe(8_795_250);
+    expect((await app.money.get(murat)).bankKurus).toBe(8_619_250);
     expect(repaid.cashFrom).toEqual({ drawerOpen: true, reserve: false });
     expect((await app.debts.get(murat)).cashFrom).toEqual({ drawerOpen: true, reserve: true });
   });
@@ -164,11 +167,11 @@ describe("Nakit ve banka (plan piece 20)", () => {
     expect(await code(app.money.move(murat, { key: key(), kind: "withdraw", account: "drawer", amountKurus: 100, note: "x" }))).toBe("ACCOUNT_INVALID");
     expect(await code(app.money.move(murat, { key: key(), kind: "withdraw", account: "reserve", amountKurus: 900_000, note: "Kira" }))).toBe("RESERVE_TOO_LOW");
     view = await app.money.move(murat, { key: key(), kind: "deposit", account: "bank", amountKurus: 1_000_000, note: "Leyla'dan sermaye" });
-    expect(view.bankKurus).toBe(9_795_250);
-    view = await app.money.move(murat, { key: key(), kind: "correction", account: "bank", amountKurus: 9_790_000, note: "Ekstre" });
-    expect(view.bankKurus).toBe(9_790_000);
+    expect(view.bankKurus).toBe(9_619_250);
+    view = await app.money.move(murat, { key: key(), kind: "correction", account: "bank", amountKurus: 9_614_000, note: "Ekstre" });
+    expect(view.bankKurus).toBe(9_614_000);
     expect(view.lines[0]).toMatchObject({ kind: "correction", amountKurus: -5_250, note: "Ekstre", by: "Murat Aksu" });
-    expect(await code(app.money.move(murat, { key: key(), kind: "correction", account: "bank", amountKurus: 9_790_000, note: "Ekstre" }))).toBe("SAME_BALANCE");
+    expect(await code(app.money.move(murat, { key: key(), kind: "correction", account: "bank", amountKurus: 9_614_000, note: "Ekstre" }))).toBe("SAME_BALANCE");
     expect(await code(app.money.move(hakan, { key: key(), kind: "deposit", account: "bank", amountKurus: 100, note: "x" }))).toBe("FORBIDDEN");
 
     // "Geri al": the whole transfer, both sides, while its drawer day is open.
@@ -201,8 +204,10 @@ describe("Ay kapanışı (plan piece 20)", () => {
       sales: { cashKurus: 0, cardKurus: 0, totalKurus: 0 },
       // The packaging (on the card) and the milk (cash).
       bills: { count: 2, totalKurus: 456_000, paidKurus: { credit: 370_000, cash: 86_000 } },
-      money: { drawerKurus: null, reserveKurus: 1_114_000, bankKurus: 8_500_000 },
-      owed: { billsKurus: 0, checksKurus: 0, loansKurus: 0, cardKurus: 370_000, totalKurus: 370_000 },
+      // September's hours (Puantaj ve maaş), all paid on 2 October.
+      wages: { earnedKurus: 10_676_000, paidKurus: 0 },
+      money: { drawerKurus: null, reserveKurus: 1_114_000, bankKurus: 18_500_000 },
+      owed: { billsKurus: 0, checksKurus: 0, loansKurus: 0, cardKurus: 370_000, wagesKurus: 10_676_000, totalKurus: 11_046_000 },
     });
     expect(await code(app.money.closeMonth(murat, { month: "2026-09" }))).toBe("FORBIDDEN");
     expect(await code(app.money.closeMonth(leyla, { month: "2026-10" }))).toBe("MONTH_NOT_CLOSABLE");

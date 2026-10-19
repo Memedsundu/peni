@@ -194,6 +194,8 @@ function Line({ t, lang, slug, line: l, busy, onUndo }: { t: T; lang: Lang; slug
         return t("lineRepayment");
       case "card":
         return t("lineCard");
+      case "wages":
+        return t("lineWages");
       case "sales":
         return t(l.account === "bank" ? "lineSalesCard" : "lineSalesCash");
       case "drawer":

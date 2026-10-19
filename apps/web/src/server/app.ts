@@ -22,6 +22,7 @@ import type {
   StaffReportFieldsDTO,
   TakeClaimInput,
   WalletDTO,
+  ShiftPersonDTO,
 } from "@peni/api";
 import {
   InMemoryCommunityStore,
@@ -32,8 +33,11 @@ import {
   InMemoryBillStore,
   InMemoryDebtStore,
   InMemoryBooksStore,
+  InMemoryShiftStore,
   type BillStore,
   type BooksStore,
+  type Shift,
+  type ShiftStore,
   type DebtStore,
   type ImageStore,
   type ReportStore,
@@ -86,6 +90,9 @@ import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifier } from "./customer-auth";
 import { giftEmail } from "./gift-email";
+import { PayService } from "./pay";
+import { shiftEmail } from "./shift-email";
+import { ShiftService } from "./shifts";
 import { AppError } from "./errors";
 import { buildIcs } from "./ics";
 import { MenuService } from "./menu";
@@ -130,6 +137,7 @@ export interface PeniStores {
   bills: BillStore;
   debts: DebtStore;
   books: BooksStore;
+  shifts: ShiftStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -151,6 +159,7 @@ export function inMemoryStores(): PeniStores {
     bills: new InMemoryBillStore(),
     debts: new InMemoryDebtStore(),
     books: new InMemoryBooksStore(),
+    shifts: new InMemoryShiftStore(),
   };
 }
 
@@ -206,6 +215,12 @@ export class PeniApp {
   readonly debtStore: DebtStore;
   readonly money: MoneyService;
   readonly books: BooksStore;
+  /** Vardiyalar (plan piece 21). */
+  readonly shifts: ShiftService;
+  /** Puantaj ve maaş (plan piece 21). */
+  readonly pay: PayService;
+  /** Shifts, hours, rates and pay as stored; for the demo seed and the data move from Shelby. */
+  readonly shiftStore: ShiftStore;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   readonly feed: FeedService;
@@ -216,6 +231,7 @@ export class PeniApp {
   private readonly claims: ClaimStore;
   /** Members' reports on each other's comments and events (plan piece 15). */
   private readonly reports: ReportStore;
+  private readonly staffStore: StaffStore;
   private clockOverride: Date | null = null;
 
   constructor(
@@ -259,9 +275,13 @@ export class PeniApp {
     this.debtStore = stores.debts;
     this.books = stores.books;
     const atomically = <T>(fn: () => Promise<T>) => stores.ledger.atomically(fn);
-    this.money = new MoneyService(stores.books, stores.cash, stores.payments, stores.bills, stores.debts, this.directory, stores.staff, atomically, () => this.now());
+    this.money = new MoneyService(stores.books, stores.cash, stores.payments, stores.bills, stores.debts, stores.shifts, this.directory, stores.staff, atomically, () => this.now());
     this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, stores.debts, this.money, atomically, () => this.now());
-    this.debts = new DebtService(stores.debts, stores.bills, this.bills, this.money, this.directory, stores.staff, atomically, () => this.now());
+    this.debts = new DebtService(stores.debts, stores.bills, this.bills, this.money, stores.shifts, this.directory, stores.staff, atomically, () => this.now());
+    this.shiftStore = stores.shifts;
+    this.staffStore = stores.staff;
+    this.shifts = new ShiftService(stores.shifts, stores.staff, this.money, this.directory, (ctx, week, shifts, people) => this.tellShifts(ctx, week, shifts, people), () => this.now());
+    this.pay = new PayService(stores.shifts, stores.staff, this.money, this.directory, atomically, () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
@@ -554,6 +574,28 @@ export class PeniApp {
       );
     } catch (error) {
       console.error("Gift email not sent", gift.id, error);
+    }
+  }
+
+  /**
+   * Emails each person on a published week their shifts, when the site's own address is
+   * set. One person's failed email doesn't stop the others.
+   */
+  private async tellShifts(ctx: StaffContext, weekStart: string, shifts: Shift[], people: Map<string, ShiftPersonDTO>): Promise<void> {
+    const email = this.options.auth?.email;
+    const base = this.options.publicUrl;
+    if (!email || !base) return;
+    const link = `${base.replace(/\/+$/, "")}/panel/vardiyalar?kafe=${encodeURIComponent(ctx.cafe.slug)}&hafta=${weekStart}`;
+    for (const [memberId, person] of people) {
+      const mine = shifts.filter((s) => s.memberIds.includes(memberId));
+      const member = mine.length ? await this.staffStore.getMember(memberId) : null;
+      const account = member && (await this.staffStore.getAccount(member.accountId));
+      if (!account?.email) continue;
+      try {
+        await email.send(shiftEmail({ to: account.email, name: person.name, cafeName: ctx.cafe.name, shifts: mine, link }));
+      } catch (error) {
+        console.error("Shift email not sent", memberId, weekStart, error);
+      }
     }
   }
 

@@ -157,7 +157,7 @@ function Closed({ t, lang, slug, close: c, onDone }: { t: T; lang: Lang; slug: s
   );
 }
 
-/** A month's numbers in four blocks: sales, bills, money at the end, owed at the end. */
+/** A month's numbers in five blocks: sales, bills, wages, money at the end, owed at the end. */
 function Summary({ t, lang, summary: s }: { t: T; lang: Lang; summary: MonthSummaryDTO }) {
   const money = (v: number | null) => (v === null ? t("sumNotKept") : formatTL(v));
   const paid = Object.entries(s.bills.paidKurus).filter(([, v]) => v > 0);
@@ -173,6 +173,9 @@ function Summary({ t, lang, summary: s }: { t: T; lang: Lang; summary: MonthSumm
           <Row key={method} label={t(METHOD[method as BillPayMethodDTO])} value={formatTL(v)} />
         ))}
       </Block>
+      <Block title={t("sumWages")} total={formatTL(s.wages.earnedKurus)}>
+        <Row label={t("statPaid")} value={formatTL(s.wages.paidKurus)} />
+      </Block>
       <Block title={t("sumMoney")} sub={formatDay(s.to, lang, { year: true })}>
         <Row label={t("accDrawer")} value={money(s.money.drawerKurus)} />
         <Row label={t("accReserve")} value={money(s.money.reserveKurus)} />
@@ -183,6 +186,7 @@ function Summary({ t, lang, summary: s }: { t: T; lang: Lang; summary: MonthSumm
         <Row label={t("checks")} value={formatTL(s.owed.checksKurus)} />
         <Row label={t("kindLoan")} value={formatTL(s.owed.loansKurus)} />
         <Row label={t("kindCard")} value={formatTL(s.owed.cardKurus)} />
+        <Row label={t("kindWages")} value={formatTL(s.owed.wagesKurus)} />
       </Block>
     </div>
   );

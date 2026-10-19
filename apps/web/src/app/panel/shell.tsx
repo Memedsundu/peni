@@ -17,6 +17,9 @@ const PAGES = [
   { key: "kapanis", href: "/panel/kapanis", label: "months", can: (c: StaffCafeAccessDTO) => has(c, "cash.manage") },
   { key: "tedarikciler", href: "/panel/tedarikciler", label: "suppliers", can: (c: StaffCafeAccessDTO) => has(c, "suppliers.view") },
   { key: "stok", href: "/panel/stok", label: "stock", can: (c: StaffCafeAccessDTO) => has(c, "stock.view") },
+  { key: "vardiyalar", href: "/panel/vardiyalar", label: "shifts", can: (c: StaffCafeAccessDTO) => has(c, "shifts.view") },
+  // Everyone sees their own hours and pay; some see everyone's.
+  { key: "puantaj", href: "/panel/puantaj", label: "pay", can: () => true },
   { key: "topluluk", href: "/panel/topluluk", label: "community", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },
 ] as const satisfies readonly { key: string; href: string; label: TextKey; can: (c: StaffCafeAccessDTO) => boolean }[];
 

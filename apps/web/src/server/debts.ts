@@ -4,6 +4,7 @@ import {
   cardStatement,
   loansLeft,
   localDateKey,
+  owedByMonth,
   validDate,
   type Bill,
   type BillStore,
@@ -14,6 +15,7 @@ import {
   type MoneyMethod,
   type PeniDirectory,
   type Permission,
+  type ShiftStore,
   type StaffStore,
 } from "@peni/core";
 import { AppError } from "./errors";
@@ -58,6 +60,7 @@ export class DebtService {
     private readonly bills: BillStore,
     private readonly billService: BillService,
     private readonly money: MoneyService,
+    private readonly shifts: ShiftStore,
     private readonly directory: PeniDirectory,
     private readonly staff: StaffStore,
     private readonly atomically: <T>(fn: () => Promise<T>) => Promise<T>,
@@ -96,6 +99,7 @@ export class DebtService {
       .sort((a, b) => Number(a.state === "cashed") - Number(b.state === "cashed") || (a.state === "cashed" ? b.cashedOn!.localeCompare(a.cashedOn!) : 0));
     const lenders = this.lenders(loans, repayments, loanBills, supplierNames, names, today);
     const card = cardSettings ? await this.card(cafeId, cardSettings, today, supplierNames, names) : null;
+    const wages = permissions.has("pay.hours") || permissions.has("pay.payouts") ? await this.wages(cafeId, today) : [];
 
     const rows: DebtRowDTO[] = [
       ...owedBills.map((b) => ({
@@ -147,6 +151,7 @@ export class DebtService {
             },
           ]
         : []),
+      ...wages,
     ].sort((a, b) => Number(b.overdue) - Number(a.overdue) || (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || b.amountKurus - a.amountKurus);
 
     const weekEnd = this.daysAgo(today, -7);
@@ -428,6 +433,23 @@ export class DebtService {
   }
 
   // ─────────────────────────────────────────────── helpers
+
+  /** Pay still owed to each person (Puantaj ve maaş), with the months it is for. */
+  private async wages(cafeId: string, today: string): Promise<DebtRowDTO[]> {
+    const [days, rates, payouts] = await Promise.all([this.shifts.listWorkDays(cafeId, "0000-01-01", today), this.shifts.listRates(cafeId), this.shifts.listPayouts(cafeId)]);
+    const owed = owedByMonth(days, rates, payouts);
+    const names = await this.names([...owed.keys()]);
+    const monthName = (m: string) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString("tr-TR", { month: "long", timeZone: "UTC" });
+    return [...owed].map(([memberId, months]) => ({
+      kind: "wages" as const,
+      id: memberId,
+      name: names.get(memberId) ?? "",
+      detail: [...months.keys()].sort().map(monthName).join(", "),
+      amountKurus: [...months.values()].reduce((s, k) => s + k, 0),
+      dueDate: null,
+      overdue: false,
+    }));
+  }
 
   private lenders(
     loans: Loan[],

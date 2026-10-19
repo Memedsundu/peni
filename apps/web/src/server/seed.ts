@@ -1,5 +1,5 @@
-import { defaultSettings, localDateKey, startOfLocalDay } from "@peni/core";
-import type { Bill, BillLine, Cafe, MenuItem, MoneyMovement, MovementKind, Post, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier } from "@peni/core";
+import { addMonths, dayPay, defaultSettings, localDateKey, monthDays, plusDays, rateOn, startOfLocalDay, weekStartOf } from "@peni/core";
+import type { Bill, BillLine, Cafe, MenuItem, MoneyMovement, MovementKind, PayRate, Post, Shift, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier, WorkDay } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -144,6 +144,13 @@ export async function seed(app: PeniApp): Promise<void> {
   await seedBills(app, {
     leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
     murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
+    ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
+    on,
+  });
+  await seedShifts(app, {
+    leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
+    murat: staffAt[`${DEMO_STAFF.murat.email}:moda`]!.id,
+    hakan: staffAt[`${DEMO_STAFF.hakan.email}:moda`]!.id,
     ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id,
     on,
   });
@@ -648,7 +655,7 @@ async function seedMoney(app: PeniApp, p: { leyla: string; murat: string; on: (d
   });
   await app.books.addMovements([
     move("mmv_seed_open_r", "reserve", 1_200_000, "opening", "opening", 18),
-    move("mmv_seed_open_b", "bank", 8_500_000, "opening", "opening", 18),
+    move("mmv_seed_open_b", "bank", 18_500_000, "opening", "opening", 18),
     move("mmv_seed_sut1", "reserve", -86_000, "bill", "bill_payment:bpy_bil_seed_sut1", 16, { createdAt: p.on(16, 17) }),
     move("mmv_seed_card", "bank", -200_000, "card", "card_payment:cpy_seed_1", 12, { createdAt: p.on(12, 11) }),
     move("mmv_seed_tr_r", "reserve", -500_000, "transfer", "manual:seed_transfer", 9, { counterpart: "bank", note: "Haftalık yatırma", createdAt: p.on(9, 18) }),
@@ -656,6 +663,101 @@ async function seedMoney(app: PeniApp, p: { leyla: string; murat: string; on: (d
     move("mmv_seed_lrp", "reserve", -20_000, "repayment", "repayment:lrp_seed_1", 3, { createdAt: p.on(3, 19) }),
     move("mmv_seed_fix", "bank", -4_750, "correction", "manual:seed_fix", 2, { note: "Ekstrede hesap işletim ücreti", createdAt: p.on(2, 10) }),
   ]);
+}
+
+/**
+ * Vardiyalar and Puantaj ve maaş (plan piece 21): the same week, every week, from the start
+ * of last month to next week. Next week is still a draft. Hours are in up to four days ago,
+ * as planned except for a day Ece was ill and two evenings Hakan stayed on; the last three
+ * days are for the manager to fill in. Last month's pay went out by bank early this month,
+ * except part of Hakan's, which waits. Ece got a raise this month.
+ */
+async function seedShifts(app: PeniApp, p: { leyla: string; murat: string; hakan: string; ece: string; on: (daysAgo: number, hh: number, mm?: number) => Date }): Promise<void> {
+  const cafeId = "cafe_moda";
+  const timeZone = (await app.directory.getSettings(cafeId)).timeZone;
+  const today = localDateKey(p.on(0, 12), timeZone);
+  const thisMonth = today.slice(0, 7);
+  const lastMonth = addMonths(thisMonth, -1);
+  const at = (day: string, hh: number) => new Date(`${day}T${String(hh - 3).padStart(2, "0")}:00:00Z`);
+  const h = (hh: number, mm = 0) => hh * 60 + mm;
+  // Monday is 0. Who works when, the same every week.
+  const pattern: { weekday: number; start: number; end: number; who: string[]; note?: string }[] = [
+    { weekday: 0, start: h(8), end: h(16), who: [p.ece] },
+    { weekday: 0, start: h(12), end: h(20), who: [p.murat] },
+    { weekday: 1, start: h(8), end: h(16), who: [p.ece] },
+    { weekday: 1, start: h(9), end: h(17), who: [p.hakan] },
+    { weekday: 1, start: h(12), end: h(20), who: [p.murat] },
+    { weekday: 2, start: h(9), end: h(17), who: [p.hakan] },
+    { weekday: 2, start: h(12), end: h(20), who: [p.murat] },
+    { weekday: 3, start: h(8), end: h(16), who: [p.ece] },
+    { weekday: 3, start: h(9), end: h(17), who: [p.hakan] },
+    { weekday: 3, start: h(12), end: h(20), who: [p.murat] },
+    { weekday: 4, start: h(8), end: h(16), who: [p.ece] },
+    { weekday: 4, start: h(9), end: h(17), who: [p.hakan] },
+    { weekday: 4, start: h(12), end: h(20), who: [p.murat] },
+    { weekday: 5, start: h(9), end: h(18), who: [p.ece, p.hakan], note: "Hafta sonu kahvaltısı" },
+    { weekday: 6, start: h(10), end: h(18), who: [p.murat] },
+  ];
+  const first = weekStartOf(monthDays(lastMonth).from);
+  const last = plusDays(weekStartOf(today), 7);
+  const shifts: Shift[] = [];
+  for (let week = first; week <= last; week = plusDays(week, 7)) {
+    pattern.forEach((x, i) => {
+      const day = plusDays(week, x.weekday);
+      shifts.push({
+        id: `shf_seed_${day}_${i}`, cafeId, day, startMinutes: x.start, endMinutes: x.end, memberIds: x.who, note: x.note ?? null,
+        createdById: p.murat, createdAt: at(plusDays(week, -4), 15), updatedAt: at(plusDays(week, -4), 15),
+      });
+    });
+    if (week < last) await app.shiftStore.saveWeek({ cafeId, weekStart: week, publishedAt: at(plusDays(week, -3), 10), publishedById: p.murat });
+  }
+  await app.shiftStore.addShifts(shifts);
+
+  const rates: PayRate[] = [
+    { id: "prt_seed_ece", cafeId, memberId: p.ece, fromDay: plusDays(today, -120), kurusPerHour: 15_000, byId: p.leyla, createdAt: p.on(120, 10) },
+    { id: "prt_seed_ece2", cafeId, memberId: p.ece, fromDay: monthDays(thisMonth).from, kurusPerHour: 16_500, byId: p.leyla, createdAt: p.on(20, 10) },
+    { id: "prt_seed_hakan", cafeId, memberId: p.hakan, fromDay: plusDays(today, -120), kurusPerHour: 20_000, byId: p.leyla, createdAt: p.on(120, 10) },
+    { id: "prt_seed_murat", cafeId, memberId: p.murat, fromDay: plusDays(today, -120), kurusPerHour: 22_000, byId: p.leyla, createdAt: p.on(120, 10) },
+  ];
+  for (const r of rates) await app.shiftStore.saveRate(r);
+
+  const entered = plusDays(today, -4);
+  const days = new Map<string, WorkDay>();
+  for (const s of shifts) {
+    if (s.day < monthDays(lastMonth).from || s.day > entered) continue;
+    for (const memberId of s.memberIds) {
+      const k = `${memberId}|${s.day}`;
+      const minutes = (days.get(k)?.minutes ?? 0) + s.endMinutes - s.startMinutes;
+      days.set(k, { cafeId, memberId, day: s.day, minutes, note: null, byId: p.murat, updatedAt: at(s.day, 21) });
+    }
+  }
+  const tweak = (memberId: string, day: string, minutes: number) => {
+    const d = days.get(`${memberId}|${day}`);
+    if (d) d.minutes = minutes;
+  };
+  // Ece was ill on a Thursday last month; Hakan stayed an hour longer on two Fridays.
+  const thursday = plusDays(weekStartOf(monthDays(lastMonth).from), 14 + 3);
+  tweak(p.ece, thursday, 0);
+  tweak(p.hakan, plusDays(thursday, 1), h(9));
+  tweak(p.hakan, plusDays(thursday, 8), h(9));
+  await app.shiftStore.setWorkDays(cafeId, [...days.values()], []);
+
+  // Last month's pay: what each earned, by bank, on the 2nd; Hakan's ₺5.000 short.
+  const payDay = `${thisMonth}-02`;
+  const startedOn = (await app.books.getStart(cafeId))?.startedOn ?? null;
+  const owed = new Map<string, number>();
+  for (const d of days.values()) if (d.day.startsWith(lastMonth)) owed.set(d.memberId, (owed.get(d.memberId) ?? 0) + dayPay(d.minutes, rateOn(rates, d.memberId, d.day)));
+  for (const [i, [memberId, earned]] of [...owed].entries()) {
+    const amountKurus = memberId === p.hakan ? earned - 500_000 : earned;
+    const id = `ppo_seed_${i}`;
+    const account = startedOn && payDay >= startedOn ? ("bank" as const) : null;
+    await app.shiftStore.addPayout({ id, cafeId, memberId, month: lastMonth, amountKurus, method: "bank", account, paidOn: payDay, note: null, byId: p.leyla, createdAt: at(payDay, 11) });
+    if (account) {
+      await app.books.addMovements([
+        { id: `mmv_${id}`, cafeId, account, amountKurus: -amountKurus, kind: "wages", counterpart: null, source: `pay:${id}`, day: payDay, note: null, memberId: p.leyla, createdAt: at(payDay, 11) },
+      ]);
+    }
+  }
 }
 
 /**

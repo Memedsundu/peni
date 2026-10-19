@@ -6,6 +6,11 @@ const BASE = process.argv[2] ?? "http://localhost:3000";
 const STAFF_PASSWORD = process.env.PENI_DEMO_STAFF_PASSWORD ?? "demo-staff";
 const key = () => crypto.randomUUID();
 
+/** "2026-10-12" plus n days. */
+function addDays(day, n) {
+  return new Date(Date.parse(`${day}T12:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+}
+
 async function call(method, path, { body, token, headers = {} } = {}) {
   const res = await fetch(`${BASE}/api/v1${path}`, {
     method,
@@ -502,6 +507,58 @@ assert.deepEqual([lateBill.status, lateBill.json.error.code], [409, "PERIOD_CLOS
 months = (await call("POST", `/staff/moda/money/months/${months.closes[0].id}/reopen`, { headers: STAFF, body: { reason: "Smoke" } })).json;
 assert.deepEqual([months.closedThrough, months.next.month, months.closes[0].reopenReason], [null, lastMonth, "Smoke"]);
 step("Cash bills and repayments came out of the reserve and the cashed check out of the bank; Leyla moves ₺1.000 (once) and back, corrects the bank, closes last month (a bill in it is refused) and reopens it; Ece can't see the money");
+
+// 5p. Vardiyalar and Puantaj ve maaş (piece 21): Leyla copies next week into the week after
+//     and publishes it; Ece, at the till, sees her own shifts there, and a shift on top of one
+//     of hers is refused. Leyla enters the missing days as planned, pays the ₺5.000 left of
+//     Hakan's last month by bank (once despite a retry), closes that pay month (its hours are
+//     then kept), reopens it and exports it for Excel. Ece sees only her own pay.
+let week = (await call("GET", "/staff/moda/shifts", { headers: STAFF })).json;
+assert.ok(week.published && week.shifts.length > 0, "this week is planned and published");
+const nextWeek = addDays(week.weekStart, 7);
+const later = addDays(week.weekStart, 14);
+assert.deepEqual((await call("GET", `/staff/moda/shifts?week=${nextWeek}`, { headers: ecePos3 })).json.visible, false, "next week is a draft Ece doesn't see");
+week = (await call("POST", "/staff/moda/shifts/copy", { headers: STAFF, body: { week: later } })).json;
+assert.equal(week.shifts.length, 15);
+week = (await call("POST", "/staff/moda/shifts/publish", { headers: STAFF, body: { week: later, published: true } })).json;
+const eceWeek = (await call("GET", `/staff/moda/shifts?week=${later}`, { headers: ecePos3 })).json;
+const eceShift = eceWeek.shifts.find((s) => s.mine);
+assert.ok(eceWeek.visible && eceShift, "Ece sees her shifts once the week is published");
+const extraShift = { key: key(), day: eceShift.day, start: eceShift.start, end: eceShift.end, memberIds: [eceWeek.me] };
+const clash = await call("POST", "/staff/moda/shifts", { headers: STAFF, body: extraShift });
+assert.deepEqual([clash.status, clash.json.error.code], [409, "SHIFT_OVERLAP"]);
+assert.equal((await call("POST", "/staff/moda/shifts", { headers: ecePos3, body: { ...extraShift, start: 0, end: 60 } })).json.error.code, "FORBIDDEN");
+
+let pay = (await call("GET", "/staff/moda/pay", { headers: STAFF })).json;
+const missing = pay.people.flatMap((p) => pay.days.flatMap((day, i) => (day < pay.today && p.planned[i] > 0 && p.worked[i] === null ? [{ memberId: p.memberId, day, minutes: p.planned[i] }] : [])));
+assert.ok(missing.length > 0 && pay.totals.missingDays === missing.length, "the last days' hours are still to be entered");
+pay = (await call("POST", `/staff/moda/pay/hours?month=${pay.month}`, { headers: STAFF, body: { days: missing } })).json;
+assert.equal(pay.totals.missingDays, 0);
+const payMonth = pay.months[1];
+let past = (await call("GET", `/staff/moda/pay?month=${payMonth}`, { headers: STAFF })).json;
+const hakanPay = past.people.find((p) => p.name === "Hakan Usta");
+assert.equal(hakanPay.leftKurus, 500_000, "₺5.000 of Hakan's last month is still owed");
+const bankBefore = (await call("GET", "/staff/moda/money", { headers: STAFF })).json.bankKurus;
+const payHakan = { key: key(), memberId: hakanPay.memberId, month: payMonth, amountKurus: 500_000, method: "bank" };
+await call("POST", "/staff/moda/pay/payouts", { headers: STAFF, body: payHakan });
+past = (await call("POST", "/staff/moda/pay/payouts", { headers: STAFF, body: payHakan })).json;
+assert.equal(past.people.find((p) => p.name === "Hakan Usta").leftKurus, 0);
+assert.equal((await call("GET", "/staff/moda/money", { headers: STAFF })).json.bankKurus, bankBefore - 500_000, "a retried payout pays once, from the bank");
+past = (await call("POST", "/staff/moda/pay/closes", { headers: STAFF, body: { month: payMonth, note: "Smoke" } })).json;
+assert.equal(past.close.summary.earnedKurus, past.totals.earnedKurus);
+const lockedDay = await call("POST", `/staff/moda/pay/hours?month=${payMonth}`, { headers: STAFF, body: { days: [{ memberId: hakanPay.memberId, day: `${payMonth}-15`, minutes: 60 }] } });
+assert.deepEqual([lockedDay.status, lockedDay.json.error.code], [409, "PAY_CLOSED"]);
+past = (await call("POST", `/staff/moda/pay/closes/${past.close.id}/reopen`, { headers: STAFF, body: { reason: "Smoke" } })).json;
+assert.deepEqual([past.close, past.history[0].reopenReason], [null, "Smoke"]);
+const csv = await fetch(`${BASE}/api/v1/staff/moda/pay/export?month=${payMonth}`, { headers: STAFF });
+const csvBytes = new Uint8Array(await csv.arrayBuffer());
+// The byte order mark tells Excel it's UTF-8, so the Turkish letters come through.
+assert.deepEqual([...csvBytes.slice(0, 3)], [0xef, 0xbb, 0xbf]);
+assert.ok(csv.headers.get("content-type").startsWith("text/csv") && new TextDecoder().decode(csvBytes).startsWith("Tarih;Çalışan;"), "the export opens in Excel");
+const ecePay = (await call("GET", "/staff/moda/pay", { headers: ecePos3 })).json;
+assert.deepEqual([ecePay.own, ecePay.people.map((p) => p.name)], [true, ["Ece Tan"]]);
+assert.equal((await call("POST", `/staff/moda/pay/hours?month=${ecePay.month}`, { headers: ecePos3, body: { days: missing.slice(0, 1) } })).json.error.code, "FORBIDDEN");
+step("Leyla copies and publishes a week Ece then sees (a clash is refused); the missing days go in as planned; Hakan's last ₺5.000 goes out once by bank; the pay month closes (its hours kept), reopens and exports; Ece sees only her own pay");
 
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
