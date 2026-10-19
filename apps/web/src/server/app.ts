@@ -14,6 +14,7 @@ import type {
   PostDTO,
   RecentRecipientDTO,
   RefItemDTO,
+  SessionDTO,
   StaffDashboardDTO,
   StaffReportFieldsDTO,
   WalletDTO,
@@ -49,6 +50,7 @@ import {
 } from "@peni/core";
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
 import { createHash, randomBytes } from "node:crypto";
+import { CustomerAuth, JoseIdTokenVerifier, type EmailSender, type IdTokenVerifier } from "./customer-auth";
 import { AppError } from "./errors";
 import { buildIcs } from "./ics";
 import { StaffService, type StaffContext } from "./staff";
@@ -90,6 +92,8 @@ export interface PeniAppOptions {
   demo: boolean;
   /** bcrypt cost for staff passwords. Tests lower it. */
   bcryptRounds?: number;
+  /** Customer sign-in. Without it, Google and Apple are off and so is email. */
+  auth?: { verifier?: IdTokenVerifier; email?: EmailSender | null };
   /** Defaults to the system clock. Tests move it to check day boundaries. */
   clock?: () => Date;
 }
@@ -112,6 +116,8 @@ export class PeniApp {
   readonly menu: MenuStore;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
+  /** Customer sign-in with Google, Apple or an email code. */
+  readonly auth: CustomerAuth;
   private clockOverride: Date | null = null;
 
   constructor(
@@ -124,6 +130,11 @@ export class PeniApp {
     this.community = stores.community;
     this.menu = stores.menu;
     this.peni = new PeniService(this.ledger, this.directory, () => this.now());
+    this.auth = new CustomerAuth(this.identity, {
+      now: () => this.now(),
+      verifier: options.auth?.verifier ?? new JoseIdTokenVerifier({ google: { audiences: [] }, apple: { audiences: [] } }),
+      email: options.auth?.email ?? null,
+    });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
   }
 
@@ -151,10 +162,7 @@ export class PeniApp {
     return id ? this.identity.getCustomer(id) : null;
   }
 
-  /**
-   * Demo only: a session for a seeded customer, so the web demo can sign in with one tap.
-   * Google, Apple and email sign-in replace it (plan piece 3).
-   */
+  /** A new 90-day session. Sign-in calls it; so does the demo's one-tap sign-in as a seeded customer. */
   async createSessionFor(customerId: string): Promise<string> {
     const token = randomBytes(32).toString("base64url");
     await this.identity.createSession(customerId, sha256(token), new Date(this.now().getTime() + SESSION_MS));
@@ -163,6 +171,25 @@ export class PeniApp {
 
   async signOut(token: string | null): Promise<void> {
     if (token) await this.identity.revokeSession(sha256(token), this.now());
+  }
+
+  /** Signs in with the 6-digit code from the email. [plan piece 3] */
+  async signInWithEmailCode(email: string, code: string): Promise<SessionDTO> {
+    return this.session(await this.auth.verifyEmail(email, code));
+  }
+
+  /** Signs in with an ID token from Google or Apple. */
+  async signInWithIdToken(provider: "google" | "apple", idToken: string, name?: string): Promise<SessionDTO> {
+    return this.session(await this.auth.verifyIdToken(provider, idToken, name));
+  }
+
+  private async session({ customer, isNew }: { customer: CustomerRecord; isNew: boolean }): Promise<SessionDTO> {
+    return {
+      token: await this.createSessionFor(customer.id),
+      customer: toCustomerDTO(customer),
+      isNew,
+      staffCafes: await this.staff.cafesForCustomer(customer.id),
+    };
   }
 
   // ─────────────────────────────────────────────── me (profile, staff cafés)
@@ -657,7 +684,7 @@ export class PeniApp {
       const count = perCafe.get(s.cafe.id) ?? 0;
       if (seen.has(key) || count >= 5) continue;
       const customer = await this.customerForMembership(s.recipientId);
-      if (!customer) continue;
+      if (!customer?.phone) continue;
       seen.add(key);
       perCafe.set(s.cafe.id, count + 1);
       const { firstName, lastInitial } = nameParts(customer.displayName);
@@ -725,7 +752,14 @@ export class PeniApp {
 }
 
 function toCustomerDTO(c: CustomerRecord): CustomerDTO {
-  return { id: c.id, phone: c.phone, displayName: c.displayName, avatarUrl: c.avatarUrl, profileVisible: c.profileVisible };
+  return {
+    id: c.id,
+    phone: c.phone,
+    email: c.email,
+    displayName: c.displayName,
+    avatarUrl: c.avatarUrl,
+    profileVisible: c.profileVisible,
+  };
 }
 
 function toMenuDTO(m: MenuItem, settings: CafePeniSettings): MenuItemDTO {

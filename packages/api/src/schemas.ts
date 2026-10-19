@@ -44,6 +44,7 @@ export const updateProfileSchema = z.object({
 
 export const staffRoleSchema = z.enum(["owner", "manager", "chef", "barista"]);
 const email = z.string().trim().toLowerCase().pipe(z.email("Geçerli bir e-posta yaz")).pipe(z.string().max(200));
+export const emailSchema = email;
 /** Long enough to resist guessing; no other rules, so people can use a passphrase. */
 const newPassword = z.string().min(8, "Şifre en az 8 karakter olmalı").max(200);
 
@@ -87,6 +88,26 @@ export const saveRolesSchema = z.object({
   roles: z.record(z.string(), z.record(z.string(), z.boolean())),
 });
 
+// ─────────────────────────────────────────────── customer sign-in (plan piece 3)
+
+/** `POST /auth/email/start`: sends a 6-digit code. */
+export const emailStartSchema = z.object({ email: emailSchema });
+
+/** `POST /auth/email/verify` */
+export const emailVerifySchema = z.object({
+  email: emailSchema,
+  code: z.string().trim().regex(/^\d{6}$/, "Kod 6 rakam olmalı"),
+});
+
+/** `POST /auth/google`: the ID token from Google's sign-in on the web or in the app. */
+export const googleSignInSchema = z.object({ idToken: z.string().min(20).max(8000) });
+
+/** `POST /auth/apple`: Apple sends the name to the app only the first time, so the app passes it on. */
+export const appleSignInSchema = z.object({
+  idToken: z.string().min(20).max(8000),
+  name: z.string().trim().max(40).optional(),
+});
+
 export type SendGiftInput = z.input<typeof sendGiftSchema>;
 export type DonateAskidaInput = z.input<typeof donateAskidaSchema>;
 export type TillDonationInput = z.input<typeof tillDonationSchema>;
@@ -102,3 +123,7 @@ export type SaveRolesInput = z.input<typeof saveRolesSchema>;
 export type SetPinInput = z.input<typeof setPinSchema>;
 export type RegisterDeviceInput = z.input<typeof registerDeviceSchema>;
 export type PinSignInInput = z.input<typeof pinSignInSchema>;
+export type EmailStartInput = z.input<typeof emailStartSchema>;
+export type EmailVerifyInput = z.input<typeof emailVerifySchema>;
+export type GoogleSignInInput = z.input<typeof googleSignInSchema>;
+export type AppleSignInInput = z.input<typeof appleSignInSchema>;

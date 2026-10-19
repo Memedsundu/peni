@@ -19,10 +19,37 @@ export interface Cafe {
 
 export interface Customer {
   id: string;
-  phone: string;
+  /** E.164. Optional: Google, Apple and email sign-in don't give one. */
+  phone: string | null;
+  /** Lower case, verified by the sign-in that gave it. */
+  email: string | null;
   displayName: string;
   avatarUrl: string | null;
   profileVisible: boolean;
+}
+
+/** How a customer signs in. Each is one row: Google's or Apple's user id, or the email address. */
+export type LoginProvider = "google" | "apple" | "email";
+
+export interface CustomerLogin {
+  customerId: string;
+  provider: LoginProvider;
+  /** Google's or Apple's `sub`, or the lower-case email for email codes. */
+  subject: string;
+  email: string | null;
+}
+
+/** A sign-in code sent by email. Only its hash is kept. */
+export interface EmailCode {
+  id: string;
+  /** Lower case. */
+  email: string;
+  codeHash: string;
+  createdAt: Date;
+  expiresAt: Date;
+  /** Wrong tries so far. */
+  attempts: number;
+  usedAt: Date | null;
 }
 
 export interface IdentityStore {
@@ -34,7 +61,19 @@ export interface IdentityStore {
   getCustomer(id: string): Promise<Customer | null>;
   getCustomers(ids: readonly string[]): Promise<Customer[]>;
   getCustomerByPhone(phone: string): Promise<Customer | null>;
+  getCustomerByEmail(email: string): Promise<Customer | null>;
   saveCustomer(customer: Customer): Promise<void>;
+
+  /** The customer behind a Google, Apple or email login. */
+  findLogin(provider: LoginProvider, subject: string): Promise<CustomerLogin | null>;
+  addLogin(login: CustomerLogin): Promise<void>;
+  loginsOf(customerId: string): Promise<CustomerLogin[]>;
+
+  saveEmailCode(code: EmailCode): Promise<void>;
+  /** The newest code for an email that is not used and not expired at `now`. */
+  liveEmailCode(email: string, now: Date): Promise<EmailCode | null>;
+  /** Codes sent to an email since `since`, for the per-hour limit. */
+  countEmailCodes(email: string, since: Date): Promise<number>;
 
   /** Stores only the hash of a session token. */
   createSession(customerId: string, tokenHash: string, expiresAt: Date): Promise<void>;
@@ -60,6 +99,8 @@ export class InMemoryIdentityStore implements IdentityStore {
   private readonly codes = new Map<string, string>(); // membership id to code
   private readonly byCode = new Map<string, string>(); // code to membership id
   private readonly lookups = new Map<string, Date[]>();
+  private readonly logins: CustomerLogin[] = [];
+  private readonly emailCodes = new Map<string, EmailCode>();
 
   async listCafes() {
     return [...this.cafes.values()].map(copyCafe);
@@ -94,6 +135,39 @@ export class InMemoryIdentityStore implements IdentityStore {
   async getCustomerByPhone(phone: string) {
     const c = [...this.customers.values()].find((x) => x.phone === phone);
     return c ? { ...c } : null;
+  }
+
+  async getCustomerByEmail(email: string) {
+    const c = [...this.customers.values()].find((x) => x.email === email.trim().toLowerCase());
+    return c ? { ...c } : null;
+  }
+
+  async findLogin(provider: LoginProvider, subject: string) {
+    const l = this.logins.find((x) => x.provider === provider && x.subject === subject);
+    return l ? { ...l } : null;
+  }
+
+  async addLogin(login: CustomerLogin) {
+    if (!(await this.findLogin(login.provider, login.subject))) this.logins.push({ ...login });
+  }
+
+  async loginsOf(customerId: string) {
+    return this.logins.filter((l) => l.customerId === customerId).map((l) => ({ ...l }));
+  }
+
+  async saveEmailCode(code: EmailCode) {
+    this.emailCodes.set(code.id, { ...code });
+  }
+
+  async liveEmailCode(email: string, now: Date) {
+    const live = [...this.emailCodes.values()]
+      .filter((c) => c.email === email && !c.usedAt && c.expiresAt > now)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return live[0] ? { ...live[0] } : null;
+  }
+
+  async countEmailCodes(email: string, since: Date) {
+    return [...this.emailCodes.values()].filter((c) => c.email === email && c.createdAt > since).length;
   }
 
   async saveCustomer(customer: Customer) {

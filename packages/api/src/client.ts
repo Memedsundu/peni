@@ -1,4 +1,5 @@
 import type {
+  AuthProvidersDTO,
   CafeDetailDTO,
   CafeSummaryDTO,
   FullWalletDTO,
@@ -7,6 +8,7 @@ import type {
   MeDTO,
   MemberLookupDTO,
   RolesDTO,
+  SessionDTO,
   StaffDashboardDTO,
   StaffMeDTO,
   StaffSessionDTO,
@@ -18,8 +20,10 @@ import type {
 import { errorMessageTr } from "./messages";
 import type {
   AddStaffInput,
+  AppleSignInInput,
   ChangePasswordInput,
   DonateAskidaInput,
+  EmailVerifyInput,
   PinSignInInput,
   SaveRolesInput,
   StaffSignInInput,
@@ -93,6 +97,18 @@ export function createPeniClient(options: PeniClientOptions) {
   const slug = (s: string) => encodeURIComponent(s);
 
   return {
+    auth: {
+      /** Which sign-in buttons to show. */
+      providers: () => call<AuthProvidersDTO>("GET", "/auth/providers"),
+      /** Emails a 6-digit code. */
+      emailStart: (email: string) => call<{ ok: true; expiresInSeconds: number }>("POST", "/auth/email/start", { email }),
+      emailVerify: (input: EmailVerifyInput) => call<SessionDTO>("POST", "/auth/email/verify", input),
+      /** The ID token from Google's sign-in (Google Identity Services on the web, expo-auth-session in the app). */
+      google: (idToken: string) => call<SessionDTO>("POST", "/auth/google", { idToken }),
+      /** The ID token from Sign in with Apple, and the name Apple gives only the first time. */
+      apple: (input: AppleSignInInput) => call<SessionDTO>("POST", "/auth/apple", input),
+      signOut: () => call<{ ok: true }>("POST", "/auth/logout", {}),
+    },
     me: {
       /** The signed-in customer and the cafés they work at. [G18, G19] */
       get: () => call<MeDTO>("GET", "/me"),

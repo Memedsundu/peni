@@ -15,8 +15,10 @@ datasource db {
 /// A person using the customer app. Not tied to any café — they join cafés through Membership.
 model Customer {
   id                  String    @id @default(cuid())
-  /// E.164, e.g. +905321234567. Only the demo sign-in uses it now; Google, Apple and email sign-in replace it (plan piece 3).
-  phone               String    @unique
+  /// E.164, e.g. +905321234567. Optional: Google, Apple and email sign-in don't give one.
+  phone               String?   @unique
+  /// Lower case, verified by the sign-in that gave it.
+  email               String?   @unique
   displayName         String
   avatarUrl           String?
   bio                 String?   @db.VarChar(160)
@@ -25,14 +27,15 @@ model Customer {
   createdAt           DateTime  @default(now())
   deletionRequestedAt DateTime?
 
-  memberships  Membership[]
-  sessions     CustomerSession[]
-  devices      CustomerDevice[]
-  comments     PostComment[]
-  reactions    PostReaction[]
-  rsvps        EventRsvp[]
-  staffAccount StaffAccount?
-  lookups      GiftLookup[]
+  memberships    Membership[]
+  sessions       CustomerSession[]
+  devices        CustomerDevice[]
+  comments       PostComment[]
+  reactions      PostReaction[]
+  rsvps          EventRsvp[]
+  staffAccount   StaffAccount?
+  lookups        GiftLookup[]
+  customerLogins CustomerLogin[]
 }
 
 model CustomerSession {
@@ -48,6 +51,42 @@ model CustomerSession {
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([customerId])
+}
+
+enum LoginProvider {
+  google
+  apple
+  email
+}
+
+/// How a customer signs in: Google's or Apple's user id, or their email address. One customer can have several.
+model CustomerLogin {
+  id         String        @id @default(cuid())
+  customerId String
+  provider   LoginProvider
+  /// Google's or Apple's `sub`, or the lower-case email for email codes.
+  subject    String
+  email      String?
+  createdAt  DateTime      @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@index([customerId])
+}
+
+/// A sign-in code sent by email. Only its hash is kept.
+model EmailCode {
+  id        String    @id
+  /// Lower case.
+  email     String
+  codeHash  String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  attempts  Int       @default(0)
+  usedAt    DateTime?
+
+  @@index([email, createdAt])
 }
 
 enum DevicePlatform {

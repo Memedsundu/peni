@@ -134,8 +134,8 @@ export async function seed(app: PeniApp): Promise<void> {
   // ─────────────────────────────────────────── people and memberships
 
   const people = new Map<string, CustomerRecord>();
-  for (const c of Object.values(DEMO_CUSTOMERS)) people.set(c.id, { ...c, avatarUrl: null, profileVisible: c.id !== "cus_deniz" });
-  for (const c of Object.values(DEMO_NEIGHBOURS)) people.set(c.id, { ...c, avatarUrl: null });
+  for (const c of Object.values(DEMO_CUSTOMERS)) people.set(c.id, { ...c, email: null, avatarUrl: null, profileVisible: c.id !== "cus_deniz" });
+  for (const c of Object.values(DEMO_NEIGHBOURS)) people.set(c.id, { ...c, email: null, avatarUrl: null });
   for (const c of people.values()) await app.identity.saveCustomer(c);
 
   const id = (who: Who) => (who in DEMO_CUSTOMERS ? DEMO_CUSTOMERS[who as keyof typeof DEMO_CUSTOMERS] : DEMO_NEIGHBOURS[who as keyof typeof DEMO_NEIGHBOURS]).id;
@@ -195,7 +195,7 @@ export async function seed(app: PeniApp): Promise<void> {
     const key = `seed_gift_${++n}`;
     plan(o.at, () =>
       app.at(o.at, () =>
-        app.sendGift(customer(o.from), { cafeSlug: o.slug, toPhone: customer(o.to).phone, peni: o.peni, message: o.message, idempotencyKey: key }),
+        app.sendGift(customer(o.from), { cafeSlug: o.slug, toPhone: customer(o.to).phone!, peni: o.peni, message: o.message, idempotencyKey: key }),
       ),
     );
     return key;

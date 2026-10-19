@@ -143,7 +143,28 @@ await call("POST", `/staff/moda/devices/${setup.device.id}/revoke`, { headers: S
 assert.equal((await call("GET", "/staff-session", { headers: ecePin })).status, 401, "revoking the till signs everyone on it out");
 step("Leyla sets up a till; Ece signs in with her PIN, records askı cash, can't change her PIN there; revoking the till signs her out");
 
-// 5. Profile, calendar.
+// 5. A newcomer signs in with an email code; a second code replaces the first.
+const providers = (await call("GET", "/auth/providers")).json;
+assert.equal(providers.email, true);
+const newcomer = `zeynep.${key().slice(0, 8)}@example.com`;
+assert.equal((await call("POST", "/auth/email/start", { body: { email: newcomer } })).status, 200);
+const firstCode = (await call("GET", `/auth/demo/outbox?email=${encodeURIComponent(newcomer)}`)).json.code;
+await call("POST", "/auth/email/start", { body: { email: newcomer.toUpperCase() } });
+const code = (await call("GET", `/auth/demo/outbox?email=${encodeURIComponent(newcomer)}`)).json.code;
+assert.match(code, /^\d{6}$/);
+if (firstCode !== code) {
+  assert.equal((await call("POST", "/auth/email/verify", { body: { email: newcomer, code: firstCode } })).json.error.code, "CODE_WRONG");
+}
+const emailSession = await call("POST", "/auth/email/verify", { body: { email: newcomer, code } });
+assert.equal(emailSession.status, 200);
+assert.equal(emailSession.json.isNew, true);
+const zeynep = (await call("GET", "/me", { token: emailSession.json.token })).json;
+assert.equal(zeynep.customer.email, newcomer);
+assert.equal(zeynep.customer.phone, null);
+assert.equal((await call("POST", "/auth/email/verify", { body: { email: newcomer, code } })).json.error.code, "CODE_EXPIRED", "a code works once");
+step("A newcomer asks for two email codes; only the newest works, once, and she lands without a name or phone");
+
+// 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
 assert.deepEqual(me.staffCafes, []);
@@ -156,7 +177,7 @@ assert.match(ics.headers.get("content-type") ?? "", /^text\/calendar/);
 assert.match(await ics.text(), /BEGIN:VEVENT\r\n[\s\S]*SUMMARY:Mahalleye bir takas kütüphanesi kursak\?/);
 step("Profil loads and saves; the Peni masası downloads as text/calendar");
 
-// 6. The café report adds up: every change in what is owed is a change in wallets or the askı.
+// 7. The café report adds up: every change in what is owed is a change in wallets or the askı.
 const dash = (await call("GET", "/staff/moda", { headers: STAFF })).json;
 const wallets = await Promise.all([ayse, mehmet, deniz].map(modaBalance));
 const delta = (xs, ys) => ys.reduce((a, b) => a + b, 0) - xs.reduce((a, b) => a + b, 0);
