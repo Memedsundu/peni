@@ -58,6 +58,9 @@ export class OrderService {
     payments.onApproved = (payment) => this.applyPayment(payment);
   }
 
+  /** Stock the order uses once paid, and gives back when refunded (piece 17). Set by the app. */
+  stock: { used(order: Order, memberId: string | null): Promise<void>; refunded(order: Order, memberId: string | null): Promise<void> } | null = null;
+
   /** "Ayşe Y." for a wallet's membership, shown to the barista. Set by the app. */
   peniMemberName: (membershipId: string) => Promise<string> = async () => "Üye";
 
@@ -422,6 +425,7 @@ export class OrderService {
       if (amountPaid(await this.payments.list(order.cafeId, [order.id])) < order.totalKurus) return;
       // Before the order shows paid, so a retry that catches up records it too (once).
       await this.hang(order, payment.startedByMemberId);
+      await this.useStock(() => this.stock?.used({ ...order, lines: order.lines.filter((l) => !isHang(l.productId)) }, payment.startedByMemberId));
       await this.orders.saveOrder({
         ...order,
         status: "paid",
@@ -437,6 +441,7 @@ export class OrderService {
     // Paid two ways (peni and cash, say), it's refunded once both have gone back.
     const payments = await this.payments.list(order.cafeId, [order.id]);
     if (amountPaid(payments) > 0) return;
+    await this.useStock(() => this.stock?.refunded(order, payment.startedByMemberId));
     await this.orders.saveOrder({
       ...order,
       status: "refunded",
@@ -450,6 +455,15 @@ export class OrderService {
     await this.peni.refundOrder(order.cafeId, order.id);
     // What the guest left on the askı comes back off it, as much as is still there.
     await this.peni.unhangOrder(order.cafeId, order.id);
+  }
+
+  /** Stock never holds up a sale or a refund: if it can't be recorded, the sale still goes through. */
+  private async useStock(fn: () => Promise<void> | undefined): Promise<void> {
+    try {
+      await fn();
+    } catch (error) {
+      console.error("stock: could not record", error);
+    }
   }
 
   /**

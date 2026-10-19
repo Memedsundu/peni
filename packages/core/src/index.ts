@@ -18,3 +18,4 @@ export * from "./community";
 export * from "./images";
 export * from "./staff";
 export * from "./reports";
+export * from "./stock";

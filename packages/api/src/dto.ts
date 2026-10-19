@@ -96,6 +96,96 @@ export interface StaffMenuDTO {
   removed: StaffMenuProductDTO[];
 }
 
+// ─────────────────────────────────────────────── stock and recipes (plan piece 17)
+
+export type StockUnitDTO = "kg" | "l" | "adet";
+export type StockLevelDTO = "ok" | "low" | "out";
+export type StockModeDTO = "recipe" | "counted" | "none";
+export type WasteWhyDTO = "spilled" | "expired" | "broken" | "other";
+
+/**
+ * An ingredient or supply. Amounts are thousandths of the unit: grams for kg, ml for
+ * litres, 1000 per piece. `qtyMilli` can be below zero when sales ran ahead of a count.
+ */
+export interface StockItemDTO {
+  id: string;
+  name: string;
+  kind: "ingredient" | "supply";
+  unit: StockUnitDTO;
+  qtyMilli: number;
+  /** 0: no warning. */
+  minMilli: number;
+  /** Per kg, litre or piece; null until entered (bills set it from piece 18). */
+  costKurus: number | null;
+  level: StockLevelDTO;
+  /** Products on the menu that use it, by name. */
+  usedBy: string[];
+  /** Last counted, ISO. */
+  countedAt: string | null;
+  /** The unit can change only while nothing has used it yet. */
+  unitLocked: boolean;
+}
+
+export interface StockMoveDTO {
+  id: string;
+  itemId: string;
+  itemName: string;
+  unit: StockUnitDTO;
+  changeMilli: number;
+  afterMilli: number;
+  reason: "start" | "count" | "waste" | "sale" | "refund" | "bill";
+  why: WasteWhyDTO | null;
+  note: string | null;
+  /** Who did it, when a person did. */
+  by: string | null;
+  at: string;
+  /** What it was worth at the item's price; waste shows this as its cost. Null without a price. */
+  valueKurus: number | null;
+}
+
+/** `GET /staff/:slug/stock`: Stok in the café panel. Needs "stock.view". */
+export interface StockDTO {
+  /** Out first, then low, then by name. */
+  items: StockItemDTO[];
+  /** "Stoktan kaldırılanlar": kept for history, can be brought back. */
+  removed: StockItemDTO[];
+  /** Counts, waste and the rest, newest first; sales are in each item's own history. */
+  moves: StockMoveDTO[];
+  /** Waste over the last 30 days at today's prices. */
+  wasteKurus: number;
+  /** The viewer can count, record waste and change items ("stock.edit"). */
+  canEdit: boolean;
+}
+
+/** `GET /staff/:slug/stock/items/:id`: one item and every move it had, newest first. */
+export interface StockItemHistoryDTO {
+  item: StockItemDTO;
+  moves: StockMoveDTO[];
+}
+
+export interface RecipeDTO {
+  productId: string;
+  /** The product, so a chef (recipes, no menu editing) can work from this alone. */
+  name: string;
+  category: string;
+  priceKurus: number;
+  imageUrl: string | null;
+  mode: StockModeDTO;
+  /** Per one of the product. */
+  lines: { itemId: string; qtyMilli: number }[];
+  /** What one costs from its recipe; null when not tracked or an item has no price (D30). */
+  costKurus: number | null;
+  /** Items in it with no price yet, by name. */
+  unpriced: string[];
+}
+
+/** `GET /staff/:slug/menu/recipes`: how each product uses stock, and the items a recipe can use. Needs "menu.recipes". */
+export interface RecipesDTO {
+  /** Every product on the menu; "none" for one nobody set up yet. */
+  recipes: RecipeDTO[];
+  items: { id: string; name: string; unit: StockUnitDTO; kind: "ingredient" | "supply"; costKurus: number | null }[];
+}
+
 // ─────────────────────────────────────────────── till: Satış ekranı (plan piece 6)
 
 /** `GET /staff/:slug/till-menu`: the till's tabs and tiles, only what can be sold now. */
@@ -647,6 +737,8 @@ export interface StaffDashboardDTO {
     previous: StaffReportFieldsDTO & { untilIso: string; memberCount: number };
   };
   memberCount: number;
+  /** Items out or running low, worst first; null when the viewer can't see stock. */
+  lowStock: Pick<StockItemDTO, "id" | "name" | "unit" | "qtyMilli" | "minMilli" | "level">[] | null;
 }
 
 // ─────────────────────────────────────────────── staff (plan piece 2)

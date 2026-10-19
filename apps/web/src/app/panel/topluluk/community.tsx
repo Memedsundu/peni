@@ -3,41 +3,18 @@
 import {
   newIdempotencyKey,
   PeniApiError,
-  type StaffCafeAccessDTO,
   type StaffFeedDTO,
-  type StaffMeDTO,
   type StaffPostDTO,
   type StaffReportDTO,
 } from "@peni/api";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice, Sheet } from "../../kasa/ui";
 import { shrinkPhoto } from "../photos";
-import { errorText, fill, text, type Lang, type T } from "../text";
+import { field, PanelShell, when, type PanelProps } from "../shell";
+import { errorText, fill, type Lang, type T } from "../text";
 
 const MAX_PHOTOS = 6;
-const field = "w-full rounded-2xl border border-line bg-paper px-4 py-3 text-base text-ink outline-none focus:border-ink";
-const canPost = (c: StaffCafeAccessDTO) => c.permissions.includes("posts.write") || c.permissions.includes("posts.moderate");
-
-function useLang(): [Lang, () => void] {
-  const [lang, setLang] = useState<Lang>("tr");
-  useEffect(() => {
-    try {
-      if (localStorage.getItem("peni.lang") === "en") setLang("en");
-    } catch {}
-  }, []);
-  return [
-    lang,
-    () =>
-      setLang((l) => {
-        const next = l === "tr" ? "en" : "tr";
-        try {
-          localStorage.setItem("peni.lang", next);
-        } catch {}
-        return next;
-      }),
-  ];
-}
 
 /**
  * Topluluk (plan pieces 14 and 15): the café writes posts and events with photos, pins, edits
@@ -45,146 +22,42 @@ function useLang(): [Lang, () => void] {
  * a member when it must. Phone first, since that's where the photos are.
  */
 export function Community({ cafeSlug }: { cafeSlug: string | null }) {
-  const [lang, toggleLang] = useLang();
-  const t = text(lang);
-  const [me, setMe] = useState<StaffMeDTO | null | "signed-out">(null);
-  const [slug, setSlug] = useState<string | null>(cafeSlug);
+  return <PanelShell cafeSlug={cafeSlug} page="topluluk">{(p) => <Feed key={p.cafe.slug} {...p} />}</PanelShell>;
+}
+
+function Feed({ cafe, t, lang, signedOut }: PanelProps) {
   const [feed, setFeed] = useState<StaffFeedDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.staff.me().then(setMe, () => setMe("signed-out"));
-  }, []);
-  const cafes = me && me !== "signed-out" ? me.cafes.filter(canPost) : [];
-  useEffect(() => {
-    if (cafes.length === 1 && !slug) setSlug(cafes[0]!.slug);
-  }, [cafes, slug]);
-  const cafe = cafes.find((c) => c.slug === slug) ?? null;
-
-  const load = useCallback(
-    (s: string) =>
-      api.staff.feed.get(s).then(setFeed, (e: unknown) => {
-        if (e instanceof PeniApiError && e.status === 401) setMe("signed-out");
-        else setError(errorText(e, lang));
-      }),
-    [lang],
-  );
-  useEffect(() => {
-    if (cafe) void load(cafe.slug);
-  }, [cafe, load]);
-
-  const signOut = async () => {
-    await api.staff.signOut().catch(() => undefined);
-    setFeed(null);
-    setMe("signed-out");
-  };
-
-  let body;
-  if (me === null) body = <p className="text-muted">{t("loading")}</p>;
-  else if (me === "signed-out") body = <SignIn t={t} lang={lang} onDone={setMe} />;
-  else if (cafes.length === 0) body = <Notice>{t("noAccess")}</Notice>;
-  else if (!cafe) {
-    body = (
-      <section className="flex flex-col gap-3">
-        <h1 className="font-serif text-4xl">{t("whichCafe")}</h1>
-        {cafes.map((c) => (
-          <button
-            key={c.slug}
-            type="button"
-            onClick={() => {
-              setSlug(c.slug);
-              // A reload stays on this café.
-              window.history.replaceState(null, "", `?kafe=${encodeURIComponent(c.slug)}`);
-            }}
-            className="flex min-h-16 cursor-pointer items-center rounded-2xl border border-line bg-paper px-5 text-left text-lg"
-          >
-            {c.name}
-          </button>
-        ))}
-      </section>
-    );
-  } else {
-    body = (
-      <>
-        <section className="flex flex-col gap-2">
-          <p className="text-sm text-muted">{cafe.name}</p>
-          <h1 className="font-serif text-5xl leading-none">{t("community")}</h1>
-          <p className="leading-normal text-muted">
-            {t("communityHelp")}{" "}
-            <a href={`/kafe/${encodeURIComponent(cafe.slug)}`} className="text-ink underline underline-offset-4">
-              {t("seePage")}
-            </a>
-          </p>
-        </section>
-        {error && <Notice tone="red">{error}</Notice>}
-        {feed && feed.reports.length > 0 && <Reports t={t} lang={lang} slug={cafe.slug} reports={feed.reports} onFeed={setFeed} />}
-        {feed?.canWrite && <Composer t={t} lang={lang} slug={cafe.slug} onPosted={setFeed} />}
-        {feed && feed.posts.length === 0 && <p className="py-10 text-center text-muted">{t("noPosts")}</p>}
-        {feed?.posts.map((p) => (
-          <PostCard key={p.id} t={t} lang={lang} slug={cafe.slug} post={p} canWrite={feed.canWrite} canModerate={feed.canModerate} onFeed={setFeed} />
-        ))}
-        {feed && feed.paused.length > 0 && <Paused t={t} lang={lang} slug={cafe.slug} paused={feed.paused} onFeed={setFeed} />}
-      </>
-    );
-  }
+    api.staff.feed.get(cafe.slug).then(setFeed, (e: unknown) => {
+      if (e instanceof PeniApiError && e.status === 401) signedOut();
+      else setError(errorText(e, lang));
+    });
+    // Once per café; the language or a new callback isn't a reason to load again.
+  }, [cafe.slug]);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-8 px-4 pt-5 pb-16 sm:px-6">
-      <header className="flex items-center justify-between gap-3">
-        <span className="flex items-baseline gap-3">
-          <a href="/" className="font-serif text-2xl">
-            peni
+    <>
+      <section className="flex flex-col gap-2">
+        <p className="text-sm text-muted">{cafe.name}</p>
+        <h1 className="font-serif text-5xl leading-none">{t("community")}</h1>
+        <p className="leading-normal text-muted">
+          {t("communityHelp")}{" "}
+          <a href={`/kafe/${encodeURIComponent(cafe.slug)}`} className="text-ink underline underline-offset-4">
+            {t("seePage")}
           </a>
-          <span className="text-sm text-muted">{t("panel")}</span>
-        </span>
-        <span className="flex items-center gap-1">
-          {me && me !== "signed-out" && (
-            <Button kind="bare" size="sm" onClick={() => void signOut()}>
-              {t("signOut")}
-            </Button>
-          )}
-          <Button kind="bare" size="sm" onClick={toggleLang} aria-label={lang === "tr" ? "English" : "Türkçe"}>
-            {lang === "tr" ? "EN" : "TR"}
-          </Button>
-        </span>
-      </header>
-      {body}
-    </main>
-  );
-}
-
-function SignIn({ t, lang, onDone }: { t: T; lang: Lang; onDone: (me: StaffMeDTO) => void }) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(e) => {
-        e.preventDefault();
-        setBusy(true);
-        setError(null);
-        api.staff
-          .signIn({ email, password })
-          .then(onDone, (err: unknown) => setError(errorText(err, lang)))
-          .finally(() => setBusy(false));
-      }}
-    >
-      <h1 className="font-serif text-4xl">{t("signInTitle")}</h1>
-      <label className="flex flex-col gap-2 text-sm text-muted">
-        {t("email")}
-        <input className={`${field} min-h-12`} type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
-      </label>
-      <label className="flex flex-col gap-2 text-sm text-muted">
-        {t("password")}
-        <input className={`${field} min-h-12`} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-      </label>
+        </p>
+      </section>
       {error && <Notice tone="red">{error}</Notice>}
-      <Button kind="primary" size="lg" type="submit" disabled={busy}>
-        {t("signIn")}
-      </Button>
-    </form>
+      {feed && feed.reports.length > 0 && <Reports t={t} lang={lang} slug={cafe.slug} reports={feed.reports} onFeed={setFeed} />}
+      {feed?.canWrite && <Composer t={t} lang={lang} slug={cafe.slug} onPosted={setFeed} />}
+      {feed && feed.posts.length === 0 && <p className="py-10 text-center text-muted">{t("noPosts")}</p>}
+      {feed?.posts.map((p) => (
+        <PostCard key={p.id} t={t} lang={lang} slug={cafe.slug} post={p} canWrite={feed.canWrite} canModerate={feed.canModerate} onFeed={setFeed} />
+      ))}
+      {feed && feed.paused.length > 0 && <Paused t={t} lang={lang} slug={cafe.slug} paused={feed.paused} onFeed={setFeed} />}
+    </>
   );
 }
 
@@ -491,10 +364,6 @@ function Paused({ t, lang, slug, paused, onFeed }: { t: T; lang: Lang; slug: str
       <p className="text-sm leading-normal text-muted">{t("pauseHelp")}</p>
     </section>
   );
-}
-
-function when(iso: string, lang: Lang) {
-  return new Date(iso).toLocaleString(lang === "tr" ? "tr-TR" : "en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 function PostCard({

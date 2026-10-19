@@ -111,6 +111,16 @@ export const errorMessagesTr: Record<string, string> = {
   COUNT_INVALID: "Sayımı kontrol et.",
   DIFFERENCE_REASON_REQUIRED: "Sayım tutmuyor. Farkın sebebini yaz.",
   AMOUNT_INVALID: "Tutarı kontrol et.",
+  QTY_INVALID: "Miktarı kontrol et.",
+  COST_INVALID: "Fiyatı kontrol et.",
+  STOCK_ITEM_NOT_FOUND: "Bu malzeme bulunamadı.",
+  STOCK_ITEM_EXISTS: "Bu adla bir malzeme zaten var.",
+  STOCK_UNIT_LOCKED: "Bu malzeme kullanılmaya başladı, birimi değişmez. Yeni birimle yeni bir malzeme ekle.",
+  STOCK_ITEM_IN_USE: "Bu malzeme bir tarifte var. Önce tariften çıkar.",
+  RECIPE_COUNTED_ONE: "Adet olarak düşen ürün tek bir adetli malzemeye bağlanır.",
+  RECIPE_EMPTY: "Tarife en az bir malzeme ekle.",
+  RECIPE_DUPLICATE: "Bir malzeme tarifte bir kez olur. Miktarını artır.",
+  WASTE_NOTE_REQUIRED: "Ne olduğunu kısaca yaz.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

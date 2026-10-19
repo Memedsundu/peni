@@ -408,4 +408,40 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.cash.saveSession({ ...first, id: `cash_3_${run}`, openKey: `ok3_${run}` })).toBe(true);
     expect((await stores.cash.listSessions(cafeId, 5)).map((s) => s.id)).toContain(first.id);
   });
+
+  it("keeps stock items, applies each batch once, counts against the amount at that moment, and keeps recipes", async () => {
+    const item = (id: string, name: string, unit: "kg" | "l" | "adet") => ({
+      id: `${id}_${run}`, cafeId, name, kind: "ingredient" as const, unit, qtyMilli: 0, minMilli: 500, costKurus: 90_000, archivedAt: null, createdAt: at,
+    });
+    const beans = item("stk_beans", "Kahve çekirdeği", "kg");
+    const milk = item("stk_milk", "Süt", "l");
+    for (const i of [beans, milk]) await stores.stock.saveItem(i);
+    const batch = (batchKey: string, reason: "start" | "sale" | "count", changes: Parameters<typeof stores.stock.applyBatch>[0]["changes"]) =>
+      stores.stock.applyBatch({ cafeId, batchKey: `${batchKey}_${run}`, reason, at, changes });
+
+    await batch("start", "start", [{ id: `m1_${run}`, itemId: beans.id, changeMilli: 2_000 }, { id: `m2_${run}`, itemId: milk.id, changeMilli: 5_000 }]);
+    // Two tills selling at once: both land, in whatever order.
+    const sales = await Promise.all(
+      [1, 2, 3].map((n) => batch(`sale:o${n}`, "sale", [{ id: `s${n}a_${run}`, itemId: milk.id, changeMilli: -200 }, { id: `s${n}b_${run}`, itemId: beans.id, changeMilli: -18 }])),
+    );
+    expect(sales.every((m) => m?.length === 2)).toBe(true);
+    // A retried sale changes nothing.
+    expect(await batch("sale:o1", "sale", [{ id: `s1x_${run}`, itemId: milk.id, changeMilli: -200 }])).toBeNull();
+    expect((await stores.stock.getItem(cafeId, milk.id))!.qtyMilli).toBe(4_400);
+
+    // A count says what's there; the move is the difference.
+    const [counted] = (await batch("count1", "count", [{ id: `c1_${run}`, itemId: beans.id, countedMilli: 1_900 }]))!;
+    expect(counted).toMatchObject({ changeMilli: -46, afterMilli: 1_900 });
+    // Details never overwrite the amount.
+    await stores.stock.saveItem({ ...beans, name: "Çekirdek (Brezilya)", qtyMilli: 0 });
+    expect(await stores.stock.getItem(cafeId, beans.id)).toMatchObject({ name: "Çekirdek (Brezilya)", qtyMilli: 1_900 });
+    expect((await stores.stock.listMoves(cafeId, { itemId: beans.id, limit: 10 })).map((m) => m.reason).sort()).toEqual(["count", "sale", "sale", "sale", "start"]);
+    expect(await stores.stock.listBatch(cafeId, `sale:o2_${run}`)).toHaveLength(2);
+
+    const recipe = { cafeId, productId: `latte_${run}`, mode: "recipe" as const, lines: [{ itemId: beans.id, qtyMilli: 18 }, { itemId: milk.id, qtyMilli: 200 }] };
+    await stores.stock.saveRecipe(recipe);
+    await stores.stock.saveRecipe({ ...recipe, lines: [{ itemId: milk.id, qtyMilli: 220 }, { itemId: beans.id, qtyMilli: 18 }] });
+    expect(await stores.stock.getRecipe(cafeId, recipe.productId)).toEqual({ ...recipe, lines: [{ itemId: milk.id, qtyMilli: 220 }, { itemId: beans.id, qtyMilli: 18 }] });
+    expect(await stores.stock.listRecipes(cafeId)).toHaveLength(1);
+  });
 });

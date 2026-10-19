@@ -141,6 +141,9 @@ model Cafe {
   payments       Payment[]
   cashSessions   CashSession[]
   cashMoves      CashMove[]
+  stockItems     StockItem[]
+  stockMoves     StockMove[]
+  recipes        StockRecipe[]
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
@@ -518,6 +521,114 @@ model CashMove {
 
   @@unique([cafeId, key])
   @@index([sessionId, at])
+}
+
+// ─────────────────────────────────────────────────────────── stock (plan piece 17)
+
+enum StockUnit {
+  kg
+  l
+  adet
+}
+
+enum StockKind {
+  ingredient
+  supply
+}
+
+enum StockReason {
+  start
+  count
+  waste
+  sale
+  refund
+  bill
+}
+
+enum WasteWhy {
+  spilled
+  expired
+  broken
+  other
+}
+
+enum StockMode {
+  recipe
+  counted
+  none
+}
+
+/// An ingredient or supply. Amounts are thousandths of the unit (g, ml, 1/1000 piece); they change only through StockMove.
+model StockItem {
+  id         String    @id
+  cafeId     String
+  name       String
+  kind       StockKind
+  unit       StockUnit
+  qtyMilli   Int       @default(0)
+  /// At or below this it's low; 0 means no warning.
+  minMilli   Int       @default(0)
+  /// Per kg, litre or piece.
+  costKurus  Int?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  cafe   Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  moves  StockMove[]
+  usedIn StockRecipeLine[]
+
+  @@index([cafeId, name])
+}
+
+/// Every change to an item's amount, with why. One batch per sale, count or waste entry.
+model StockMove {
+  id          String      @id
+  cafeId      String
+  itemId      String
+  changeMilli Int
+  afterMilli  Int
+  reason      StockReason
+  why         WasteWhy?
+  note        String?
+  orderId     String?
+  memberId    String?
+  at          DateTime
+  batchKey    String
+
+  cafe Cafe      @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  item StockItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, batchKey, itemId])
+  @@index([cafeId, at])
+  @@index([itemId, at])
+}
+
+/// How a product uses stock: by recipe, as one counted piece, or not at all.
+model StockRecipe {
+  cafeId    String
+  productId String
+  mode      StockMode
+  updatedAt DateTime  @updatedAt
+
+  cafe  Cafe              @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  lines StockRecipeLine[]
+
+  @@id([cafeId, productId])
+}
+
+model StockRecipeLine {
+  cafeId    String
+  productId String
+  itemId    String
+  /// Per one of the product.
+  qtyMilli  Int
+  sortOrder Int    @default(0)
+
+  recipe StockRecipe @relation(fields: [cafeId, productId], references: [cafeId, productId], onDelete: Cascade)
+  item   StockItem   @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@id([cafeId, productId, itemId])
+  @@index([itemId])
 }
 
 // ─────────────────────────────────────────────────────────── membership & peni
