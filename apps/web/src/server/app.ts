@@ -110,6 +110,7 @@ import { ChatService } from "./chat";
 import { LetterService } from "./letters";
 import { MonthPackageService } from "./month-package";
 import { WatchService } from "./watch";
+import { InsightsService } from "./insights";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
@@ -279,6 +280,8 @@ export class PeniApp {
   /** The weekly letter (piece 30). */
   readonly letters: LetterService;
   readonly watch: WatchService;
+  /** Müdavimler: community insights (piece 32). */
+  readonly insights: InsightsService;
   /** Ay kapanışı's package for the mali müşavir (piece 30). */
   readonly monthPackage: MonthPackageService;
   /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
@@ -366,6 +369,7 @@ export class PeniApp {
     const checks = new ChecksService(stores.assistant, this.money, stores.payments, stores.bills, stores.debts, this.directory, () => this.now());
     this.assistant = new AssistantService(stores.assistant, this.jobs, this.bills, stores.bills, stores.stock, stores.staff, this.directory, checks, ai, () => this.now());
     this.askedReports = new AskedReportService(stores.orders, stores.payments, stores.bills, stores.shifts, stores.stock, this.menu, this.directory, () => this.now());
+    this.insights = new InsightsService({ ledger: stores.ledger, directory: this.directory, community: stores.community, orders: stores.orders, now: () => this.now() });
     this.chat = new ChatService(
       stores.chat,
       stores.assistant,
@@ -379,6 +383,7 @@ export class PeniApp {
       (ids) => this.staffNames(ids),
       ai,
       () => this.now(),
+      this.insights,
     );
     this.inbox = new InboxService(
       stores.assistant,

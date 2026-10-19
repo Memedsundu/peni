@@ -34,7 +34,7 @@ export function getApp(): Promise<PeniApp> {
       { demo, auth: { verifier: verifierFromEnv(), email: emailFromEnv(demo) }, publicUrl: process.env.PENI_PUBLIC_URL || undefined, ai: aiFromEnv(), inboxDomain: inboxFromEnv() },
       stores,
     );
-    if (demo && (await app.identity.listCafes()).length === 0) await seed(app);
+    if (demo && (await app.identity.listCafes()).length === 0) await seed(app, { history: true });
     return app;
   })();
   return globalForPeni.peniApp;

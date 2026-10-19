@@ -10,7 +10,7 @@ import type { AiRequest } from "./model";
 
 const day = z.string().describe("YYYY-MM-DD");
 
-export const CHAT_TOOLS = ["report", "summary", "bills", "owed", "stock", "money"] as const;
+export const CHAT_TOOLS = ["report", "summary", "bills", "owed", "stock", "money", "community"] as const;
 export type ChatTool = (typeof CHAT_TOOLS)[number];
 
 export const askedReportShape = z.object({
@@ -40,7 +40,7 @@ export const chatStepSchema = z.object({
       z.object({
         tool: z.enum(CHAT_TOOLS),
         report: askedReportShape.nullable().describe("For report"),
-        from: day.nullable().describe("For summary and bills"),
+        from: day.nullable().describe("For summary and bills; for community, a day in the month"),
         through: day.nullable().describe("For summary and bills"),
         search: z.string().nullable().describe("For bills (a supplier's name) and stock (an item's name)"),
       }),
@@ -61,6 +61,8 @@ const TOOL_HELP: Record<ChatTool, string> = {
   owed: "owed: what the café owes now: unpaid bills and those overdue, checks, loans, the credit card.",
   stock: "stock: stock items with how much is left, and which are low or out; `search` narrows by name.",
   money: "money: what is in the drawer, the reserve (ayrı kasa) and the bank now.",
+  community:
+    "community: Müdavimler for the month of `from` (this month when null): members who came (a visit is a day they earned or spent peni or took from the askı), newcomers, regulars, how many of last month's came back, return rates after spending peni, treats, the askı and events, the askı this month and each event's turnout. Counts only: never name or guess who took from the askı.",
 };
 
 export const CHAT_INSTRUCTIONS = `You are the assistant in Peni, the back office of a small café in Turkey. You answer the owner's or manager's questions about the café's own numbers.

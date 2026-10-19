@@ -31,6 +31,7 @@ export const PAGE_LABEL: Record<string, TextKey> = {
   puantaj: "pay",
   gorevler: "navTasks",
   gozcu: "navWatch",
+  mudavimler: "navRegulars",
 };
 
 const key = () => (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);

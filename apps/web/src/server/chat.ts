@@ -27,6 +27,7 @@ import type { AiMode } from "./assistant";
 import { eventId } from "./assistant";
 import type { DebtService } from "./debts";
 import { AppError } from "./errors";
+import type { InsightsService } from "./insights";
 import type { MoneyService } from "./money";
 import type { SalesReportService } from "./sales-report";
 import type { StaffContext } from "./staff";
@@ -51,6 +52,7 @@ const TOOL_NEEDS: Record<ChatTool, Permission> = {
   owed: "debts.view",
   stock: "stock.view",
   money: "cash.manage",
+  community: "reports.view",
 };
 
 const SECTION_ABOUT: Record<ReportSection, string> = {
@@ -92,6 +94,7 @@ export class ChatService {
     private readonly names: (ids: string[]) => Promise<Map<string, string>>,
     private readonly ai: { model: AiModel | null; mode: AiMode },
     private readonly now: () => Date,
+    private readonly insights: InsightsService,
   ) {}
 
   /** The person's newest conversation here, or an empty one. */
@@ -315,6 +318,39 @@ export class ChatService {
             : { notStarted: "Nakit ve banka hasn't been started, so balances aren't kept yet." };
           return { input: {}, result, data: null };
         }
+        case "community": {
+          const month = look.from && look.from <= today ? look.from.slice(0, 7) : today.slice(0, 7);
+          const c = await this.insights.get(ctx, month);
+          const share = (r: { people: number; cameBack: number; pct: number | null }) =>
+            r.pct === null ? { people: r.people, tooFewToShow: true } : { people: r.people, cameBackPct: r.pct };
+          const result = {
+            month: c.month,
+            through: c.through,
+            note: "Only members who used Peni are counted. Never name anyone.",
+            members: c.members,
+            joinedThisMonth: c.joined,
+            came: { now: c.visitors, sameDaysLastMonth: c.visitorsBefore },
+            firstVisit: { now: c.newcomers, sameDaysLastMonth: c.newcomersBefore },
+            regulars: { now: c.regulars, sameDaysLastMonth: c.regularsBefore, lastMonthsNotBackYet: c.regularsAway },
+            ofLastMonthsCameBack: share(c.cameBack),
+            cameBackWithin30Days: {
+              from: c.effectFrom,
+              through: c.effectThrough,
+              after: Object.fromEntries(c.effects.map((e) => [e.kind, { did: share(e.with), didNot: share(e.without) }])),
+            },
+            askidaThisMonth: { itemsGiven: c.askida.given, put: tl(c.askida.donatedKurus), membersWhoGave: c.askida.donors },
+            events: c.events.map((e) => ({
+              title: e.title,
+              day: e.day,
+              going: e.going,
+              came: e.came,
+              firstVisitThatDay: e.newcomers,
+              ordersThatDay: e.orders,
+              usualOrders: e.usualOrders,
+            })),
+          };
+          return { input: { month }, result, data: { month } };
+        }
       }
     } catch (e) {
       return { input: null, result: { error: e instanceof AppError ? e.message : "That couldn't be looked at." }, data: null };
@@ -394,6 +430,10 @@ export class ChatService {
       else if (r.tool === "owed") source = { kind: "page", label: "borclar", href: `/panel/borclar?kafe=${slug}` };
       else if (r.tool === "stock") source = { kind: "page", label: "stok", href: `/panel/stok?kafe=${slug}` };
       else if (r.tool === "money") source = { kind: "page", label: "nakit", href: `/panel/nakit?kafe=${slug}` };
+      else if (r.tool === "community") {
+        const d = r.data as { month?: string } | null;
+        source = { kind: "page", label: "mudavimler", href: `/panel/mudavimler?kafe=${slug}${d?.month ? `&ay=${d.month}` : ""}` };
+      }
       if (source && !seen.has(source.href)) {
         seen.add(source.href);
         out.push(source);

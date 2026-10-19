@@ -52,6 +52,7 @@ import type {
   SavedReportsDTO,
   LettersDTO,
   WatchDTO,
+  InsightsDTO,
   UploadsDTO,
   InboxDTO,
   TodayDTO,
@@ -468,6 +469,9 @@ export function createPeniClient(options: PeniClientOptions) {
         get: (cafeSlug: string) => call<WatchDTO>("GET", `/staff/${slug(cafeSlug)}/watch`, undefined, true),
         dismiss: (cafeSlug: string, body: { key: string; note?: string }) => call<WatchDTO>("POST", `/staff/${slug(cafeSlug)}/watch/seen`, body, true),
       },
+      /** Müdavimler (piece 32): community insights for a month, counts only. */
+      insights: (cafeSlug: string, month?: string) =>
+        call<InsightsDTO>("GET", `/staff/${slug(cafeSlug)}/insights${month ? `?month=${encodeURIComponent(month)}` : ""}`, undefined, true),
       /** Ay kapanışı's package for the mali müşavir (piece 30): a ZIP to download, not JSON. */
       monthPackageUrl: (cafeSlug: string, month: string) => `${base}/api/v1/staff/${slug(cafeSlug)}/money/months/${encodeURIComponent(month)}/package`,
       /**
