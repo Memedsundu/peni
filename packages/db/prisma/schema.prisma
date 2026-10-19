@@ -173,6 +173,7 @@ model Cafe {
   aiChats        AiChat[]
   savedReports   SavedReport[]
   weeklyLetters  WeeklyLetter[]
+  watchSeen      WatchDismissal[]
   inbox          CafeInbox?
   inboundEmails  InboundEmail[]
   memberships    Membership[]
@@ -1614,4 +1615,17 @@ model WeeklyLetter {
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@unique([cafeId, weekStart])
+}
+
+/// Gözcü (plan piece 31): a finding someone looked at and let go, so it stops showing.
+model WatchDismissal {
+  cafeId   String
+  key      String
+  memberId String
+  note     String?
+  at       DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, key])
 }

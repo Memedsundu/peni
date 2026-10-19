@@ -836,6 +836,23 @@ assert.equal((await fetch(`${BASE}/api/v1/staff/moda/money/months/${packageMonth
 assert.equal((await call("GET", "/staff/moda/money/months/2099-01/package", { headers: STAFF })).json.error.code, "PACKAGE_MONTH");
 step("Letter: opening Mektup writes last week's letter in the background, with links, on Bugün too; Leyla downloads the month's ZIP with its workbook; Ece sees neither");
 
+// 5y. Gözcü (piece 31): Leyla sees Ece's unusual voids, the next 30 days' money, what to order
+//     and next week's staffing; "Gördüm" hides the voids for everyone. Ece can't open it.
+const watched = (await call("GET", "/staff/moda/watch", { headers: STAFF })).json;
+assert.equal(watched.forecast.days.length, 30);
+assert.equal(watched.forecast.days[0].day, watched.today);
+assert.ok(watched.orders.length > 0 && watched.orders.every((o) => o.message.startsWith("Merhaba")));
+assert.ok(watched.staffing.hints.length > 0);
+const voids = watched.unusual.find((u) => u.kind === "voids");
+assert.equal(voids.name, "Ece Tan");
+assert.ok((await call("GET", "/staff/moda/today", { headers: STAFF })).json.alerts.some((a) => a.type === "watch"));
+const afterSeen = (await call("POST", "/staff/moda/watch/seen", { headers: STAFF, body: { key: voids.key } })).json;
+assert.equal(afterSeen.unusual.some((u) => u.key === voids.key), false);
+assert.ok(afterSeen.seen >= 1);
+assert.equal((await call("GET", "/staff/moda/watch", { headers: MURAT })).json.unusual.some((u) => u.key === voids.key), false);
+assert.equal((await call("GET", "/staff/moda/watch", { headers: ecePassword })).json.error.code, "FORBIDDEN");
+step("Gözcü: Ece's voids, 30 days of money, orders with messages and next week's staffing; seen once for everyone; Ece can't open it");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

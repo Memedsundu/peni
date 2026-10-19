@@ -38,6 +38,8 @@ import {
   InMemoryAssistantStore,
   InMemoryChatStore,
   InMemoryLetterStore,
+  InMemoryWatchStore,
+  type WatchStore,
   type LetterStore,
   type AssistantStore,
   type ChatStore,
@@ -107,6 +109,7 @@ import { AssistantService, demoModel, demoTranscriber, type AiMode } from "./ass
 import { ChatService } from "./chat";
 import { LetterService } from "./letters";
 import { MonthPackageService } from "./month-package";
+import { WatchService } from "./watch";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
@@ -162,6 +165,7 @@ export interface PeniStores {
   assistant: AssistantStore;
   chat: ChatStore;
   letters: LetterStore;
+  watch: WatchStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -188,6 +192,7 @@ export function inMemoryStores(): PeniStores {
     assistant: new InMemoryAssistantStore(),
     chat: new InMemoryChatStore(),
     letters: new InMemoryLetterStore(),
+    watch: new InMemoryWatchStore(),
   };
 }
 
@@ -273,6 +278,7 @@ export class PeniApp {
   readonly chat: ChatService;
   /** The weekly letter (piece 30). */
   readonly letters: LetterService;
+  readonly watch: WatchService;
   /** Ay kapanışı's package for the mali müşavir (piece 30). */
   readonly monthPackage: MonthPackageService;
   /** Orders and payments as stored; for the demo seed and the data move from Shelby. */
@@ -395,6 +401,7 @@ export class PeniApp {
       email: () => this.options.auth?.email ?? null,
       publicUrl: () => this.options.publicUrl ?? null,
       letter: (cafeId) => this.letters.latest(cafeId),
+      watch: (cafeId, permissions) => this.watch.attention(cafeId, permissions),
       now: () => this.now(),
     });
     this.monthPackage = new MonthPackageService(stores.bills, stores.assistant, stores.payments, this.money, this.directory, () => this.now());
@@ -414,6 +421,21 @@ export class PeniApp {
       email: () => this.options.auth?.email ?? null,
       publicUrl: () => this.options.publicUrl ?? null,
       ai,
+      now: () => this.now(),
+    });
+    this.watch = new WatchService({
+      store: stores.watch,
+      bills: stores.bills,
+      stock: stores.stock,
+      menu: this.menu,
+      orders: stores.orders,
+      payments: stores.payments,
+      cash: stores.cash,
+      shifts: stores.shifts,
+      staff: stores.staff,
+      debts: this.debts,
+      money: this.money,
+      directory: this.directory,
       now: () => this.now(),
     });
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";

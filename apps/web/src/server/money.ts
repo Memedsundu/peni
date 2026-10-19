@@ -219,6 +219,15 @@ export class MoneyService {
     };
   }
 
+  /** Drawer, reserve and bank together now, as Nakit ve banka shows them; null before "Başla". */
+  async totalOf(cafeId: string): Promise<number | null> {
+    const [start, open, last] = await Promise.all([this.store.getStart(cafeId), this.cash.openSession(cafeId), this.cash.lastClosed(cafeId)]);
+    if (!start) return null;
+    const drawer = open ? await this.drawerExpected(open) : (last?.closing?.countKurus ?? 0);
+    const totals = await this.store.totals(cafeId);
+    return drawer + totals.reserve + totals.bank + (await this.cardNet(cafeId, start.startedOn, this.justAfterNow()));
+  }
+
   /** "Başla": what the reserve and the bank hold today. The drawer's own count is its Kasa count. */
   async start(ctx: StaffContext, input: { reserveKurus: number; bankKurus: number }): Promise<MoneyDTO> {
     this.require(ctx, "cash.manage");

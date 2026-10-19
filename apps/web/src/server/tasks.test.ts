@@ -164,6 +164,7 @@ describe("Bugün and its alerts (plan piece 22)", () => {
       ["stockLow", "warning", 3, null],
       ["tasksLate", "warning", 3, null],
       ["stockNoCost", "warning", 1, null],
+      ["watch", "warning", 1, null],
     ]);
     const words = (type: string) => alertWords(today.alerts.find((a) => a.type === type)!, "tr", formatTL, today.today);
     expect(words("cardDue")).toEqual({ title: "İş kartı ekstresi: ₺1.700", detail: "Son ödeme günü 6 Ekim geçti.", action: "Kartı öde" });
@@ -171,6 +172,8 @@ describe("Bugün and its alerts (plan piece 22)", () => {
     expect(words("tasksLate")).toMatchObject({ title: "3 görev yapılmadı", detail: "Son 7 günde: Kapanış (2), Mutfak (1)" });
     expect(words("draftsOpen")).toEqual({ title: "1 taslak onay bekliyor", detail: "Ambalaj Dünyası Tic. Ltd. Şti. · ₺1.810", action: "Taslaklara bak" });
     expect(words("hoursMissing")).toMatchObject({ title: "8 günün saati girilmedi", detail: "Hakan Usta, Murat Aksu, Ece Tan" });
+    // Gözcü (piece 31): Ece voided four orders in a week, where she usually voids none.
+    expect(words("watch")).toEqual({ title: "Gözcü 1 şey buldu", detail: "Ece Tan", action: "Gözcüye bak" });
     expect(today.alerts.find((a) => a.type === "hoursMissing")).toMatchObject({ month: "2026-10", href: "/panel/puantaj?ay=2026-10" });
     expect(today.tasks).toMatchObject({ done: 3, total: 11 });
 
@@ -208,8 +211,8 @@ describe("Bugün and its alerts (plan piece 22)", () => {
     ]);
     expect(sent.map((m) => m.to).sort()).toEqual([DEMO_STAFF.leyla.email, DEMO_STAFF.murat.email].sort());
     const mail = sent.find((m) => m.to === DEMO_STAFF.murat.email)!;
-    expect(mail.subject).toBe("Bugün 10 konu · Moda Kahvesi");
-    expect(mail.text).toContain("Günaydın Murat, bugün 10 konu var:");
+    expect(mail.subject).toBe("Bugün 11 konu · Moda Kahvesi");
+    expect(mail.text).toContain("Günaydın Murat, bugün 11 konu var:");
     expect(mail.text).toContain("• İş kartı ekstresi: ₺1.700 (Son ödeme günü 6 Ekim geçti.)");
     expect(mail.text).toContain("https://peni.test/panel/bugun?kafe=moda");
     expect(mail.html).toContain("Bugün'e git");
