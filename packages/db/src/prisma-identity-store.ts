@@ -103,6 +103,22 @@ export class PrismaIdentityStore implements IdentityStore {
     await this.db().customerSession.updateMany({ where: { tokenHash, revokedAt: null }, data: { revokedAt: at } });
   }
 
+  async forgetCustomer(customerId: string, displayName: string, at: Date): Promise<void> {
+    const db = this.db();
+    const c = await db.customer.findUnique({ where: { id: customerId }, select: { email: true } });
+    if (!c) return;
+    const logins = await db.customerLogin.findMany({ where: { customerId }, select: { email: true } });
+    const emails = [...new Set([c.email, ...logins.map((l) => l.email)].filter((e): e is string => !!e))];
+    await db.customer.update({
+      where: { id: customerId },
+      data: { displayName, email: null, phone: null, avatarUrl: null, bio: null, profileVisible: false, deletionRequestedAt: at },
+    });
+    await db.customerLogin.deleteMany({ where: { customerId } });
+    await db.customerSession.updateMany({ where: { customerId, revokedAt: null }, data: { revokedAt: at } });
+    await db.customerDevice.deleteMany({ where: { customerId } });
+    if (emails.length) await db.emailCode.deleteMany({ where: { email: { in: emails } } });
+  }
+
   async memberCodeOf(membershipId: string): Promise<string | null> {
     const m = await this.db().membership.findUnique({ where: { id: membershipId }, select: { memberCode: true } });
     return m?.memberCode ?? null;

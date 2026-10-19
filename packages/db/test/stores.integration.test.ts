@@ -159,6 +159,22 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.identity.countEmailCodes(email, new Date(at.getTime() - 1))).toBe(2);
   });
 
+  it("forgets a customer who deletes their account, keeping their id for the cafés' books", async () => {
+    const id = `cus_gone_${run}`;
+    const email = `gone.${run}@example.com`;
+    await stores.identity.saveCustomer({ id, phone: null, email, displayName: "Giden", avatarUrl: "https://x/y.jpg", profileVisible: true });
+    await stores.identity.addLogin({ customerId: id, provider: "email", subject: email, email });
+    await stores.identity.createSession(id, `tok_gone_${run}`, new Date(at.getTime() + 86_400_000));
+    await stores.identity.saveEmailCode({ id: `ec_gone_${run}`, email, codeHash: "h", createdAt: at, expiresAt: new Date(at.getTime() + 600_000), attempts: 0, usedAt: null });
+
+    await stores.identity.forgetCustomer(id, "Silinmiş üye", at);
+    expect(await stores.identity.getCustomer(id)).toEqual({ id, phone: null, email: null, displayName: "Silinmiş üye", avatarUrl: null, profileVisible: false });
+    expect(await stores.identity.loginsOf(id)).toEqual([]);
+    expect(await stores.identity.customerIdForSession(`tok_gone_${run}`, at)).toBeNull();
+    expect(await stores.identity.liveEmailCode(email, at)).toBeNull();
+    expect(await stores.identity.getCustomerByEmail(email)).toBeNull();
+  });
+
   it("keeps the feed with reactions, RSVPs in order and comments", async () => {
     const postId = `post_${run}`;
     await stores.community.savePost({

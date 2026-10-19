@@ -80,6 +80,12 @@ export interface IdentityStore {
   /** The customer behind a live session: not expired at `now`, not revoked. */
   customerIdForSession(tokenHash: string, now: Date): Promise<string | null>;
   revokeSession(tokenHash: string, at: Date): Promise<void>;
+  /**
+   * "Hesabımı sil": the customer's name, email, phone and photo are wiped, their sign-ins,
+   * sessions, devices and email codes go. What they did at cafés (peni, posts) stays under
+   * `displayName` ("Silinmiş üye"), since cafés' books need it. Signing in again starts afresh.
+   */
+  forgetCustomer(customerId: string, displayName: string, at: Date): Promise<void>;
 
   /** A membership's Peni kodu. Codes are unique across all cafés. */
   memberCodeOf(membershipId: string): Promise<string | null>;
@@ -186,6 +192,16 @@ export class InMemoryIdentityStore implements IdentityStore {
   async revokeSession(tokenHash: string, at: Date) {
     const s = this.sessions.get(tokenHash);
     if (s && !s.revokedAt) s.revokedAt = at;
+  }
+
+  async forgetCustomer(customerId: string, displayName: string, at: Date) {
+    const c = this.customers.get(customerId);
+    if (!c) return;
+    const emails = new Set([c.email, ...this.logins.filter((l) => l.customerId === customerId).map((l) => l.email)].filter(Boolean));
+    this.customers.set(customerId, { ...c, displayName, email: null, phone: null, avatarUrl: null, profileVisible: false });
+    this.logins.splice(0, this.logins.length, ...this.logins.filter((l) => l.customerId !== customerId));
+    for (const s of this.sessions.values()) if (s.customerId === customerId && !s.revokedAt) s.revokedAt = at;
+    for (const [id, code] of this.emailCodes) if (emails.has(code.email)) this.emailCodes.delete(id);
   }
 
   async memberCodeOf(membershipId: string) {

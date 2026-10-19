@@ -8,6 +8,7 @@ import type {
   CafeMembersDTO,
   CafeSummaryDTO,
   FullWalletDTO,
+  AccountExportDTO,
   GiftDTO,
   GiftPreviewDTO,
   MeDTO,
@@ -95,6 +96,7 @@ import type {
   UpdatePostInput,
   TillDonationInput,
   UpdateProfileInput,
+  DeleteAccountInput,
   AddStockItemInput,
   UpdateStockItemInput,
   CountStockInput,
@@ -223,6 +225,10 @@ export function createPeniClient(options: PeniClientOptions) {
       /** The signed-in customer and the cafés they work at. [G18, G19] */
       get: () => call<MeDTO>("GET", "/me"),
       updateProfile: (input: UpdateProfileInput) => call<MeDTO>("POST", "/me/profile", input),
+      /** "Verilerimi indir". (plan piece 34) */
+      exportData: () => call<AccountExportDTO>("GET", "/me/export"),
+      /** "Hesabımı sil": signs out everywhere; peni left at cafés is given up. (plan piece 34) */
+      deleteAccount: () => call<{ ok: true }>("POST", "/me/delete", { confirm: true } satisfies DeleteAccountInput),
     },
     cafes: {
       list: () => call<{ cafes: CafeSummaryDTO[] }>("GET", "/cafes"),
