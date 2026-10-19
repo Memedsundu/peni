@@ -1,13 +1,14 @@
 import { applyBps, kurusToPeniFloor, peniToKurus, type Kurus, type Peni } from "./money";
 import type { CafePeniSettings } from "./settings";
 
-export interface OrderLine {
+/** The price part of an order line: enough for totals and peni rules. */
+export interface PricedLine {
   productId: string;
   unitPriceKurus: Kurus;
   quantity: number;
 }
 
-export function orderTotalKurus(lines: OrderLine[]): Kurus {
+export function orderTotalKurus(lines: PricedLine[]): Kurus {
   return lines.reduce((sum, line) => sum + line.unitPriceKurus * line.quantity, 0);
 }
 
@@ -26,7 +27,7 @@ export interface RedemptionPlan {
 
 /** Works out how much of a wallet can go towards an order under the café's rules. */
 export function planRedemption(input: {
-  lines: OrderLine[];
+  lines: PricedLine[];
   balance: Peni;
   requestedPeni: Peni;
   settings: CafePeniSettings;

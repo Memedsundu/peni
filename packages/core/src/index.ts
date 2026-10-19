@@ -8,6 +8,7 @@ export * from "./directory";
 export * from "./peni-service";
 export * from "./member-code";
 export * from "./menu";
+export * from "./orders";
 export * from "./identity";
 export * from "./community";
 export * from "./staff";

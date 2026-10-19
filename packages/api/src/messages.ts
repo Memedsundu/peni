@@ -59,6 +59,17 @@ export const errorMessagesTr: Record<string, string> = {
   CATEGORY_NOT_FOUND: "Bu kategori bulunamadı.",
   CATEGORY_REQUIRED: "Ürün için bir kategori seç.",
   PRODUCT_NOT_FOUND: "Bu ürün bulunamadı.",
+  ORDER_EMPTY: "Sipariş boş. Önce bir ürün ekle.",
+  TOO_MANY_LINES: "Bir siparişte en çok 100 farklı ürün olabilir.",
+  QUANTITY_INVALID: "Adet 1 ile 99 arasında olmalı.",
+  DISCOUNT_INVALID: "İndirim 0 ile 100 arasında tam sayı olmalı.",
+  ORDER_NOT_FOUND: "Bu sipariş bulunamadı.",
+  ORDER_NOT_OPEN: "Bu sipariş kapanmış. Ödenmiş bir siparişi iade edebilirsin.",
+  ORDER_NOT_PAID: "Yalnızca ödenmiş bir sipariş iade edilebilir.",
+  TENDERED_TOO_LOW: "Verilen para toplamdan az.",
+  PRODUCT_UNAVAILABLE: "Siparişteki bir ürün şu an satışta değil. Siparişi yenile.",
+  REASON_REQUIRED: "Bir sebep yaz.",
+  REASON_TOO_LONG: "Sebep en çok 200 karakter olabilir.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

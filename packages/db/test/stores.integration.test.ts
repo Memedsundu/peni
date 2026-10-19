@@ -202,4 +202,37 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     ).rejects.toMatchObject({ code: "INSUFFICIENT_BALANCE" });
     expect(await stores.directory.listGifts({ membershipId: `m_ayse_${run}` })).toHaveLength(1);
   });
+
+  it("numbers orders per café and day even when tills ask at once, and keeps their lines", async () => {
+    const day = "2026-10-16";
+    const numbers = await Promise.all(Array.from({ length: 12 }, () => stores.orders.nextNumber(cafeId, day)));
+    expect([...numbers].sort((a, b) => a - b)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
+    expect(await stores.orders.nextNumber(cafeId, "2026-10-17")).toBe(1);
+
+    const line = (productId: string, unitPriceKurus: number, quantity: number, discountPercent = 0) => ({ productId, name: productId, unitPriceKurus, quantity, discountPercent });
+    const base = {
+      cafeId, businessDay: day, status: "open" as const, discountPercent: 0, createdByMemberId: "sm_x",
+      paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null, payKey: null,
+      voidedAt: null, voidedByMemberId: null, voidReason: null, refundedAt: null, refundedByMemberId: null, refundReason: null,
+      refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
+    };
+    const first = { ...base, id: `ord_1_${run}`, number: 1, createKey: `ck1_${run}`, createdAt: at, lines: [line("cay", 3_000, 2), line("simit", 2_500, 1, 10)], subtotalKurus: 8_500, discountKurus: 250, totalKurus: 8_250 };
+    await stores.orders.saveOrder(first);
+    await stores.orders.saveOrder({ ...base, id: `ord_2_${run}`, number: 2, createKey: `ck2_${run}`, createdAt: new Date(at.getTime() + 60_000), lines: [line("turk", 9_000, 1)], subtotalKurus: 9_000, discountKurus: 0, totalKurus: 9_000 });
+    expect((await stores.orders.getOrder(cafeId, first.id))!.lines).toEqual(first.lines);
+
+    // Paying replaces the lines and fields in one write.
+    await stores.orders.saveOrder({ ...first, status: "paid", paidAt: at, paymentMethod: "cash", tenderedKurus: 10_000, changeKurus: 1_750, payKey: `pk_${run}`, lines: [line("cay", 3_000, 2)] });
+    expect(await stores.orders.getOrder(cafeId, first.id)).toMatchObject({ status: "paid", paymentMethod: "cash", changeKurus: 1_750, lines: [line("cay", 3_000, 2)] });
+    expect((await stores.orders.findByCreateKey(cafeId, `ck1_${run}`))!.id).toBe(first.id);
+
+    // A second order with the same create key is refused by the database.
+    await expect(stores.orders.saveOrder({ ...first, id: `ord_dup_${run}`, number: 3 })).rejects.toThrow();
+
+    expect((await stores.orders.listOrders(cafeId, { businessDay: day })).map((o) => o.number)).toEqual([2, 1]);
+    expect((await stores.orders.listOrders(cafeId, { status: "paid" })).map((o) => o.number)).toEqual([1]);
+    await stores.orders.saveOrder({ ...(await stores.orders.getOrder(cafeId, `ord_2_${run}`))!, deletedAt: at, deletedByMemberId: "sm_x", deleteReason: "Deneme" });
+    expect((await stores.orders.listOrders(cafeId)).map((o) => o.number)).toEqual([1]);
+    expect(await stores.orders.getOrder("cafe_other", first.id)).toBeNull();
+  });
 });

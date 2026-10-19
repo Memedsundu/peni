@@ -2,7 +2,7 @@ import type { Gift, Membership, PeniDirectory } from "./directory";
 import { PeniError } from "./errors";
 import { account, type Ledger, type LedgerTransaction } from "./ledger";
 import { applyBps, assertWholeNumber, kurusToPeniCeil, type Kurus, type Peni } from "./money";
-import { calculateEarn, planRedemption, type OrderLine, type RedemptionPlan } from "./rules";
+import { calculateEarn, planRedemption, type PricedLine, type RedemptionPlan } from "./rules";
 import type { CafePeniSettings } from "./settings";
 import { addDays, addHours, startOfLocalDay, startOfLocalMonth } from "./time";
 
@@ -177,7 +177,7 @@ export class PeniService {
   async redeemForOrder(input: {
     membershipId: string;
     orderId: string;
-    lines: OrderLine[];
+    lines: PricedLine[];
     requestedPeni: Peni;
   }): Promise<RedemptionPlan & { transaction: LedgerTransaction | null }> {
     const membership = await this.requireActiveMembership(input.membershipId);

@@ -25,7 +25,7 @@ Grouped like the café panel. ✓ is the default; each café's owner can switch 
 | **Satış ekranı** · Till | Takes orders <br>`till.use` | Takes orders and records payments on the till. | ✓ | ✓ | ✓ | ✓ |
 |  | Sees past orders <br>`till.history` | Today's and earlier orders. | ✓ | ✓ | ✓ | ✓ |
 |  | Voids and refunds <br>`till.correct` | Voids an order or gives the money back. | ✓ | · | · | ✓ |
-|  | Deletes orders <br>`till.delete` | Removes an order from the records entirely. A void is usually enough. | · | · | · | · |
+|  | Deletes orders <br>`till.delete` | Takes an order out of sales and reports; who deleted it, when and why is kept. A void is usually enough. | · | · | · | · |
 | **Menü** · Menu | Edits the menu <br>`menu.edit` | Products, prices and categories. | ✓ | · | · | · |
 |  | Edits recipes <br>`menu.recipes` | What goes into each product; stock is used from it. | ✓ | ✓ | · | · |
 | **Faturalar** · Bills | Sees bills <br>`bills.view` | Bills and receipts received. | ✓ | ✓ | ✓ | · |

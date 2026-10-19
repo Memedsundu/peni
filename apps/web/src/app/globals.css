@@ -1,24 +1,65 @@
-/* Placeholder styles until the new design system lands (plan piece 4, docs/plan.md).
-   Colours follow the approved direction: black, white, and one green when needed. */
+/* Peni's look (plan piece 4, docs/design.md): black and white, one green when needed,
+   lots of white space. Light by default; dark when the person picks it. */
 @import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 :root {
   --ink: #111111;
   --paper: #ffffff;
+  /** Side panels, a step off white. */
+  --panel: #fafaf8;
+  /** Photo placeholders. */
+  --tile: #eeeeea;
+  --line: #e6e6e6;
+  --line-soft: #ecece8;
+  --muted: #5c5c5c;
   --green: #1e4d3b;
-  --muted: #6b6b6b;
+  --green-soft: #e8efeb;
+  --red: #a3342b;
+  --red-soft: #f7e9e7;
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #f5f5f5;
-    --paper: #111111;
-    --muted: #a3a3a3;
-  }
+[data-theme="dark"] {
+  --ink: #f2f2ee;
+  --paper: #111111;
+  --panel: #171716;
+  --tile: #242422;
+  --line: #2c2c2a;
+  --line-soft: #232321;
+  --muted: #a3a3a0;
+  --green: #8cc4a6;
+  --green-soft: #1b2a22;
+  --red: #e59a91;
+  --red-soft: #2e1c1a;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-serif: "Instrument Serif", Georgia, serif;
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-panel: var(--panel);
+  --color-tile: var(--tile);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-muted: var(--muted);
+  --color-green: var(--green);
+  --color-green-soft: var(--green-soft);
+  --color-red: var(--red);
+  --color-red-soft: var(--red-soft);
 }
 
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Amounts line up in columns. */
+.tabular {
+  font-variant-numeric: tabular-nums;
 }

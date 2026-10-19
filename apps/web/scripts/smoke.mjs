@@ -196,6 +196,34 @@ assert.deepEqual(menu.removed.map((p) => p.productId), [brew.productId]);
 assert.ok(!(await call("GET", "/cafes/moda")).json.menu.some((m) => m.productId === brew.productId), "removed products leave the customer page");
 step("Leyla adds Soğuk Demleme, raises its price, which customers see at once, then takes it off the menu; Ece can't edit the menu");
 
+// 5d. Satış ekranı: Ece takes an order at the till, a retry makes no second one, she takes cash
+//     and the till works out the change; Leyla voids an unpaid order and refunds a paid one.
+const till2 = (await call("POST", "/staff/moda/devices", { headers: STAFF, body: { name: "Kasa" } })).json;
+const TILL2 = { "x-peni-till-token": till2.token };
+const eceId = (await call("GET", "/till", { headers: TILL2 })).json.staff.find((s) => s.name === "Ece Tan").memberId;
+const ecePos = { "x-peni-staff-token": (await call("POST", "/till/pin", { headers: TILL2, body: { memberId: eceId, pin: "2580" } })).json.token };
+const tiles = (await call("GET", "/staff/moda/till-menu", { headers: ecePos })).json;
+assert.deepEqual(tiles.categories.map((c) => c.name), ["Sıcak", "Soğuk", "Yiyecek", "Tatlı"]);
+const sale = { createKey: key(), lines: [{ productId: "latte", quantity: 2, discountPercent: 10 }, { productId: "simit", quantity: 1 }] };
+const order = (await call("POST", "/staff/moda/orders", { headers: ecePos, body: sale })).json;
+assert.equal(order.totalKurus, 24_100, "2 latte with 10% off and a simit");
+assert.equal((await call("POST", "/staff/moda/orders", { headers: ecePos, body: sale })).json.id, order.id, "a retried tap makes no second order");
+const payBody = { method: "cash", payKey: key(), tenderedKurus: 30_000 };
+const paidOrder = (await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: payBody })).json;
+assert.equal(paidOrder.changeKurus, 5_900);
+assert.equal((await call("POST", `/staff/moda/orders/${order.id}/pay`, { headers: ecePos, body: payBody })).json.paidAt, paidOrder.paidAt);
+const second = (await call("POST", "/staff/moda/orders", { headers: ecePos, body: { createKey: key(), lines: [{ productId: "cay", quantity: 1 }] } })).json;
+assert.equal(second.number, order.number + 1);
+assert.equal((await call("POST", `/staff/moda/orders/${second.id}/void`, { headers: ecePos, body: { reason: "Vazgeçti" } })).json.error.code, "FORBIDDEN");
+assert.equal((await call("POST", `/staff/moda/orders/${second.id}/void`, { headers: STAFF, body: { reason: "Müşteri vazgeçti" } })).json.status, "voided");
+assert.equal((await call("POST", `/staff/moda/orders/${order.id}/refund`, { headers: STAFF, body: { reason: "" } })).status, 400);
+assert.equal((await call("POST", `/staff/moda/orders/${order.id}/refund`, { headers: STAFF, body: { reason: "Latte soğuktu" } })).json.refunded.amountKurus, 24_100);
+const day = (await call("GET", "/staff/moda/orders", { headers: ecePos })).json;
+assert.deepEqual(day.orders.slice(0, 2).map((o) => o.status), ["voided", "refunded"]);
+assert.equal(day.summary.refundedKurus >= 24_100, true);
+await call("POST", `/staff/moda/devices/${till2.device.id}/revoke`, { headers: STAFF });
+step("Ece sells 2 latte and a simit at the till (one order despite a retry), takes 300 TL cash with 59 TL change; Leyla voids an unpaid order and refunds the paid one");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

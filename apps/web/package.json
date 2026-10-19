@@ -11,11 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource/instrument-serif": "5.3.0",
     "@peni/api": "workspace:*",
     "@peni/brand": "workspace:*",
     "@peni/core": "workspace:*",
     "@peni/db": "workspace:*",
     "bcryptjs": "3.0.2",
+    "geist": "1.8.1",
     "jose": "6.2.10",
     "next": "16.4.1",
     "react": "19.3.0",
