@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { PeniApp } from "./app";
+import { PeniApp, type CustomerRecord } from "./app";
 import { DEMO_CUSTOMERS, DEMO_NEIGHBOURS, seed } from "./seed";
 
 let app: PeniApp;
@@ -10,10 +10,12 @@ const tick = (ms: number) => {
 };
 const MIN = 60_000;
 const HOUR = 60 * MIN;
-const ayse = () => app.customers.get(DEMO_CUSTOMERS.ayse.id)!;
-const mehmet = () => app.customers.get(DEMO_CUSTOMERS.mehmet.id)!;
-const deniz = () => app.customers.get(DEMO_CUSTOMERS.deniz.id)!;
-const neighbour = (who: keyof typeof DEMO_NEIGHBOURS) => app.customers.get(DEMO_NEIGHBOURS[who].id)!;
+/** The seeded customers as stored, reloaded before every test. */
+let people: Map<string, CustomerRecord>;
+const ayse = () => people.get(DEMO_CUSTOMERS.ayse.id)!;
+const mehmet = () => people.get(DEMO_CUSTOMERS.mehmet.id)!;
+const deniz = () => people.get(DEMO_CUSTOMERS.deniz.id)!;
+const neighbour = (who: keyof typeof DEMO_NEIGHBOURS) => people.get(DEMO_NEIGHBOURS[who].id)!;
 /** Deniz takes one çay from the askı at the till. */
 const claimCay = async () => {
   const membershipId = (await modaFor(deniz())).membership!.id;
@@ -24,6 +26,8 @@ beforeEach(async () => {
   now = new Date("2026-10-16T09:00:00Z");
   app = new PeniApp({ demo: true, staffKey: "k", clock: () => now });
   await seed(app);
+  const ids = [...Object.values(DEMO_CUSTOMERS), ...Object.values(DEMO_NEIGHBOURS)].map((c) => c.id);
+  people = new Map((await app.identity.getCustomers(ids)).map((c) => [c.id, c]));
 });
 
 const modaFor = (c: ReturnType<typeof ayse> | null) => app.cafeDetail("moda", c);
@@ -114,20 +118,20 @@ describe("the feed and events (G4, G13)", () => {
     expect((await q(mehmet())).answeredTodayByMe).toBe(true);
     expect((await q(ayse())).answeredTodayByMe).toBe(false);
     expect((await q(ayse())).comments.length).toBeGreaterThanOrEqual(3);
-    app.comment(ayse(), "moda", "post_question_1", "Moda Parkı'nın üst köşesi.");
+    await app.comment(ayse(), "moda", "post_question_1", "Moda Parkı'nın üst köşesi.");
     expect((await q(ayse())).answeredTodayByMe).toBe(true);
     tick(24 * HOUR);
     expect((await q(ayse())).answeredTodayByMe).toBe(false);
   });
 
   it("refuses an RSVP when the table is full", async () => {
-    const event = app.posts.get("post_event_1")!;
-    event.eventCapacity = event.rsvps.size;
-    expect(() => app.rsvp(deniz(), "moda", "post_event_1")).toThrow(expect.objectContaining({ code: "EVENT_FULL" }));
+    const { reactions: _r, rsvps, comments: _c, ...event } = (await app.community.getPost("post_event_1"))!;
+    await app.community.savePost({ ...event, eventCapacity: rsvps.length });
+    await expect(app.rsvp(deniz(), "moda", "post_event_1")).rejects.toMatchObject({ code: "EVENT_FULL" });
   });
 
-  it("serves a Peni masası as an .ics file", () => {
-    const { filename, body } = app.eventIcs("moda", "post_event_1");
+  it("serves a Peni masası as an .ics file", async () => {
+    const { filename, body } = await app.eventIcs("moda", "post_event_1");
     expect(filename).toBe("peni-masasi-2026-10-22.ics");
     expect(body).toContain("BEGIN:VEVENT\r\n");
     expect(body).toContain("DTSTART:20261022T160000Z\r\n");
@@ -135,7 +139,7 @@ describe("the feed and events (G4, G13)", () => {
     expect(body).toContain("SUMMARY:Mahalleye bir takas kütüphanesi kursak?\r\n");
     expect(body).toContain("LOCATION:Moda Kahvesi\\, Moda Cd. No: 42\\, Kadıköy\\, İstanbul\r\n");
     for (const line of body.split("\r\n")) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
-    expect(() => app.eventIcs("moda", "post_1")).toThrow(expect.objectContaining({ code: "NOT_FOUND" }));
+    await expect(app.eventIcs("moda", "post_1")).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 });
 
@@ -143,28 +147,41 @@ describe("membership (G7b)", () => {
   it("gives each membership a stable Peni kodu", async () => {
     const mine = (await modaFor(ayse())).membership!;
     expect(mine.memberCode).toMatch(/^[B-DF-HJ-NP-TV-Z2-9]{3}-[B-DF-HJ-NP-TV-Z2-9]{3}$/);
-    expect(mine.memberCode).toBe(app.memberCodeFor(mine.id));
+    expect(mine.memberCode).toBe(await app.memberCodeFor(mine.id));
+    expect(await app.membershipForCode(mine.memberCode.replace("-", "").toLowerCase())).toBe(mine.id);
     expect((await app.wallet(ayse())).cafes.find((c) => c.cafeSlug === "moda")!.memberCode).toBe(mine.memberCode);
   });
 
 });
 
 describe("sign-in and profile (G18, G19)", () => {
-  it("signs in a seeded customer with a demo session; nobody in the demo is staff", () => {
-    const token = app.createSessionFor(DEMO_CUSTOMERS.ayse.id);
-    expect(app.customerForToken(token)).toBe(ayse());
-    expect(app.customerForToken("nope")).toBeNull();
-    for (const c of [ayse(), mehmet(), deniz()]) expect(app.me(c).staffCafes).toEqual([]);
+  it("signs in a seeded customer with a demo session; nobody in the demo is staff", async () => {
+    const token = await app.createSessionFor(DEMO_CUSTOMERS.ayse.id);
+    expect(await app.customerForToken(token)).toEqual(ayse());
+    expect(await app.customerForToken("nope")).toBeNull();
+    for (const c of [ayse(), mehmet(), deniz()]) expect((await app.me(c)).staffCafes).toEqual([]);
   });
 
-  it("offers the café panel only to staff", () => {
-    app.grantStaff(DEMO_CUSTOMERS.mehmet.id, "moda", "barista");
-    expect(app.me(mehmet()).staffCafes).toEqual([{ slug: "moda", name: "Moda Kahvesi", role: "barista" }]);
+  it("ends a session on sign-out and after 90 days", async () => {
+    const first = await app.createSessionFor(DEMO_CUSTOMERS.ayse.id);
+    await app.signOut(first);
+    expect(await app.customerForToken(first)).toBeNull();
+    const second = await app.createSessionFor(DEMO_CUSTOMERS.ayse.id);
+    tick(89 * 24 * HOUR);
+    expect(await app.customerForToken(second)).not.toBeNull();
+    tick(24 * HOUR);
+    expect(await app.customerForToken(second)).toBeNull();
   });
 
-  it("changes only what was sent", () => {
-    const before = app.me(ayse()).customer;
-    expect(app.updateProfile(ayse(), { profileVisible: false }).customer).toEqual({ ...before, profileVisible: false });
+  it("offers the café panel only to staff", async () => {
+    await app.grantStaff(DEMO_CUSTOMERS.mehmet.id, "moda", "barista");
+    expect((await app.me(mehmet())).staffCafes).toEqual([{ slug: "moda", name: "Moda Kahvesi", role: "barista" }]);
+  });
+
+  it("changes only what was sent", async () => {
+    const before = (await app.me(ayse())).customer;
+    expect((await app.updateProfile(ayse(), { profileVisible: false })).customer).toEqual({ ...before, profileVisible: false });
+    expect((await app.identity.getCustomer(DEMO_CUSTOMERS.ayse.id))!.profileVisible).toBe(false);
   });
 });
 

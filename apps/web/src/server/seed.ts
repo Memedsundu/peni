@@ -1,5 +1,6 @@
 import { defaultSettings, startOfLocalDay } from "@peni/core";
-import type { PeniApp, PostRecord } from "./app";
+import type { Post } from "@peni/core";
+import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
   ayse: { id: "cus_ayse", phone: "+905320000001", displayName: "Ayşe Yılmaz" },
@@ -48,7 +49,7 @@ export async function seed(app: PeniApp): Promise<void> {
 
   // ─────────────────────────────────────────── cafés, menus, rules
 
-  app.cafes.set("cafe_moda", {
+  await app.identity.saveCafe({
     id: "cafe_moda",
     slug: "moda",
     name: "Moda Kahvesi",
@@ -60,7 +61,7 @@ export async function seed(app: PeniApp): Promise<void> {
     // Moda chose its own colourway (G9); without a choice the hash would give mürekkep.
     hue: "lacivert",
   });
-  app.cafes.set("cafe_kuzguncuk", {
+  await app.identity.saveCafe({
     id: "cafe_kuzguncuk",
     slug: "kuzguncuk",
     name: "Kuzguncuk Kıraathanesi",
@@ -68,10 +69,11 @@ export async function seed(app: PeniApp): Promise<void> {
     district: "Üsküdar",
     city: "İstanbul",
     coverImageUrl: null,
+    referenceProductIds: [],
     hue: null,
   });
 
-  app.menu.setMenu("cafe_moda", [
+  await app.menu.setMenu("cafe_moda", [
     { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 3_000, available: true, description: "İnce belli bardakta" },
     { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 9_000, available: true, description: "Yanında lokum" },
     { productId: "filtre", name: "Filtre Kahve", category: "Sıcak", priceKurus: 8_500, available: true, description: "Bu hafta Etiyopya Yirgacheffe" },
@@ -80,21 +82,21 @@ export async function seed(app: PeniApp): Promise<void> {
     { productId: "simit", name: "Simit", category: "Yiyecek", priceKurus: 2_500, available: true, description: "Sabah fırından" },
     { productId: "cheesecake", name: "San Sebastian", category: "Tatlı", priceKurus: 18_000, available: true, description: null },
   ]);
-  app.menu.setMenu("cafe_kuzguncuk", [
+  await app.menu.setMenu("cafe_kuzguncuk", [
     { productId: "cay", name: "Çay", category: "Sıcak", priceKurus: 2_500, available: true, description: "Demlikte, tavşan kanı" },
     { productId: "turk", name: "Türk Kahvesi", category: "Sıcak", priceKurus: 8_000, available: true, description: null },
     { productId: "sahlep", name: "Salep", category: "Sıcak", priceKurus: 10_000, available: true, description: "Tarçınlı" },
     { productId: "pogaca", name: "Peynirli Poğaça", category: "Yiyecek", priceKurus: 4_000, available: true, description: null },
   ]);
 
-  app.directory.settings.set("cafe_moda", {
+  await app.directory.saveSettings({
     ...defaultSettings("cafe_moda"),
     earnRateBps: 500,
     askidaProductIds: ["cay", "filtre", "simit"],
     askidaMatchBps: 5_000,
     askidaMatchMonthlyCapPeni: 500,
   });
-  app.directory.settings.set("cafe_kuzguncuk", {
+  await app.directory.saveSettings({
     ...defaultSettings("cafe_kuzguncuk"),
     earnRateBps: 700,
     askidaProductIds: ["cay", "pogaca"],
@@ -103,13 +105,13 @@ export async function seed(app: PeniApp): Promise<void> {
 
   // ─────────────────────────────────────────── people and memberships
 
-  for (const c of Object.values(DEMO_CUSTOMERS)) {
-    app.customers.set(c.id, { ...c, avatarUrl: null, profileVisible: c.id !== "cus_deniz" });
-  }
-  for (const c of Object.values(DEMO_NEIGHBOURS)) app.customers.set(c.id, { ...c, avatarUrl: null });
+  const people = new Map<string, CustomerRecord>();
+  for (const c of Object.values(DEMO_CUSTOMERS)) people.set(c.id, { ...c, avatarUrl: null, profileVisible: c.id !== "cus_deniz" });
+  for (const c of Object.values(DEMO_NEIGHBOURS)) people.set(c.id, { ...c, avatarUrl: null });
+  for (const c of people.values()) await app.identity.saveCustomer(c);
 
   const id = (who: Who) => (who in DEMO_CUSTOMERS ? DEMO_CUSTOMERS[who as keyof typeof DEMO_CUSTOMERS] : DEMO_NEIGHBOURS[who as keyof typeof DEMO_NEIGHBOURS]).id;
-  const customer = (who: Who) => app.customers.get(id(who))!;
+  const customer = (who: Who) => people.get(id(who))!;
   const members: Record<Slug, Partial<Record<Who, string>>> = { moda: {}, kuzguncuk: {} };
   const join = async (who: Who, slug: Slug, joinedDaysAgo: number) => {
     members[slug][who] = await app.ensureMembership(id(who), CAFE_ID[slug], daysAgo(joinedDaysAgo));
@@ -245,13 +247,18 @@ export async function seed(app: PeniApp): Promise<void> {
 
   // ─────────────────────────────────────────── the feed
 
-  const post = (p: Omit<PostRecord, "reactions" | "rsvps" | "comments">, extra?: Partial<PostRecord>): void => {
-    app.posts.set(p.id, { ...p, reactions: new Set(), rsvps: new Set(), comments: [], ...extra });
+  type Activity = { reactions?: Who[]; rsvps?: Who[]; comments?: { id: string; customerId: string; body: string; createdAt: Date }[] };
+  /** RSVPs and reactions land a minute apart from publishing, in the order given. */
+  const post = async (p: Post, extra: Activity = {}) => {
+    await app.community.savePost(p);
+    let t = p.publishedAt.getTime();
+    for (const who of extra.rsvps ?? []) await app.community.addRsvp(p.id, id(who), new Date((t += MIN)));
+    for (const who of extra.reactions ?? []) await app.community.toggleReaction(p.id, id(who), new Date((t += MIN)));
+    for (const c of extra.comments ?? []) await app.community.addComment(p.id, c);
   };
-  const ids = (...who: Who[]) => new Set(who.map(id));
   const answer = (cid: string, who: Who, body: string, at: Date) => ({ id: cid, customerId: id(who), body, createdAt: at });
 
-  post(
+  await post(
     {
       id: "post_event_1",
       cafeId: "cafe_moda",
@@ -263,10 +270,10 @@ export async function seed(app: PeniApp): Promise<void> {
       eventStartsAt: nextWeekday(now, 4, 19, 0),
       eventCapacity: 14,
     },
-    { rsvps: ids("ayse", "zeynep", "can", "elif", "emre", "selin"), reactions: ids("mehmet", "irem") },
+    { rsvps: ["ayse", "zeynep", "can", "elif", "emre", "selin"], reactions: ["mehmet", "irem"] },
   );
   const asked = earlierToday(200);
-  post(
+  await post(
     {
       id: "post_question_1",
       cafeId: "cafe_moda",
@@ -279,7 +286,7 @@ export async function seed(app: PeniApp): Promise<void> {
       eventCapacity: null,
     },
     {
-      reactions: ids("mehmet", "zeynep", "selin"),
+      reactions: ["mehmet", "zeynep", "selin"],
       comments: [
         answer("cmt_1", "mehmet", "Yel değirmeni parkının arkasındaki bank. Gün batımı başka.", earlierToday(170)),
         answer("cmt_2", "zeynep", "Bahariye'deki eski sahafın üst katı. Sorarsan çay da koyuyorlar.", earlierToday(120)),
@@ -288,7 +295,7 @@ export async function seed(app: PeniApp): Promise<void> {
       ],
     },
   );
-  post(
+  await post(
     {
       id: "post_1",
       cafeId: "cafe_moda",
@@ -301,14 +308,14 @@ export async function seed(app: PeniApp): Promise<void> {
       eventCapacity: null,
     },
     {
-      reactions: ids("ayse", "zeynep", "selin", "emre"),
+      reactions: ["ayse", "zeynep", "selin", "emre"],
       comments: [
         answer("cmt_5", "selin", "Dün denedim; çiçeksi, çok hafif.", on(1, 16, 20)),
         answer("cmt_6", "can", "Çekirdek olarak da satıyor musunuz?", on(1, 18, 5)),
       ],
     },
   );
-  post({
+  await post({
     id: "post_2",
     cafeId: "cafe_moda",
     kind: "post",
@@ -319,7 +326,7 @@ export async function seed(app: PeniApp): Promise<void> {
     eventStartsAt: null,
     eventCapacity: null,
   });
-  post(
+  await post(
     {
       id: "post_event_past",
       cafeId: "cafe_moda",
@@ -331,10 +338,10 @@ export async function seed(app: PeniApp): Promise<void> {
       eventStartsAt: on(6, 19, 0),
       eventCapacity: 12,
     },
-    { rsvps: ids("ayse", "mehmet", "zeynep", "can", "elif", "emre", "selin", "burak", "irem") },
+    { rsvps: ["ayse", "mehmet", "zeynep", "can", "elif", "emre", "selin", "burak", "irem"] },
   );
 
-  post(
+  await post(
     {
       id: "post_k1",
       cafeId: "cafe_kuzguncuk",
@@ -346,9 +353,9 @@ export async function seed(app: PeniApp): Promise<void> {
       eventStartsAt: nextWeekday(now, 6, 11, 0),
       eventCapacity: 20,
     },
-    { rsvps: ids("nermin", "can", "oguz", "ayse") },
+    { rsvps: ["nermin", "can", "oguz", "ayse"] },
   );
-  post({
+  await post({
     id: "post_k2",
     cafeId: "cafe_kuzguncuk",
     kind: "post",

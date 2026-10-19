@@ -31,6 +31,8 @@ model Customer {
   comments    PostComment[]
   reactions   PostReaction[]
   rsvps       EventRsvp[]
+  staffRoles  StaffMember[]
+  lookups     GiftLookup[]
 }
 
 model CustomerSession {
@@ -69,17 +71,21 @@ model CustomerDevice {
 // ─────────────────────────────────────────────────────────── cafés
 
 model Cafe {
-  id            String   @id @default(cuid())
-  slug          String   @unique
-  name          String
-  address       String?
-  district      String?
-  city          String?
-  latitude      Float?
-  longitude     Float?
-  coverImageUrl String?
-  timeZone      String   @default("Europe/Istanbul")
-  createdAt     DateTime @default(now())
+  id                  String   @id @default(cuid())
+  slug                String   @unique
+  name                String
+  address             String?
+  district            String?
+  city                String?
+  latitude            Float?
+  longitude           Float?
+  coverImageUrl       String?
+  timeZone            String   @default("Europe/Istanbul")
+  /// Items that read peni as goods ("3 çay"). Empty: the cheapest askı items.
+  referenceProductIds String[] @default([])
+  /// The café's own colour, once it picks one.
+  hue                 String?
+  createdAt           DateTime @default(now())
 
   settings    CafeSettings?
   staff       StaffMember[]
@@ -116,18 +122,22 @@ enum StaffRole {
   barista
 }
 
+/// A role at one café. Plan piece 2 (staff and roles) adds staff sign-in; for now a role belongs to a customer account.
 model StaffMember {
-  id        String    @id @default(cuid())
-  cafeId    String
-  name      String
-  email     String
-  role      StaffRole
-  createdAt DateTime  @default(now())
+  id         String    @id @default(cuid())
+  cafeId     String
+  customerId String?
+  name       String
+  email      String?
+  role       StaffRole
+  createdAt  DateTime  @default(now())
 
-  cafe  Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  posts CafePost[]
+  cafe     Cafe       @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  customer Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  posts    CafePost[]
 
   @@unique([cafeId, email])
+  @@unique([cafeId, customerId])
 }
 
 /// What a café sells. Edited in the Menü section of the café panel.
@@ -157,6 +167,8 @@ model Membership {
   customerId String
   joinedAt   DateTime @default(now())
   blocked    Boolean  @default(false)
+  /// Peni kodu shown at the till, e.g. "M7K-42Q".
+  memberCode String?  @unique
 
   cafe     Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -236,10 +248,22 @@ model Gift {
   expiresAt         DateTime
   resolvedAt        DateTime?
   sendTransactionId String     @unique
+  thankedAt         DateTime?
 
   @@index([toMembershipId, status])
   @@index([fromMembershipId, createdAt])
   @@index([status, expiresAt])
+}
+
+/// One gift recipient lookup, kept for the per-hour limit.
+model GiftLookup {
+  id         String   @id @default(cuid())
+  customerId String
+  at         DateTime @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, at])
 }
 
 // ─────────────────────────────────────────────────────────── community (the penny university side)
@@ -253,12 +277,15 @@ enum PostKind {
   event
 }
 
-/// Only café staff create posts. Members comment, react and RSVP.
+/// Café posts, questions and events. Members comment, react and RSVP.
 model CafePost {
   id            String    @id @default(cuid())
   cafeId        String
-  authorId      String
+  /// The staff member who posted it, when known.
+  authorId      String?
   kind          PostKind  @default(post)
+  /// Event topic.
+  title         String?   @db.VarChar(200)
   body          String    @db.VarChar(2000)
   imageUrls     String[]  @default([])
   pinned        Boolean   @default(false)
@@ -268,7 +295,7 @@ model CafePost {
   hiddenAt      DateTime?
 
   cafe      Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  author    StaffMember    @relation(fields: [authorId], references: [id])
+  author    StaffMember?   @relation(fields: [authorId], references: [id])
   comments  PostComment[]
   reactions PostReaction[]
   rsvps     EventRsvp[]

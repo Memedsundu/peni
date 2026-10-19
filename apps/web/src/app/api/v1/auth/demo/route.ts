@@ -7,8 +7,8 @@ import { body, route, SESSION_COOKIE } from "@/server/http";
 export const POST = route(async ({ app, req }) => {
   if (process.env.PENI_DEMO === "0") throw new AppError("NOT_FOUND", "Not available", 404);
   const { customerId } = await body(req, z.object({ customerId: z.string() }));
-  if (!app.customers.has(customerId)) throw new AppError("NOT_FOUND", "Unknown demo customer", 404);
+  if (!(await app.identity.getCustomer(customerId))) throw new AppError("NOT_FOUND", "Unknown demo customer", 404);
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE, app.createSessionFor(customerId), { httpOnly: true, sameSite: "lax", path: "/" });
+  res.cookies.set(SESSION_COOKIE, await app.createSessionFor(customerId), { httpOnly: true, sameSite: "lax", path: "/" });
   return res;
 });

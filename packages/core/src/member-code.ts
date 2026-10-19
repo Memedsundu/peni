@@ -1,7 +1,7 @@
 /**
  * Peni kodu: the short code a member shows at the till ("M7K-42Q") so a walk-in
- * purchase still earns peni. It is derived from the membership id, so it never
- * needs storing. It is read aloud and typed by hand, so the alphabet drops the
+ * purchase still earns peni. It is derived from the membership id and stored
+ * with a unique index, so a collision just takes the next attempt. It is read aloud and typed by hand, so the alphabet drops the
  * classic look-alikes (0 O, 1 I L) and every vowel, which also means a code can
  * never spell a word in Turkish or English. 28 symbols, 6 places: 481 million codes.
  */

@@ -48,7 +48,7 @@ export function route<T>(handler: Handler<T>, opts: { auth?: "customer" | "staff
   return async (req: NextRequest): Promise<NextResponse> => {
     try {
       const app = await getApp();
-      const customer = app.customerForToken(tokenFrom(req));
+      const customer = await app.customerForToken(tokenFrom(req));
       if (opts.auth === "customer" && !customer) {
         throw new AppError("UNAUTHENTICATED", "Sign in first", 401);
       }

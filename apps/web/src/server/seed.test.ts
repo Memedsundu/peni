@@ -18,7 +18,8 @@ describe.each(times)("seed at %s", (iso) => {
     const now = new Date(iso);
     const app = new PeniApp({ demo: true, staffKey: "k", clock: () => now });
     await seed(app);
-    const c = (id: string) => app.customers.get(id)!;
+    const people = new Map((await app.identity.getCustomers(Object.values(DEMO_CUSTOMERS).map((x) => x.id))).map((x) => [x.id, x]));
+    const c = (id: string) => people.get(id)!;
     const moda = (id: string) => app.cafeDetail("moda", c(id));
     const d = await moda(DEMO_CUSTOMERS.deniz.id);
     expect(d.membership!.balancePeni).toBe(0);
