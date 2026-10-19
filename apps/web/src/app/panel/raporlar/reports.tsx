@@ -1,11 +1,13 @@
 "use client";
 
-import { PeniApiError, type ExpenseKindDTO, type ReportProductDTO, type SalesReportDTO } from "@peni/api";
+import { PeniApiError, type ChatSubjectDTO, type ExpenseKindDTO, type ReportProductDTO, type SalesReportDTO, type SavedReportsDTO } from "@peni/api";
 import { formatTL } from "@peni/brand/format";
-import { useCallback, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
-import { addDaysTo, formatDay, formatMonth, shiftMonth } from "../amounts";
+import { addDaysTo, formatDay, formatMonth, rangeLabel, shiftMonth } from "../amounts";
+import { AskedReportView } from "../asked-report";
+import { SAVED_REPORTS_EVENT, useAssistant } from "../assistant";
 import { axisLabel, change, Chart, compactTL, signedPercent, type ChartColors } from "../chart";
 import { Segmented } from "../controls";
 import { CATEGORY } from "../faturalar/bills";
@@ -16,6 +18,21 @@ import { withCafe } from "../bugun/today";
 type Preset = "today" | "yesterday" | "week" | "month" | "lastMonth" | "90" | "year" | "custom";
 type Range = { from: string; through: string };
 type Sort = "profit" | "qty" | "sales";
+type Section = Extract<ChatSubjectDTO, { kind: "report" }>["section"];
+
+/** What each part is called when "Açıkla" asks about it. */
+const SECTION_TITLE: Record<Section, TextKey> = {
+  headline: "xpHeadline",
+  sales: "rpSalesChart",
+  hours: "rpByHour",
+  weekdays: "rpByWeekday",
+  months: "rpMonths",
+  spending: "rpSpendTitle",
+  paidWith: "rpPaidWith",
+  products: "rpProducts",
+};
+/** The days on screen, for "Açıkla". */
+const Shown = createContext<{ range: Range; t: T; lang: Lang } | null>(null);
 
 const PRESETS: { value: Preset; label: TextKey }[] = [
   { value: "today", label: "rpToday" },
@@ -58,13 +75,6 @@ function presetOf(r: Range, today: string): Preset {
   return "custom";
 }
 const sameRange = (a: Range, b: Range) => a.from === b.from && a.through === b.through;
-
-/** "1–18 Eki", "18 Eki", "1 Eyl – 15 Eki". */
-function rangeLabel(r: Range, lang: Lang): string {
-  if (r.from === r.through) return formatDay(r.from, lang, { year: r.from.slice(0, 4) !== new Date().toISOString().slice(0, 4) });
-  if (r.from.slice(0, 7) === r.through.slice(0, 7)) return `${Number(r.from.slice(8))}–${formatDay(r.through, lang)}`;
-  return `${formatDay(r.from, lang)} – ${formatDay(r.through, lang)}`;
-}
 
 const percent = (n: number, lang: Lang) => (lang === "tr" ? `%${n}` : `${n}%`);
 
@@ -158,6 +168,7 @@ function ReportsPage({ cafe, t, lang, signedOut, initial }: PanelProps & { initi
       )}
       {error && <Notice tone="red">{error}</Notice>}
       {data && <Report data={data} t={t} lang={lang} slug={cafe.slug} busy={busy} />}
+      {data && <SavedReports t={t} lang={lang} slug={cafe.slug} signedOut={signedOut} />}
     </>
   );
 }
@@ -182,31 +193,73 @@ function Report({ data, t, lang, slug, busy }: { data: SalesReportDTO; t: T; lan
   // One day is already hour by hour in the sales chart.
   const showHours = data.hours.length > 0 && data.series.step !== "hour";
   return (
-    <div className={`flex flex-col gap-10 transition-opacity ${busy ? "opacity-60" : ""}`} aria-busy={busy}>
-      <Headline data={data} t={t} lang={lang} />
-      <SalesChart data={data} t={t} lang={lang} />
-      {(showHours || data.weekdays.length > 0) && (
-        <div className={`grid gap-10 ${showHours && data.weekdays.length > 0 ? "md:grid-cols-2" : ""}`}>
-          {showHours && <HoursChart data={data} t={t} />}
-          {data.weekdays.length > 0 && <WeekdayChart data={data} t={t} lang={lang} />}
+    <Shown.Provider value={{ range: { from: data.from, through: data.through }, t, lang }}>
+      <div className={`flex flex-col gap-10 transition-opacity ${busy ? "opacity-60" : ""}`} aria-busy={busy}>
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-end">
+            <Explain section="headline" />
+          </div>
+          <Headline data={data} t={t} lang={lang} />
         </div>
-      )}
-      {data.months.length > 0 && <MonthsChart data={data} t={t} lang={lang} />}
-      <div className="grid gap-10 md:grid-cols-2">
-        <Spending data={data} t={t} tl={tl} />
-        <PaidWith data={data} t={t} />
+        <SalesChart data={data} t={t} lang={lang} />
+        {(showHours || data.weekdays.length > 0) && (
+          <div className={`grid gap-10 ${showHours && data.weekdays.length > 0 ? "md:grid-cols-2" : ""}`}>
+            {showHours && <HoursChart data={data} t={t} />}
+            {data.weekdays.length > 0 && <WeekdayChart data={data} t={t} lang={lang} />}
+          </div>
+        )}
+        {data.months.length > 0 && <MonthsChart data={data} t={t} lang={lang} />}
+        <div className="grid gap-10 md:grid-cols-2">
+          <Spending data={data} t={t} tl={tl} />
+          <PaidWith data={data} t={t} />
+        </div>
+        <Products data={data} t={t} lang={lang} tl={tl} slug={slug} />
       </div>
-      <Products data={data} t={t} lang={lang} tl={tl} slug={slug} />
+    </Shown.Provider>
+  );
+}
+
+function Heading({ title, help, section }: { title: string; help?: string; section?: Section }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="font-serif text-3xl leading-tight">{title}</h2>
+        {section && <Explain section={section} />}
+      </div>
+      {help && <p className="text-sm leading-normal text-muted">{help}</p>}
     </div>
   );
 }
 
-function Heading({ title, help }: { title: string; help?: string }) {
+/** "Açıkla" (B8): the assistant reads this part of the report in plain words. */
+function Explain({ section }: { section: Section }) {
+  const assistant = useAssistant();
+  const shown = useContext(Shown);
+  if (!assistant || !shown) return null;
+  const { range, t, lang } = shown;
   return (
-    <div className="flex flex-col gap-1">
-      <h2 className="font-serif text-3xl leading-tight">{title}</h2>
-      {help && <p className="text-sm leading-normal text-muted">{help}</p>}
-    </div>
+    <Button
+      kind="quiet"
+      size="sm"
+      className="shrink-0"
+      onClick={() =>
+        assistant.open({
+          text: fill(t("xpAsk"), { what: t(SECTION_TITLE[section]), period: rangeLabel(range, lang) }),
+          subject: { kind: "report", section, ...range },
+        })
+      }
+    >
+      <SparkIcon />
+      {t("xpExplain")}
+    </Button>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z" />
+    </svg>
   );
 }
 
@@ -299,7 +352,7 @@ function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang 
   const total = points.reduce((s, p) => s + p.salesKurus, 0);
   return (
     <section className="flex flex-col gap-3">
-      <Heading title={t("rpSalesChart")} />
+      <Heading title={t("rpSalesChart")} section="sales" />
       {total === 0 && points.every((p) => !p.previousKurus) ? (
         <p className="rounded-3xl bg-panel px-5 py-6">{t("rpNoSales")}</p>
       ) : (
@@ -336,7 +389,7 @@ function HoursChart({ data, t }: { data: SalesReportDTO; t: T }) {
   );
   return (
     <section className="flex flex-col gap-3">
-      <Heading title={t("rpByHour")} help={t("rpByHourHelp")} />
+      <Heading title={t("rpByHour")} help={t("rpByHourHelp")} section="hours" />
       <Chart option={option} height={220} label={`${t("rpByHour")}: ${busiest.hour}:00`} />
     </section>
   );
@@ -370,7 +423,7 @@ function WeekdayChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lan
   );
   return (
     <section className="flex flex-col gap-3">
-      <Heading title={t("rpByWeekday")} help={t("rpByWeekdayHelp")} />
+      <Heading title={t("rpByWeekday")} help={t("rpByWeekdayHelp")} section="weekdays" />
       <Chart option={option} height={220} label={`${t("rpByWeekday")}: ${t(`wd_${best.weekday}` as TextKey)}`} />
     </section>
   );
@@ -425,7 +478,7 @@ function MonthsChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang
   );
   return (
     <section className="flex flex-col gap-3">
-      <Heading title={t("rpMonths")} help={t("rpMonthsHelp")} />
+      <Heading title={t("rpMonths")} help={t("rpMonthsHelp")} section="months" />
       <Chart option={option} height={260} label={data.months.map((m) => `${formatMonth(m.month, lang)}: ${lira(m.profitKurus)}`).join(", ")} />
     </section>
   );
@@ -457,7 +510,7 @@ function Spending({ data, t, tl }: { data: SalesReportDTO; t: T; tl: (k: number)
   const label = (k: ExpenseKindDTO) => t(CATEGORY[k]);
   return (
     <section className="flex flex-col gap-4">
-      <Heading title={t("rpSpendTitle")} help={`${t("rpExpensesHelp")} ${tl(data.totals.expensesKurus)}`} />
+      <Heading title={t("rpSpendTitle")} help={`${t("rpExpensesHelp")} ${tl(data.totals.expensesKurus)}`} section="spending" />
       {data.expenses.length === 0 ? (
         <p className="text-muted">{t("rpNoSpend")}</p>
       ) : (
@@ -477,7 +530,7 @@ function PaidWith({ data, t }: { data: SalesReportDTO; t: T }) {
   ].filter((r) => r.kurus !== 0 || r.key === "cash" || r.key === "card");
   return (
     <section className="flex flex-col gap-4">
-      <Heading title={t("rpPaidWith")} help={t("rpPaidWithHelp")} />
+      <Heading title={t("rpPaidWith")} help={t("rpPaidWithHelp")} section="paidWith" />
       <Bars rows={rows} />
     </section>
   );
@@ -500,7 +553,7 @@ function Products({ data, t, lang, tl, slug }: { data: SalesReportDTO; t: T; lan
     );
   return (
     <section className="flex flex-col gap-4">
-      <Heading title={t("rpProducts")} help={t("rpProductsHelp")} />
+      <Heading title={t("rpProducts")} help={t("rpProductsHelp")} section="products" />
       <Segmented
         label={t("rpSortBy")}
         value={sort}
@@ -558,6 +611,91 @@ function Products({ data, t, lang, tl, slug }: { data: SalesReportDTO; t: T; lan
             {t("rpFixCosts")}
           </a>
         </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Kayıtlı raporlar (B9): reports asked for in the chat and kept here for everyone who sees
+ * reports. Named periods move with the calendar, so each opens with today's numbers.
+ */
+function SavedReports({ t, lang, slug, signedOut }: { t: T; lang: Lang; slug: string; signedOut: () => void }) {
+  const assistant = useAssistant();
+  const [data, setData] = useState<SavedReportsDTO | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const failed = (e: unknown) => {
+    if (e instanceof PeniApiError && e.status === 401) signedOut();
+    else setError(errorText(e, lang));
+  };
+  useEffect(() => {
+    const load = () => api.staff.reports.saved(slug).then(setData, failed);
+    load();
+    window.addEventListener(SAVED_REPORTS_EVENT, load);
+    return () => window.removeEventListener(SAVED_REPORTS_EVENT, load);
+  }, [slug]);
+  const remove = (id: string) => {
+    setRemoving(id);
+    setError(null);
+    api.staff.reports
+      .remove(slug, id)
+      .then(setData, failed)
+      .finally(() => setRemoving(null));
+  };
+  const canAsk = !!assistant && !!data?.canAsk;
+  return (
+    <section id="kayitli" className="flex scroll-mt-6 flex-col gap-4 border-t border-line pt-10">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <h2 className="font-serif text-3xl leading-tight">{t("srTitle")}</h2>
+          <p className="text-sm leading-normal text-muted">{t("srHelp")}</p>
+        </div>
+        {canAsk && (
+          <Button kind="secondary" size="sm" className="shrink-0" onClick={() => assistant.open({ text: t("srAskText") })}>
+            <SparkIcon />
+            {t("srAsk")}
+          </Button>
+        )}
+      </div>
+      {error && <Notice tone="red">{error}</Notice>}
+      {!data && !error && <p className="text-muted">{t("loading")}</p>}
+      {data && data.reports.length === 0 && <p className="rounded-3xl bg-panel px-5 py-6 text-muted">{t("srEmpty")}</p>}
+      {data && data.reports.length > 0 && (
+        <ul className="grid gap-4 md:grid-cols-2">
+          {data.reports.map((r) => (
+            <li key={r.id} className="flex min-w-0 flex-col gap-4 rounded-3xl border border-line p-5">
+              {r.result ? (
+                <AskedReportView t={t} lang={lang} spec={r.spec} result={r.result} compact />
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <h3 className="font-serif text-2xl leading-tight">{r.spec.title}</h3>
+                  <p className="text-sm text-red">{t("srProblem")}</p>
+                </div>
+              )}
+              <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-line-soft pt-3">
+                {r.by && <span className="mr-auto text-xs text-muted">{fill(t("srBy"), { name: r.by })}</span>}
+                {r.result && assistant && data.canAsk && (
+                  <Button
+                    size="sm"
+                    onClick={() =>
+                      assistant.open({
+                        text: fill(t("xpAsk"), { what: r.spec.title, period: rangeLabel(r.result!, lang) }),
+                        subject: { kind: "saved", reportId: r.id },
+                      })
+                    }
+                  >
+                    <SparkIcon />
+                    {t("xpExplain")}
+                  </Button>
+                )}
+                <Button kind="bare" size="sm" onClick={() => remove(r.id)} disabled={removing === r.id}>
+                  {t("srRemove")}
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

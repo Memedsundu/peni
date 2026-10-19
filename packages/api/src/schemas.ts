@@ -360,6 +360,44 @@ export const quickEntrySchema = z.object({
   voice: z.boolean().optional(),
 });
 
+/** A report asked for in words (piece 29), as the assistant wrote it down. */
+export const askedReportSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  measure: z.enum(["sales", "orders", "quantity", "expenses", "profit"]),
+  by: z.enum(["none", "hour", "weekday", "day", "week", "month", "product", "category", "payment", "expenseKind", "supplier"]),
+  period: z.enum(["today", "yesterday", "thisWeek", "lastWeek", "thisMonth", "lastMonth", "last7", "last30", "last90", "thisYear", "custom"]),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  through: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  compare: z.enum(["none", "previous", "lastYear"]),
+  products: z.array(z.string().trim().min(1).max(60)).max(10),
+  categories: z.array(z.string().trim().min(1).max(60)).max(10),
+  chart: z.enum(["bar", "line", "table"]),
+});
+
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+
+/** A question to the assistant (piece 29); "Açıkla" sends what it's about as `subject`. */
+export const chatAskSchema = z.object({
+  key: actionKey,
+  text: z.string().trim().min(1, "Bir şey sor").max(500, "En çok 500 karakter"),
+  chatId: z.string().min(1).max(64).nullable().optional(),
+  subject: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("report"),
+        section: z.enum(["headline", "sales", "hours", "weekdays", "months", "spending", "paidWith", "products"]),
+        from: day,
+        through: day,
+      }),
+      z.object({ kind: z.literal("saved"), reportId: z.string().min(1).max(64) }),
+    ])
+    .nullable()
+    .optional(),
+});
+
+/** "Raporlara kaydet": keeps a report drawn in the chat on Raporlar. */
+export const saveReportSchema = z.object({ key: actionKey, spec: askedReportSchema });
+
 export const dismissDraftSchema = z.object({ reason: optionalText(200) });
 
 /** "Kontrol edildi" on a statement or Z report (piece 27): a note, and whether to set the bank balance to the statement's. */
@@ -695,5 +733,7 @@ export type ConfirmDraftInput = z.input<typeof confirmDraftSchema>;
 export type DismissDraftInput = z.input<typeof dismissDraftSchema>;
 export type CheckDraftInput = z.input<typeof checkDraftSchema>;
 export type QuickEntryInput = z.input<typeof quickEntrySchema>;
+export type ChatAskInput = z.input<typeof chatAskSchema>;
+export type SaveReportInput = z.input<typeof saveReportSchema>;
 export type CheckSampleInput = z.input<typeof checkSampleSchema>;
 export type InboxSettingsInput = z.input<typeof inboxSettingsSchema>;

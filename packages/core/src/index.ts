@@ -27,3 +27,4 @@ export * from "./tasks";
 export * from "./figures";
 export * from "./assistant";
 export * from "./checks";
+export * from "./chat";

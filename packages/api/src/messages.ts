@@ -216,6 +216,11 @@ export const errorMessagesTr: Record<string, string> = {
   AI_OFF: "Asistan şu an kapalı. Belgeyi elle girebilirsin.",
   INBOX_NOT_READY: "E-posta kutusu bu sunucuda henüz kurulmadı.",
   INBOX_SAMPLE_DEMO: "Örnek e-posta yalnızca demoda gönderilir.",
+  CHAT_LIMIT: "Bugün için soru sınırı doldu. Yarın yeniden sorabilirsin.",
+  CHAT_NOT_FOUND: "Bu sohbet bulunamadı. Yeni bir sohbet başlat.",
+  SAVED_REPORT_NOT_FOUND: "Bu rapor bulunamadı; kaldırılmış olabilir.",
+  SAVED_REPORTS_FULL: "En çok 30 rapor kaydedilir. Yenisi için birini kaldır.",
+  ASKED_REPORT: "Bu rapor böyle çıkarılamıyor. Başka bir biçimde sor.",
   REPORT_RANGE: "Bu tarihlerle rapor olmaz. Başlangıç bitişten önce, bitiş en geç bugün olmalı; en çok 400 gün.",
 };
 

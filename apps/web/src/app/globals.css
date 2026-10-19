@@ -80,3 +80,20 @@ body {
 .fade-in {
   animation: peni-fade 600ms ease-out;
 }
+
+/* The assistant comes in from the right. */
+@keyframes peni-slide-in {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [role="dialog"] {
+    animation: none !important;
+  }
+}
