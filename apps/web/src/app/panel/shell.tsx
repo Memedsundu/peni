@@ -17,6 +17,7 @@ const PAGES = [
   { key: "raporlar", href: "/panel/raporlar", label: "navReports", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
   { key: "mektup", href: "/panel/mektup", label: "navLetter", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
   { key: "gozcu", href: "/panel/gozcu", label: "navWatch", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
+  { key: "mudavimler", href: "/panel/mudavimler", label: "navRegulars", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
   { key: "menu", href: "/panel/menu", label: "menu", can: (c: StaffCafeAccessDTO) => has(c, "menu.edit") || has(c, "menu.recipes") },
   { key: "faturalar", href: "/panel/faturalar", label: "bills", can: (c: StaffCafeAccessDTO) => has(c, "bills.view") },
   { key: "borclar", href: "/panel/borclar", label: "debts", can: (c: StaffCafeAccessDTO) => has(c, "debts.view") },

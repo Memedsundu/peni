@@ -30,3 +30,4 @@ export * from "./checks";
 export * from "./chat";
 export * from "./letters";
 export * from "./watch";
+export * from "./insights";

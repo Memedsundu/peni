@@ -67,6 +67,7 @@ function route(q: string, tools: Set<string | undefined>): { tool: ChatStep["loo
       chart,
     },
   });
+  if (/müdavim|mudavim|geri gel|tekrar gel|komşu|etkinli|topluluk/.test(q) && tools.has("community")) return { tool: "community" };
   if (/stok|bitti|azal/.test(q) && tools.has("stock")) return { tool: "stock" };
   if (/borç|borc|vade|çek/.test(q) && tools.has("owed")) return { tool: "owed" };
   if (/kasa|banka|bakiye/.test(q) && tools.has("money")) return { tool: "money" };
@@ -100,6 +101,18 @@ function readBack(tool: string, r: Record<string, unknown>): string {
   if (tool === "owed") return `Toplam borç ${lira(r.total)}; bunun ${lira(r.overdue)} kadarı gecikmiş, bu hafta ödenecek ${lira(r.dueThisWeek)}.`;
   if (tool === "money")
     return r.notStarted ? "Nakit ve banka henüz başlatılmamış." : `Kasada ${lira(r.drawer ?? 0)}, ayrı kasada ${lira(r.reserve)}, bankada ${lira(r.bank)} var.`;
+  if (tool === "community") {
+    const came = r.came as { now: number; sameDaysLastMonth: number };
+    const back = r.ofLastMonthsCameBack as { people: number; cameBackPct?: number };
+    const regulars = r.regulars as { now: number };
+    return [
+      `${new Date(`${r.month}-15T12:00:00Z`).toLocaleDateString("tr-TR", { month: "long", year: "numeric", timeZone: "UTC" })}: ${came.now} üye geldi (geçen ay aynı günlerde ${came.sameDaysLastMonth}); ${regulars.now} kişi müdavim.`,
+      back.cameBackPct !== undefined ? `Geçen ay gelen ${back.people} kişinin %${back.cameBackPct}'i bu ay da geldi.` : "",
+      "Sadece Peni kullanan üyeler sayılıyor.",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
   if (tool === "stock") {
     const items = (r.items as { name: string; level: string }[]) ?? [];
     const low = items.filter((i) => i.level !== "ok").map((i) => i.name);

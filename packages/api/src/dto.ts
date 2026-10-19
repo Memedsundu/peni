@@ -2120,3 +2120,64 @@ export interface WatchDTO {
   orders: OrderSuggestionDTO[] | null;
   staffing: StaffingDTO | null;
 }
+
+/** A share that came back; `pct` is null when the group is too small to show (it would point at someone). */
+export interface InsightRateDTO {
+  people: number;
+  cameBack: number;
+  pct: number | null;
+}
+
+/** Coming back after something, against everyone else who came in the same days. */
+export interface InsightEffectDTO {
+  kind: "spentPeni" | "gotTreat" | "tookAskida" | "gaveAskida" | "wentToEvent";
+  with: InsightRateDTO;
+  without: InsightRateDTO;
+}
+
+export interface InsightEventDTO {
+  id: string;
+  title: string;
+  day: string;
+  /** Opened by a neighbour rather than the café. */
+  byMember: boolean;
+  going: number;
+  came: number;
+  newcomers: number;
+  cameBackAfter: number;
+  orders: number;
+  usualOrders: number | null;
+  liftPct: number | null;
+}
+
+/**
+ * `GET /staff/:slug/insights?month=YYYY-MM`: Müdavimler, community insights ("reports.view").
+ * Counts only, never names. A visit is a day a member earned or spent peni or took from the askı.
+ */
+export interface InsightsDTO {
+  month: string;
+  /** This month at the café: the newest that can be picked. */
+  thisMonth: string;
+  /** The last day counted: the month's end, or today for this month. */
+  through: string;
+  /** Members of the café, and how many joined this month. */
+  members: number;
+  joined: number;
+  visitors: number;
+  visitorsBefore: number;
+  newcomers: number;
+  newcomersBefore: number;
+  regulars: number;
+  regularsBefore: number;
+  /** Of last month's visitors, how many came this month. */
+  cameBack: InsightRateDTO;
+  regularsAway: number;
+  weeks: { week: string; newcomers: number; returning: number }[];
+  /** First visits (or the thing) between these days; each had 30 days to come back by `through`. */
+  effectFrom: string;
+  effectThrough: string;
+  effects: InsightEffectDTO[];
+  /** This month: items given from the askı (at the till or to members), peni put on it, members who gave. */
+  askida: { given: number; donatedKurus: number; donors: number };
+  events: InsightEventDTO[];
+}

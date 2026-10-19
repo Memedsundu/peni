@@ -51,7 +51,12 @@ const DAY = 24 * 60 * MIN;
  * line, a filling event, a question with answers and trends in the report.
  * Deterministic for a given day: no randomness beyond a fixed-seed generator.
  */
-export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boolean } = {}): Promise<void> {
+/**
+ * `history` adds four months of neighbours at Moda for Müdavimler (piece 32): people who came
+ * and went, spent peni, got treats, took from or gave to the askı, and an older event. The
+ * demo server has it; tests ask for it, so the figures other tests were written against stay.
+ */
+export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boolean; history?: boolean } = {}): Promise<void> {
   const now = app.now();
   const today = startOfLocalDay(now, TZ);
   /** `daysAgo` local days back at hh:mm in Istanbul (no DST there, so plain arithmetic holds). */
@@ -308,6 +313,8 @@ export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boole
   gift({ from: "ayse", to: "zeynep", slug: "moda", at: earlierToday(50), peni: 45, message: "Takas rafı fikri için sağ ol." });
   steps.sort((a, b) => a.at.getTime() - b.at.getTime());
   for (const step of steps) await step.run();
+
+  if (opts.history) await seedHistory(app, { on, till: tillStaff.moda });
 
   // Oğuz is blocked at Kuzguncuk (staff decision; the reason is never shown to anyone).
   const blocked = (await app.directory.getMembership(members.kuzguncuk.oguz!))!;
@@ -1039,4 +1046,86 @@ async function seedDrafts(app: PeniApp): Promise<void> {
   const pdf = ambalajBill(today);
   await app.assistant.upload(murat, pdf, "ambalaj-dunyasi.pdf");
   if (app.assistant.mode === "demo") await app.jobs.runDue();
+}
+
+/** Moda's neighbours from before the demo's two months; see `seed`'s `history`. */
+const HISTORY_NEIGHBOURS: [id: string, name: string, joinedDaysAgo: number, visitDaysAgo: number[]][] = [
+  ["cus_h_asli", "Aslı Koç", 105, [100, 90, 80, 62, 55, 48, 40, 33, 20, 10, 4]],
+  ["cus_h_bora", "Bora Aydın", 98, [95, 75, 58, 45, 25, 12]],
+  ["cus_h_ceren", "Ceren Kurt", 92, [88, 70, 52, 45, 38, 15]],
+  ["cus_h_doruk", "Doruk Ateş", 90, [85, 60, 50]],
+  ["cus_h_ebru", "Ebru Tekin", 95, [92, 65, 45, 41, 18]],
+  ["cus_h_ferhat", "Ferhat Güneş", 86, [84, 52]],
+  ["cus_h_gul", "Gül Erdem", 82, [80]],
+  ["cus_h_hande", "Hande Polat", 78, [75, 55, 45, 35, 9]],
+  ["cus_h_ilgaz", "Ilgaz Yurt", 74, [72, 55, 40]],
+  ["cus_h_jale", "Jale Bulut", 68, [66, 55]],
+  ["cus_h_kaan", "Kaan Uçar", 93, [90, 64, 50, 30, 6]],
+  ["cus_h_lale", "Lale Sezer", 80, [78, 60, 44]],
+  ["cus_h_mert", "Mert Kılıç", 72, [70, 58, 37, 21]],
+  ["cus_h_nil", "Nil Akın", 46, [45, 39]],
+  ["cus_h_oya", "Oya Duman", 99, [98]],
+  ["cus_h_polat", "Polat Er", 88, [86]],
+  ["cus_h_ruya", "Rüya Taş", 79, [77]],
+  ["cus_h_sarp", "Sarp Oral", 66, [64, 61]],
+];
+
+async function seedHistory(app: PeniApp, ctx: { on: (daysAgo: number, hh: number, mm?: number) => Date; till: { cafe: Cafe; member: StaffMember } }) {
+  const { on } = ctx;
+  const member = new Map<string, string>();
+  const customers = new Map<string, CustomerRecord>();
+  for (const [i, [id, displayName, joined]] of HISTORY_NEIGHBOURS.entries()) {
+    const c: CustomerRecord = { id, phone: `+9053200001${String(i).padStart(2, "0")}`, displayName, email: null, avatarUrl: null, profileVisible: true };
+    customers.set(id, c);
+    await app.identity.saveCustomer(c);
+    member.set(id, await app.ensureMembership(id, "cafe_moda", on(joined, 9)));
+  }
+  const steps: { at: Date; run: () => Promise<unknown> }[] = [];
+  const plan = (at: Date, run: () => Promise<unknown>) => void steps.push({ at, run: () => app.at(at, run) });
+  let n = 0;
+  const visits = new Map(HISTORY_NEIGHBOURS.map(([id, , , days]) => [id, days]));
+  // Visits: a coffee and something, earning peni each time.
+  for (const [id, , , days] of HISTORY_NEIGHBOURS)
+    for (const d of days) {
+      const tl = 90 + ((d * 37 + id.length * 11) % 140);
+      plan(on(d, 9 + (d % 9), (d * 7) % 60), () => app.peni.earnForPaidOrder({ membershipId: member.get(id)!, orderId: `hist_${++n}`, paidTotalKurus: tl * 100 }));
+    }
+  // Spending peni on a visit.
+  for (const [id, d] of [["cus_h_asli", 55], ["cus_h_bora", 58], ["cus_h_ceren", 52], ["cus_h_doruk", 60]] as const) {
+    if (!visits.get(id)!.includes(d)) throw new Error(`no visit for ${id} on ${d}`);
+    plan(on(d, 21), () => app.peni.spendAtTill({ membershipId: member.get(id)!, orderId: `hist_spend_${++n}`, key: `hist_spend_${n}`, requestedPeni: 5, capPeni: 100 }));
+  }
+  // Treats, accepted the same day.
+  for (const [from, to, d] of [["cus_h_asli", "cus_h_ebru", 70], ["cus_h_bora", "cus_h_ferhat", 70], ["cus_h_kaan", "cus_h_gul", 69]] as const) {
+    const key = `hist_gift_${++n}`;
+    plan(on(d, 12), () => app.sendGift(customers.get(from)!, { cafeSlug: "moda", toPhone: customers.get(to)!.phone!, peni: 3, message: "Bir kahve benden.", idempotencyKey: key }));
+    plan(on(d, 13), async () => {
+      const tx = await app.ledger.findByIdempotencyKey(`gift:${from}:${key}`);
+      await app.resolveGift(customers.get(to)!, String(tx!.meta.giftId), "accept");
+    });
+  }
+  // The askı: cash at the till, three neighbours giving from their peni, three taking a çay.
+  plan(on(67, 11), () => app.tillDonation(ctx.till, { peni: 90, idempotencyKey: `hist_till_${++n}` }));
+  for (const [id, d] of [["cus_h_kaan", 64], ["cus_h_lale", 60], ["cus_h_mert", 58]] as const)
+    plan(on(d, 20), () => app.donateToAskida(customers.get(id)!, { cafeSlug: "moda", peni: 5, showName: false, idempotencyKey: `hist_d_${++n}` }));
+  for (const id of ["cus_h_hande", "cus_h_ilgaz", "cus_h_jale"])
+    plan(on(55, 8, 30), () => app.peni.claimFromAskida({ membershipId: member.get(id)!, orderId: `hist_aski_${++n}`, productId: "cay", unitPriceKurus: 3_000 }));
+  steps.sort((a, b) => a.at.getTime() - b.at.getTime());
+  for (const step of steps) await step.run();
+
+  // An older café event: a neighbourhood breakfast. Bora, Ceren, Ebru, Hande and Nil came; Kaan didn't.
+  const breakfast = on(45, 10);
+  await app.community.savePost({
+    id: "post_event_breakfast",
+    cafeId: "cafe_moda",
+    kind: "event",
+    title: "Mahalle kahvaltısı",
+    body: "Pazar sabahı uzun masada kahvaltı. Herkes bir şey getirsin, çay bizden.",
+    publishedAt: on(52, 10),
+    pinned: false,
+    eventStartsAt: breakfast,
+    eventCapacity: 20,
+  });
+  let t = on(52, 10).getTime();
+  for (const id of ["cus_h_ceren", "cus_h_ebru", "cus_h_hande", "cus_h_kaan", "cus_h_nil", "cus_h_bora"]) await app.community.addRsvp("post_event_breakfast", id, new Date((t += 60_000)));
 }

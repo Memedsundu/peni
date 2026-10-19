@@ -853,6 +853,23 @@ assert.equal((await call("GET", "/staff/moda/watch", { headers: MURAT })).json.u
 assert.equal((await call("GET", "/staff/moda/watch", { headers: ecePassword })).json.error.code, "FORBIDDEN");
 step("Gözcü: Ece's voids, 30 days of money, orders with messages and next week's staffing; seen once for everyone; Ece can't open it");
 
+// 5z. Müdavimler (piece 32): this month's members, what brings them back, the askı and events,
+//     counts only; last month too. Ece can't open it.
+const insights = (await call("GET", "/staff/moda/insights", { headers: STAFF })).json;
+assert.ok(insights.visitors > 0 && insights.members > insights.visitors);
+assert.equal(insights.weeks.length, 12);
+assert.deepEqual(insights.effects.map((e) => e.kind), ["spentPeni", "gotTreat", "tookAskida", "gaveAskida", "wentToEvent"]);
+assert.ok(insights.effects.find((e) => e.kind === "spentPeni").with.pct !== null);
+assert.ok(insights.askida.given > 0);
+assert.ok(!JSON.stringify(insights).includes("Hande") && !JSON.stringify(insights).includes("Kerem"), "nobody is named");
+const prev = new Date(`${insights.thisMonth}-15T12:00:00Z`);
+prev.setUTCMonth(prev.getUTCMonth() - 1);
+const insightsBefore = (await call("GET", `/staff/moda/insights?month=${prev.toISOString().slice(0, 7)}`, { headers: STAFF })).json;
+assert.ok(insightsBefore.through < insights.through);
+assert.equal((await call("GET", "/staff/moda/insights?month=1999-01", { headers: STAFF })).json.error.code, "VALIDATION");
+assert.equal((await call("GET", "/staff/moda/insights", { headers: ecePassword })).json.error.code, "FORBIDDEN");
+step(`Müdavimler: ${insights.visitors} members came this month, ${insights.cameBack.cameBack} of last month's came back; nobody named; Ece can't open it`);
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
