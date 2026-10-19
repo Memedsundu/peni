@@ -6,17 +6,22 @@ import type {
   StaffSessionDTO,
   TeamDTO,
   TeamMemberDTO,
+  TillDTO,
+  TillDeviceDTO,
 } from "@peni/api";
 import {
   ALL_PERMISSIONS,
   PERMISSIONS,
+  NO_PIN,
   ROLE_LABELS,
   SECTIONS,
   STAFF_ROLES,
+  TILL_PERMISSIONS,
   isLocked,
   normalizeEmail,
   overridesFrom,
   permissionsFor,
+  pinProblem,
   roleMatrix,
   type Cafe,
   type IdentityStore,
@@ -25,7 +30,10 @@ import {
   type StaffAccount,
   type StaffMember,
   type StaffRole,
+  type StaffSessionRecord,
+  type StaffSignInMethod,
   type StaffStore,
+  type TillDevice,
 } from "@peni/core";
 import bcrypt from "bcryptjs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -37,7 +45,12 @@ import { AppError } from "./errors";
  * Staff sign in with email and password (bcrypt, as in Shelby, so Shelby's
  * passwords move across unchanged). One account can work at several cafés with
  * a different role at each; every café call checks the role's permissions at
- * that café. Baristas' PIN at the till is the next piece (2b).
+ * that café.
+ *
+ * At the till (piece 2b): an owner sets the café's computer up once with their
+ * password, which gives it a device token. Baristas then tap their name and type
+ * their PIN on that computer only. A PIN session lasts a shift, belongs to that
+ * café and computer, and can do only the till's own work (TILL_PERMISSIONS).
  */
 
 /** Staff sessions last this long, then the password is asked again. */
@@ -45,6 +58,14 @@ const SESSION_MS = 14 * 24 * 3_600_000;
 /** Failed sign-ins per email in the window before sign-in pauses. */
 export const SIGN_IN_LIMIT = 10;
 const SIGN_IN_WINDOW_MS = 15 * 60_000;
+/** A PIN sign-in lasts a shift. */
+const PIN_SESSION_MS = 12 * 3_600_000;
+/** Every this many wrong PINs in a row, the PIN pauses for PIN_LOCK_MS. */
+export const PIN_TRIES = 5;
+const PIN_LOCK_MS = 15 * 60_000;
+/** After this many wrong PINs in a row the PIN is cleared; its owner sets a new one with their password. */
+export const PIN_MAX_FAILURES = 20;
+const DEVICE_SEEN_EVERY_MS = 5 * 60_000;
 
 /** Who is calling, at which café, and what they may do there. */
 export interface StaffContext {
@@ -54,6 +75,10 @@ export interface StaffContext {
   role: StaffRole;
   permissions: Set<Permission>;
   tokenHash: string;
+  /** "pin" at the till: only TILL_PERMISSIONS, at this café, on that device. */
+  method: StaffSignInMethod;
+  /** What the role may do after a password sign-in. */
+  rolePermissions: Set<Permission>;
 }
 
 export interface StaffServiceOptions {
@@ -94,23 +119,25 @@ export class StaffService {
       await this.store.recordFailedSignIn(key, now);
       throw new AppError("SIGN_IN_FAILED", "Wrong email or password", 401);
     }
-    const token = randomBytes(32).toString("base64url");
+    const token = newToken();
     await this.store.createSession(account.id, sha256(token), new Date(now.getTime() + SESSION_MS));
-    return { token, ...(await this.meFor(account)) };
+    return { token, ...(await this.meFor(account, null)) };
   }
 
   async signOut(token: string | null): Promise<void> {
     if (token) await this.store.revokeSession(sha256(token), this.now());
   }
 
-  /** The signed-in account, or 401. */
-  async account(token: string | null): Promise<{ account: StaffAccount; tokenHash: string }> {
+  /** The signed-in account and its session, or 401. A PIN session dies with its device. */
+  async account(token: string | null): Promise<{ account: StaffAccount; session: StaffSessionRecord; tokenHash: string }> {
     if (token) {
       const tokenHash = sha256(token);
       const session = await this.store.sessionFor(tokenHash);
       if (session && !session.revokedAt && session.expiresAt > this.now()) {
-        const account = await this.store.getAccount(session.accountId);
-        if (account && !account.disabledAt) return { account, tokenHash };
+        const device = session.deviceId ? await this.store.getDevice(session.deviceId) : null;
+        const deviceOk = session.method === "password" || (device && !device.revokedAt);
+        const account = deviceOk ? await this.store.getAccount(session.accountId) : null;
+        if (account && !account.disabledAt) return { account, session, tokenHash };
       }
     }
     throw new AppError("STAFF_UNAUTHENTICATED", "Sign in with your staff account", 401);
@@ -121,24 +148,35 @@ export class StaffService {
    * 403 when not on this café's team or the role lacks the permission.
    */
   async at(token: string | null, cafeSlug: string, permission?: Permission): Promise<StaffContext> {
-    const { account, tokenHash } = await this.account(token);
+    const { account, session, tokenHash } = await this.account(token);
     const cafe = await this.identity.getCafeBySlug(cafeSlug);
     const member = cafe ? await this.store.memberAt(account.id, cafe.id) : null;
-    if (!cafe || !member || member.removedAt) throw new AppError("NOT_STAFF", "Not on this café's team", 403);
-    const permissions = permissionsFor(member.role, await this.store.listOverrides(cafe.id));
-    if (permission && !permissions.has(permission)) {
-      throw new AppError("FORBIDDEN", `Your role cannot do this (${permission})`, 403);
-    }
-    return { account, member, cafe, role: member.role, permissions, tokenHash };
+    const inScope = !!cafe && (session.method === "password" || session.cafeId === cafe.id);
+    if (!cafe || !member || member.removedAt || !inScope) throw new AppError("NOT_STAFF", "Not on this café's team", 403);
+    const rolePermissions = permissionsFor(member.role, await this.store.listOverrides(cafe.id));
+    const ctx: StaffContext = {
+      account,
+      member,
+      cafe,
+      role: member.role,
+      permissions: this.scoped(rolePermissions, session.method),
+      rolePermissions,
+      tokenHash,
+      method: session.method,
+    };
+    if (permission) this.require(ctx, permission);
+    return ctx;
   }
 
   async me(token: string | null): Promise<StaffMeDTO> {
-    return this.meFor((await this.account(token)).account);
+    const { account, session } = await this.account(token);
+    return this.meFor(account, session);
   }
 
   /** Changes the caller's own password and signs them out everywhere else. */
   async changePassword(token: string | null, currentPassword: string, newPassword: string): Promise<{ ok: true }> {
-    const { account, tokenHash } = await this.account(token);
+    const { account, session, tokenHash } = await this.account(token);
+    if (session.method !== "password") throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
     if (!account.passwordHash || !(await bcrypt.compare(currentPassword, account.passwordHash))) {
       throw new AppError("WRONG_PASSWORD", "Current password is wrong", 403);
     }
@@ -170,6 +208,7 @@ export class StaffService {
         sinceIso: m.createdAt.toISOString(),
         isYou: account.id === ctx.account.id,
         canSignIn: !!account.passwordHash && !account.disabledAt,
+        hasPin: !!m.pinHash,
       });
     }
     return { members };
@@ -205,13 +244,20 @@ export class StaffService {
     await this.store.saveMember(
       existing
         ? { ...existing, role: input.role, removedAt: null }
-        : { id: `sm_${randomUUID()}`, cafeId: ctx.cafe.id, accountId: account.id, role: input.role, createdAt: now, removedAt: null },
+        : { id: `sm_${randomUUID()}`, cafeId: ctx.cafe.id, accountId: account.id, role: input.role, createdAt: now, removedAt: null, ...NO_PIN },
     );
     return this.team(ctx);
   }
 
-  /** Changes someone's role or takes them off the team. The café always keeps an owner. */
-  async updateMember(ctx: StaffContext, memberId: string, input: { role?: StaffRole; removed?: true }): Promise<TeamDTO> {
+  /**
+   * Changes someone's role, clears their till PIN (they set a new one with their
+   * password) or takes them off the team. The café always keeps an owner.
+   */
+  async updateMember(
+    ctx: StaffContext,
+    memberId: string,
+    input: { role?: StaffRole; removed?: true; clearPin?: true },
+  ): Promise<TeamDTO> {
     this.require(ctx, "team.manage");
     const member = await this.teamMember(ctx, memberId);
     if (input.role) this.requireOwnerFor(ctx, input.role);
@@ -223,6 +269,7 @@ export class StaffService {
     }
     await this.store.saveMember({
       ...member,
+      ...(input.clearPin || input.removed ? NO_PIN : {}),
       role: input.role ?? member.role,
       removedAt: input.removed ? this.now() : member.removedAt,
     });
@@ -249,6 +296,117 @@ export class StaffService {
     await this.store.saveAccount({ ...account, passwordHash: await this.hash(password) });
     await this.store.revokeSessionsOf(account.id, this.now());
     return { ok: true };
+  }
+
+  // ─────────────────────────────────────────────── the till: devices and PINs
+
+  /** Sets the caller's own till PIN at this café. Needs a password sign-in. */
+  async setPin(ctx: StaffContext, pin: string): Promise<{ ok: true }> {
+    if (ctx.method !== "password") throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
+    const problem = pinProblem(pin);
+    if (problem) throw new AppError(problem, problem === "PIN_FORMAT" ? "A PIN is 4 to 6 digits" : "Choose a less obvious PIN", 400);
+    await this.store.saveMember({ ...ctx.member, pinHash: await this.hash(pin), pinFailures: 0, pinLockedUntil: null });
+    return { ok: true };
+  }
+
+  /** Makes this computer a till for the café. Returns the device token, shown once. */
+  async registerDevice(ctx: StaffContext, name: string): Promise<{ device: TillDeviceDTO; token: string }> {
+    this.require(ctx, "devices.manage");
+    if (ctx.method !== "password") throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
+    const token = newToken();
+    const device: TillDevice = {
+      id: `dev_${randomUUID()}`,
+      cafeId: ctx.cafe.id,
+      name: name.trim(),
+      createdAt: this.now(),
+      createdByMemberId: ctx.member.id,
+      lastSeenAt: null,
+      revokedAt: null,
+    };
+    await this.store.createDevice(device, sha256(token));
+    return { device: toDeviceDTO(device), token };
+  }
+
+  async devices(ctx: StaffContext): Promise<{ devices: TillDeviceDTO[] }> {
+    this.require(ctx, "devices.manage");
+    return { devices: (await this.store.listDevices(ctx.cafe.id)).map(toDeviceDTO) };
+  }
+
+  /** A lost or replaced computer: its token stops working and everyone signed in on it is signed out. */
+  async revokeDevice(ctx: StaffContext, deviceId: string): Promise<{ devices: TillDeviceDTO[] }> {
+    this.require(ctx, "devices.manage");
+    const device = await this.store.getDevice(deviceId);
+    if (!device || device.cafeId !== ctx.cafe.id || device.revokedAt) throw new AppError("NOT_FOUND", "No such device", 404);
+    const now = this.now();
+    await this.store.saveDevice({ ...device, revokedAt: now });
+    await this.store.revokeSessionsOnDevice(device.id, now);
+    return this.devices(ctx);
+  }
+
+  /** The till's sign-in screen: who can sign in here with a PIN. */
+  async till(deviceToken: string | null): Promise<TillDTO> {
+    const device = await this.device(deviceToken);
+    const cafe = (await this.identity.getCafe(device.cafeId))!;
+    const overrides = await this.store.listOverrides(cafe.id);
+    const now = this.now();
+    const staff: TillDTO["staff"] = [];
+    for (const m of await this.store.listMembers(cafe.id)) {
+      if (!permissionsFor(m.role, overrides).has("till.use")) continue;
+      const account = await this.store.getAccount(m.accountId);
+      if (!account || account.disabledAt) continue;
+      staff.push({
+        memberId: m.id,
+        name: account.name,
+        role: m.role,
+        hasPin: !!m.pinHash,
+        lockedUntilIso: m.pinLockedUntil && m.pinLockedUntil > now ? m.pinLockedUntil.toISOString() : null,
+      });
+    }
+    return { cafe: { slug: cafe.slug, name: cafe.name }, device: toDeviceDTO(device), staff };
+  }
+
+  /**
+   * PIN sign-in on a till device. Every 5 wrong PINs in a row pause that PIN for
+   * 15 minutes; 20 in a row clear it. Four digits then give at most 20 guesses.
+   */
+  async pinSignIn(deviceToken: string | null, memberId: string, pin: string): Promise<StaffSessionDTO> {
+    const device = await this.device(deviceToken);
+    const now = this.now();
+    const member = await this.store.getMember(memberId);
+    const account = member ? await this.store.getAccount(member.accountId) : null;
+    const allowed =
+      member && account && !account.disabledAt && member.cafeId === device.cafeId && !member.removedAt &&
+      permissionsFor(member.role, await this.store.listOverrides(device.cafeId)).has("till.use");
+    if (!member || !account || !allowed) throw new AppError("NOT_STAFF", "Not on this café's team", 403);
+    if (!member.pinHash) throw new AppError("NO_PIN", "Set a PIN first", 409);
+    if (member.pinLockedUntil && member.pinLockedUntil > now) {
+      throw new AppError("PIN_LOCKED", `Try again after ${member.pinLockedUntil.toISOString()}`, 429);
+    }
+    if (!(await bcrypt.compare(pin, member.pinHash))) {
+      const failures = member.pinFailures + 1;
+      const cleared = failures >= PIN_MAX_FAILURES;
+      await this.store.saveMember({
+        ...member,
+        ...(cleared ? NO_PIN : {}),
+        pinFailures: cleared ? 0 : failures,
+        pinLockedUntil: !cleared && failures % PIN_TRIES === 0 ? new Date(now.getTime() + PIN_LOCK_MS) : member.pinLockedUntil,
+      });
+      throw cleared
+        ? new AppError("PIN_CLEARED", "Too many wrong PINs; set a new one with your password", 403)
+        : new AppError("PIN_WRONG", "Wrong PIN", 401);
+    }
+    await this.store.saveMember({ ...member, pinFailures: 0, pinLockedUntil: null });
+    const token = newToken();
+    const session: StaffSessionRecord = {
+      accountId: account.id,
+      expiresAt: new Date(now.getTime() + PIN_SESSION_MS),
+      revokedAt: null,
+      method: "pin",
+      cafeId: device.cafeId,
+      deviceId: device.id,
+    };
+    await this.store.createSession(account.id, sha256(token), session.expiresAt, { cafeId: device.cafeId, deviceId: device.id });
+    return { token, ...(await this.meFor(account, session)) };
   }
 
   // ─────────────────────────────────────────────── roles
@@ -299,19 +457,24 @@ export class StaffService {
   }
 
   /** Puts an account on a café's team. Seeding, tests and café sign-up (piece 5) only: no permission check. */
-  async join(accountId: string, cafeId: string, role: StaffRole): Promise<StaffMember> {
+  async join(accountId: string, cafeId: string, role: StaffRole, pin?: string): Promise<StaffMember> {
     const existing = await this.store.memberAt(accountId, cafeId);
     const member: StaffMember = existing
       ? { ...existing, role, removedAt: null }
-      : { id: `sm_${randomUUID()}`, cafeId, accountId, role, createdAt: this.now(), removedAt: null };
+      : { id: `sm_${randomUUID()}`, cafeId, accountId, role, createdAt: this.now(), removedAt: null, ...NO_PIN };
+    if (pin) member.pinHash = await this.hash(pin);
     await this.store.saveMember(member);
     return member;
   }
 
   // ─────────────────────────────────────────────── helpers
 
+  /** FORBIDDEN when the role can't; NEEDS_PASSWORD when it can, but not after a PIN sign-in. */
   private require(ctx: StaffContext, permission: Permission) {
-    if (!ctx.permissions.has(permission)) throw new AppError("FORBIDDEN", `Your role cannot do this (${permission})`, 403);
+    if (ctx.permissions.has(permission)) return;
+    throw ctx.rolePermissions.has(permission)
+      ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
+      : new AppError("FORBIDDEN", `Your role cannot do this (${permission})`, 403);
   }
 
   /** Only an owner makes, changes or removes an owner. */
@@ -327,19 +490,53 @@ export class StaffService {
     return member;
   }
 
-  private async meFor(account: StaffAccount): Promise<StaffMeDTO> {
-    return { account: { id: account.id, name: account.name, email: account.email }, cafes: await this.cafesOf(account) };
+  /** A PIN session sees only its café, with only the till's permissions. */
+  private async meFor(account: StaffAccount, session: StaffSessionRecord | null): Promise<StaffMeDTO> {
+    const method = session?.method ?? "password";
+    const cafes = (await this.cafesOf(account, method)).filter(
+      (c) => method === "password" || c.cafeId === session?.cafeId,
+    );
+    return {
+      account: { id: account.id, name: account.name, email: account.email },
+      signedInWith: method,
+      cafes: cafes.map(({ cafeId: _, ...c }) => c),
+    };
   }
 
-  private async cafesOf(account: StaffAccount): Promise<StaffCafeAccessDTO[]> {
-    const out: StaffCafeAccessDTO[] = [];
+  private async cafesOf(
+    account: StaffAccount,
+    method: StaffSignInMethod = "password",
+  ): Promise<(StaffCafeAccessDTO & { cafeId: string })[]> {
+    const out: (StaffCafeAccessDTO & { cafeId: string })[] = [];
     for (const m of await this.store.membershipsOf(account.id)) {
       const cafe = await this.identity.getCafe(m.cafeId);
       if (!cafe) continue;
-      const permissions = permissionsFor(m.role, await this.store.listOverrides(cafe.id));
-      out.push({ slug: cafe.slug, name: cafe.name, role: m.role, permissions: ALL_PERMISSIONS.filter((p) => permissions.has(p)) });
+      const permissions = this.scoped(permissionsFor(m.role, await this.store.listOverrides(cafe.id)), method);
+      out.push({
+        cafeId: cafe.id,
+        slug: cafe.slug,
+        name: cafe.name,
+        role: m.role,
+        permissions: ALL_PERMISSIONS.filter((p) => permissions.has(p)),
+      });
     }
     return out;
+  }
+
+  private scoped(permissions: Set<Permission>, method: StaffSignInMethod): Set<Permission> {
+    return method === "pin" ? new Set(TILL_PERMISSIONS.filter((p) => permissions.has(p))) : permissions;
+  }
+
+  /** The till device behind a device token, or 401. Notes when it was last used. */
+  private async device(deviceToken: string | null): Promise<TillDevice> {
+    const device = deviceToken ? await this.store.deviceForToken(sha256(deviceToken)) : null;
+    if (!device || device.revokedAt) throw new AppError("DEVICE_UNKNOWN", "This computer is not set up as a till", 401);
+    const now = this.now();
+    if (!device.lastSeenAt || now.getTime() - device.lastSeenAt.getTime() > DEVICE_SEEN_EVERY_MS) {
+      device.lastSeenAt = now;
+      await this.store.saveDevice(device);
+    }
+    return device;
   }
 
   private hash(password: string): Promise<string> {
@@ -350,6 +547,14 @@ export class StaffService {
     this.dummyHash ??= this.hash(randomBytes(16).toString("hex"));
     return this.dummyHash;
   }
+}
+
+function newToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+function toDeviceDTO(d: TillDevice): TillDeviceDTO {
+  return { id: d.id, name: d.name, createdIso: d.createdAt.toISOString(), lastSeenIso: d.lastSeenAt?.toISOString() ?? null };
 }
 
 function sha256(token: string): string {

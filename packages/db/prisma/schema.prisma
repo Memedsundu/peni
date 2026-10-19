@@ -87,12 +87,14 @@ model Cafe {
   hue                 String?
   createdAt           DateTime @default(now())
 
-  settings    CafeSettings?
-  staff       StaffMember[]
-  roleChanges RolePermission[]
-  menu        MenuItem[]
-  memberships Membership[]
-  posts       CafePost[]
+  settings      CafeSettings?
+  staff         StaffMember[]
+  roleChanges   RolePermission[]
+  tillDevices   TillDevice[]
+  staffSessions StaffSession[]
+  menu          MenuItem[]
+  memberships   Membership[]
+  posts         CafePost[]
 }
 
 /// Mirrors CafePeniSettings in @peni/core.
@@ -144,34 +146,71 @@ model StaffAccount {
 
 /// One account's role at one café. Permissions per role are in @peni/core (staff.ts) and RolePermission.
 model StaffMember {
-  id        String    @id @default(cuid())
-  cafeId    String
-  accountId String
-  role      StaffRole
-  createdAt DateTime  @default(now())
+  id             String    @id @default(cuid())
+  cafeId         String
+  accountId      String
+  role           StaffRole
+  createdAt      DateTime  @default(now())
   /// Taken off the team; kept so their past posts and records still name them.
-  removedAt DateTime?
+  removedAt      DateTime?
+  /// bcrypt of the till PIN, set by the staff member themselves.
+  pinHash        String?
+  /// Wrong PINs in a row; a right one resets it.
+  pinFailures    Int       @default(0)
+  pinLockedUntil DateTime?
 
   cafe    Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   account StaffAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   posts   CafePost[]
+  devices TillDevice[]
 
   @@unique([cafeId, accountId])
   @@index([accountId])
 }
 
 model StaffSession {
-  id        String    @id @default(cuid())
+  id        String            @id @default(cuid())
   accountId String
   /// SHA-256 of the token. The token itself is never stored.
-  tokenHash String    @unique
-  createdAt DateTime  @default(now())
+  tokenHash String            @unique
+  createdAt DateTime          @default(now())
   expiresAt DateTime
   revokedAt DateTime?
+  method    StaffSignInMethod @default(password)
+  /// PIN sessions belong to one café and one till device.
+  cafeId    String?
+  deviceId  String?
 
   account StaffAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  cafe    Cafe?        @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  device  TillDevice?  @relation(fields: [deviceId], references: [id], onDelete: Cascade)
 
   @@index([accountId])
+  @@index([deviceId])
+}
+
+enum StaffSignInMethod {
+  password
+  pin
+}
+
+/// A computer at the café that runs the till. Set up once with a password; baristas then sign in on it with their PIN.
+model TillDevice {
+  id                String    @id @default(cuid())
+  cafeId            String
+  name              String
+  /// SHA-256 of the device token. The token itself is never stored.
+  tokenHash         String    @unique
+  createdAt         DateTime  @default(now())
+  createdByMemberId String
+  lastSeenAt        DateTime?
+  revokedAt         DateTime?
+
+  cafe      Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  createdBy StaffMember    @relation(fields: [createdByMemberId], references: [id], onDelete: Cascade)
+  sessions  StaffSession[]
+
+  @@index([cafeId])
 }
 
 /// Failed staff sign-ins, for the per-email limit.

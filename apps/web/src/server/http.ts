@@ -8,6 +8,9 @@ export const SESSION_COOKIE = "peni_session";
 /** Staff sessions, separate from the customer one: a barista can be both. */
 export const STAFF_COOKIE = "peni_staff";
 export const STAFF_HEADER = "x-peni-staff-token";
+/** A computer set up as a till keeps its device token here. */
+export const TILL_COOKIE = "peni_till";
+export const TILL_HEADER = "x-peni-till-token";
 
 const STATUS: Record<string, number> = {
   NOT_FOUND: 404,
@@ -48,6 +51,10 @@ export function tokenFrom(req: NextRequest): string | null {
 /** The Expo app sends the staff token in a header; the web panel relies on the httpOnly cookie. */
 export function staffTokenFrom(req: NextRequest): string | null {
   return req.headers.get(STAFF_HEADER) ?? req.cookies.get(STAFF_COOKIE)?.value ?? null;
+}
+
+export function tillTokenFrom(req: NextRequest): string | null {
+  return req.headers.get(TILL_HEADER) ?? req.cookies.get(TILL_COOKIE)?.value ?? null;
 }
 
 type Handler<T> = (ctx: {

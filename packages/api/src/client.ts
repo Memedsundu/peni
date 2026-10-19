@@ -11,6 +11,8 @@ import type {
   StaffMeDTO,
   StaffSessionDTO,
   TeamDTO,
+  TillDTO,
+  TillDeviceDTO,
   ApiErrorBody,
 } from "./dto";
 import { errorMessageTr } from "./messages";
@@ -18,6 +20,7 @@ import type {
   AddStaffInput,
   ChangePasswordInput,
   DonateAskidaInput,
+  PinSignInInput,
   SaveRolesInput,
   StaffSignInInput,
   UpdateStaffInput,
@@ -43,6 +46,8 @@ export interface PeniClientOptions {
   getToken?: () => string | null | Promise<string | null>;
   /** The staff session token for café panel calls (the Expo app's café mode). The web panel uses the cookie. */
   getStaffToken?: () => string | null | Promise<string | null>;
+  /** On a computer set up as a till outside a browser: its device token. Browsers use the cookie. */
+  getTillToken?: () => string | null | Promise<string | null>;
   fetch?: typeof fetch;
 }
 
@@ -63,6 +68,8 @@ export function createPeniClient(options: PeniClientOptions) {
     if (staff) {
       const staffToken = await options.getStaffToken?.();
       if (staffToken) headers["x-peni-staff-token"] = staffToken;
+      const tillToken = await options.getTillToken?.();
+      if (tillToken) headers["x-peni-till-token"] = tillToken;
     }
     let res: Response;
     try {
@@ -129,6 +136,13 @@ export function createPeniClient(options: PeniClientOptions) {
       donate: (input: DonateAskidaInput) =>
         call<{ balancePeni: number; matchedPeni: number }>("POST", "/askida/donate", input),
     },
+    till: {
+      /** On a computer set up as a till: the names to tap before typing a PIN. */
+      get: () => call<TillDTO>("GET", "/till", undefined, true),
+      pinSignIn: (input: PinSignInInput) => call<StaffSessionDTO>("POST", "/till/pin", input, true),
+      /** "Kilitle": ends the PIN session, back to the names. */
+      lock: () => call<{ ok: true }>("POST", "/staff-session/sign-out", {}, true),
+    },
     staff: {
       /** Email and password. Keep `token` for later calls; the web panel also gets a cookie. */
       signIn: (input: StaffSignInInput) => call<StaffSessionDTO>("POST", "/staff-session", input, true),
@@ -142,6 +156,14 @@ export function createPeniClient(options: PeniClientOptions) {
         call<TeamDTO>("POST", `/staff/${slug(cafeSlug)}/team/${slug(memberId)}`, input, true),
       resetPassword: (cafeSlug: string, memberId: string, password: string) =>
         call<{ ok: true }>("POST", `/staff/${slug(cafeSlug)}/team/${slug(memberId)}/password`, { password }, true),
+      /** The caller's own till PIN at this café. Needs a password sign-in. */
+      setPin: (cafeSlug: string, pin: string) => call<{ ok: true }>("POST", `/staff/${slug(cafeSlug)}/pin`, { pin }, true),
+      devices: (cafeSlug: string) => call<{ devices: TillDeviceDTO[] }>("GET", `/staff/${slug(cafeSlug)}/devices`, undefined, true),
+      /** Makes this computer a till. Browsers keep the token in a cookie; keep `token` otherwise. */
+      registerDevice: (cafeSlug: string, name: string) =>
+        call<{ device: TillDeviceDTO; token: string }>("POST", `/staff/${slug(cafeSlug)}/devices`, { name }, true),
+      revokeDevice: (cafeSlug: string, deviceId: string) =>
+        call<{ devices: TillDeviceDTO[] }>("POST", `/staff/${slug(cafeSlug)}/devices/${slug(deviceId)}/revoke`, {}, true),
       roles: (cafeSlug: string) => call<RolesDTO>("GET", `/staff/${slug(cafeSlug)}/roles`, undefined, true),
       saveRoles: (cafeSlug: string, input: SaveRolesInput) => call<RolesDTO>("POST", `/staff/${slug(cafeSlug)}/roles`, input, true),
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),

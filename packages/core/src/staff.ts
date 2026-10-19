@@ -63,6 +63,8 @@ export interface PermissionDefinition {
   roles: readonly AdjustableRole[];
   /** Cannot be changed per café: money, reports, the assistant and the team stay with these roles. */
   locked?: true;
+  /** Also works after a PIN sign-in at the till. Everything else needs the password. */
+  atTill?: true;
 }
 
 const ALL = ["manager", "chef", "barista"] as const;
@@ -82,18 +84,21 @@ export const PERMISSIONS = {
     label: { tr: "Satış yapar", en: "Takes orders" },
     hint: { tr: "Satış ekranında sipariş alır, ödemeyi kaydeder.", en: "Takes orders and records payments on the till." },
     roles: ALL,
+    atTill: true,
   },
   "till.history": {
     section: "till",
     label: { tr: "Geçmiş siparişleri görür", en: "Sees past orders" },
     hint: { tr: "Bugünün ve önceki günlerin siparişleri.", en: "Today's and earlier orders." },
     roles: ALL,
+    atTill: true,
   },
   "till.correct": {
     section: "till",
     label: { tr: "İptal ve iade yapar", en: "Voids and refunds" },
     hint: { tr: "Bir siparişi iptal eder ya da parasını geri verir.", en: "Voids an order or gives the money back." },
     roles: MANAGER,
+    atTill: true,
   },
   "till.delete": {
     section: "till",
@@ -124,6 +129,7 @@ export const PERMISSIONS = {
     label: { tr: "Fatura ekler", en: "Adds bills" },
     hint: { tr: "Bir fiş ya da faturanın fotoğrafını çekip ekler.", en: "Photographs a receipt or bill and adds it." },
     roles: ALL,
+    atTill: true,
   },
   "bills.manage": {
     section: "bills",
@@ -161,6 +167,7 @@ export const PERMISSIONS = {
     label: { tr: "Kasayı açar ve kapatır", en: "Opens and closes the drawer" },
     hint: { tr: "Gün başı ve gün sonu nakit sayımı.", en: "The cash count at opening and closing." },
     roles: ALL,
+    atTill: true,
   },
   "cash.manage": {
     section: "cash",
@@ -193,6 +200,7 @@ export const PERMISSIONS = {
     label: { tr: "Vardiyaları görür", en: "Sees shifts" },
     hint: { tr: "Kim ne zaman çalışıyor.", en: "Who works when." },
     roles: ALL,
+    atTill: true,
   },
   "shifts.edit": {
     section: "shifts",
@@ -223,6 +231,7 @@ export const PERMISSIONS = {
     label: { tr: "Görevleri görür ve yapar", en: "Sees and does tasks" },
     hint: { tr: "Açılış, kapanış ve temizlik listeleri.", en: "Opening, closing and cleaning checklists." },
     roles: ALL,
+    atTill: true,
   },
   "tasks.edit": {
     section: "tasks",
@@ -241,6 +250,7 @@ export const PERMISSIONS = {
     label: { tr: "Askıya nakit ekler", en: "Adds cash to the askı" },
     hint: { tr: "Bir misafir askı için nakit bıraktığında kaydeder.", en: "Records it when a guest leaves cash for the askı." },
     roles: ALL,
+    atTill: true,
   },
   "posts.write": {
     section: "posts",
@@ -312,6 +322,9 @@ export function isPermission(value: string): value is Permission {
 function definition(permission: Permission): PermissionDefinition {
   return PERMISSIONS[permission];
 }
+
+/** What a PIN sign-in at the till can do, at most: the till's own work. */
+export const TILL_PERMISSIONS = ALL_PERMISSIONS.filter((p) => definition(p).atTill === true);
 
 export function isLocked(permission: Permission): boolean {
   return definition(permission).locked === true;
@@ -481,12 +494,47 @@ export interface StaffMember {
   createdAt: Date;
   /** Taken off the team; the account keeps its other cafés. */
   removedAt: Date | null;
+  /** bcrypt of the till PIN, set by the staff member themselves. */
+  pinHash: string | null;
+  /** Wrong PINs in a row; a right one resets it. */
+  pinFailures: number;
+  pinLockedUntil: Date | null;
 }
+
+/** A new team member's PIN fields: no PIN yet. */
+export const NO_PIN = { pinHash: null, pinFailures: 0, pinLockedUntil: null } as const;
+
+export type StaffSignInMethod = "password" | "pin";
 
 export interface StaffSessionRecord {
   accountId: string;
   expiresAt: Date;
   revokedAt: Date | null;
+  method: StaffSignInMethod;
+  /** PIN sessions belong to one café and one till device. Null for password sessions. */
+  cafeId: string | null;
+  deviceId: string | null;
+}
+
+/** A computer at the café that runs the till. Baristas sign in on it with their PIN. */
+export interface TillDevice {
+  id: string;
+  cafeId: string;
+  name: string;
+  createdAt: Date;
+  /** The staff member who set it up. */
+  createdByMemberId: string;
+  lastSeenAt: Date | null;
+  revokedAt: Date | null;
+}
+
+/** Why a PIN is not accepted, or null. 4 to 6 digits; no 1111, 1234 or 4321. */
+export function pinProblem(pin: string): "PIN_FORMAT" | "PIN_TOO_EASY" | null {
+  if (!/^\d{4,6}$/.test(pin)) return "PIN_FORMAT";
+  const d = [...pin].map(Number);
+  const steps = new Set(d.slice(1).map((x, i) => x - d[i]!));
+  if (steps.size === 1 && [0, 1, -1].includes([...steps][0]!)) return "PIN_TOO_EASY";
+  return null;
 }
 
 export interface StaffStore {
@@ -504,12 +552,27 @@ export interface StaffStore {
   membershipsOf(accountId: string): Promise<StaffMember[]>;
   saveMember(member: StaffMember): Promise<void>;
 
-  /** Stores only the hash of a session token. */
-  createSession(accountId: string, tokenHash: string, expiresAt: Date): Promise<void>;
+  /** Stores only the hash of a session token. A PIN session names its café and device. */
+  createSession(
+    accountId: string,
+    tokenHash: string,
+    expiresAt: Date,
+    pin?: { cafeId: string; deviceId: string },
+  ): Promise<void>;
   sessionFor(tokenHash: string): Promise<StaffSessionRecord | null>;
   revokeSession(tokenHash: string, at: Date): Promise<void>;
   /** Signs the account out everywhere except, optionally, one session. */
   revokeSessionsOf(accountId: string, at: Date, exceptTokenHash?: string): Promise<void>;
+  /** Ends every PIN session on a device. */
+  revokeSessionsOnDevice(deviceId: string, at: Date): Promise<void>;
+
+  /** Stores only the hash of the device token. */
+  createDevice(device: TillDevice, tokenHash: string): Promise<void>;
+  getDevice(id: string): Promise<TillDevice | null>;
+  deviceForToken(tokenHash: string): Promise<TillDevice | null>;
+  /** A café's devices, oldest first, without revoked ones. */
+  listDevices(cafeId: string): Promise<TillDevice[]>;
+  saveDevice(device: TillDevice): Promise<void>;
 
   /** Failed sign-ins, kept for the per-email limit. */
   recordFailedSignIn(email: string, at: Date): Promise<void>;
@@ -529,6 +592,7 @@ export class InMemoryStaffStore implements StaffStore {
   private readonly sessions = new Map<string, StaffSessionRecord>();
   private readonly failures = new Map<string, Date[]>();
   private readonly overrides = new Map<string, RoleOverride[]>();
+  private readonly devices = new Map<string, { device: TillDevice; tokenHash: string }>();
 
   async getAccount(id: string) {
     const a = this.accounts.get(id);
@@ -571,8 +635,15 @@ export class InMemoryStaffStore implements StaffStore {
     this.members.set(member.id, { ...member });
   }
 
-  async createSession(accountId: string, tokenHash: string, expiresAt: Date) {
-    this.sessions.set(tokenHash, { accountId, expiresAt, revokedAt: null });
+  async createSession(accountId: string, tokenHash: string, expiresAt: Date, pin?: { cafeId: string; deviceId: string }) {
+    this.sessions.set(tokenHash, {
+      accountId,
+      expiresAt,
+      revokedAt: null,
+      method: pin ? "pin" : "password",
+      cafeId: pin?.cafeId ?? null,
+      deviceId: pin?.deviceId ?? null,
+    });
   }
 
   async sessionFor(tokenHash: string) {
@@ -589,6 +660,37 @@ export class InMemoryStaffStore implements StaffStore {
     for (const [hash, s] of this.sessions) {
       if (s.accountId === accountId && !s.revokedAt && hash !== exceptTokenHash) s.revokedAt = at;
     }
+  }
+
+  async revokeSessionsOnDevice(deviceId: string, at: Date) {
+    for (const s of this.sessions.values()) if (s.deviceId === deviceId && !s.revokedAt) s.revokedAt = at;
+  }
+
+  async createDevice(device: TillDevice, tokenHash: string) {
+    this.devices.set(device.id, { device: { ...device }, tokenHash });
+  }
+
+  async getDevice(id: string) {
+    const d = this.devices.get(id);
+    return d ? { ...d.device } : null;
+  }
+
+  async deviceForToken(tokenHash: string) {
+    const d = [...this.devices.values()].find((x) => x.tokenHash === tokenHash);
+    return d ? { ...d.device } : null;
+  }
+
+  async listDevices(cafeId: string) {
+    return [...this.devices.values()]
+      .map((d) => d.device)
+      .filter((d) => d.cafeId === cafeId && !d.revokedAt)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map((d) => ({ ...d }));
+  }
+
+  async saveDevice(device: TillDevice) {
+    const d = this.devices.get(device.id);
+    if (d) d.device = { ...device };
   }
 
   async recordFailedSignIn(email: string, at: Date) {

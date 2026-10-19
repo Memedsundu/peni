@@ -35,6 +35,14 @@ export const errorMessagesTr: Record<string, string> = {
   LAST_OWNER: "Kafenin en az bir sahibi olmalı.",
   OWNER_ONLY: "Bunu yalnız kafenin sahibi yapabilir.",
   PASSWORD_REQUIRED: "Yeni kişi için bir şifre belirle.",
+  NEEDS_PASSWORD: "Bunun için şifrenle giriş yap.",
+  PIN_FORMAT: "PIN 4-6 rakam olmalı.",
+  PIN_TOO_EASY: "Daha zor tahmin edilecek bir PIN seç.",
+  PIN_WRONG: "PIN yanlış.",
+  PIN_LOCKED: "Çok fazla yanlış PIN. Biraz sonra tekrar dene.",
+  PIN_CLEARED: "PIN'in silindi. Şifrenle giriş yapıp yeni bir PIN belirle.",
+  NO_PIN: "Önce şifrenle giriş yapıp bir PIN belirle.",
+  DEVICE_UNKNOWN: "Bu bilgisayar satış ekranı olarak kurulmamış.",
 };
 
 export function errorMessageTr(code: string, fallback?: string): string {

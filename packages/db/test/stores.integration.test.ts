@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { Ledger, PeniService, defaultSettings } from "@peni/core";
+import { Ledger, NO_PIN, PeniService, defaultSettings } from "@peni/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPrismaClient, createPrismaStores, type PrismaClient } from "../src";
 
@@ -88,18 +88,30 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.staff.getAccountByEmail(email.toLowerCase()))!.id).toBe(accountId);
     expect((await stores.staff.accountForCustomer(mehmet))!.email).toBe(email.toLowerCase());
 
-    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "chef", createdAt: at, removedAt: null });
-    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "manager", createdAt: at, removedAt: null });
+    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "chef", createdAt: at, removedAt: null, ...NO_PIN });
+    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "manager", createdAt: at, removedAt: null, ...NO_PIN, pinHash: "p", pinFailures: 2 });
+    expect(await stores.staff.memberAt(accountId, cafeId)).toMatchObject({ pinHash: "p", pinFailures: 2, pinLockedUntil: null });
     expect((await stores.staff.memberAt(accountId, cafeId))!.role).toBe("manager");
     expect((await stores.staff.listMembers(cafeId)).map((m) => m.id)).toEqual([`sm_${run}`]);
-    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "manager", createdAt: at, removedAt: at });
+
+    const device = { id: `dev_${run}`, cafeId, name: "Kasa", createdAt: at, createdByMemberId: `sm_${run}`, lastSeenAt: null, revokedAt: null };
+    await stores.staff.createDevice(device, `dh_${run}`);
+    expect(await stores.staff.deviceForToken(`dh_${run}`)).toEqual(device);
+    await stores.staff.createSession(accountId, `pin_${run}`, new Date(at.getTime() + 60_000), { cafeId, deviceId: device.id });
+    expect(await stores.staff.sessionFor(`pin_${run}`)).toMatchObject({ method: "pin", cafeId, deviceId: device.id });
+    await stores.staff.revokeSessionsOnDevice(device.id, at);
+    expect((await stores.staff.sessionFor(`pin_${run}`))!.revokedAt).toEqual(at);
+    await stores.staff.saveDevice({ ...device, revokedAt: at });
+    expect(await stores.staff.listDevices(cafeId)).toEqual([]);
+
+    await stores.staff.saveMember({ id: `sm_${run}`, cafeId, accountId, role: "manager", createdAt: at, removedAt: at, ...NO_PIN });
     expect(await stores.staff.membershipsOf(accountId)).toEqual([]);
 
     await stores.staff.createSession(accountId, `s1_${run}`, new Date(at.getTime() + 60_000));
     await stores.staff.createSession(accountId, `s2_${run}`, new Date(at.getTime() + 60_000));
     await stores.staff.revokeSessionsOf(accountId, at, `s2_${run}`);
     expect((await stores.staff.sessionFor(`s1_${run}`))!.revokedAt).toEqual(at);
-    expect((await stores.staff.sessionFor(`s2_${run}`))!.revokedAt).toBeNull();
+    expect(await stores.staff.sessionFor(`s2_${run}`)).toMatchObject({ revokedAt: null, method: "password", cafeId: null, deviceId: null });
 
     await stores.staff.recordFailedSignIn(email, at);
     expect(await stores.staff.countFailedSignIns(email.toLowerCase(), new Date(at.getTime() - 1))).toBe(1);

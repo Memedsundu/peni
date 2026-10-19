@@ -3,6 +3,9 @@ import {
   ALL_PERMISSIONS,
   FROM_SHELBY,
   InMemoryStaffStore,
+  NO_PIN,
+  TILL_PERMISSIONS,
+  pinProblem,
   PERMISSIONS,
   STAFF_ROLES,
   overridesFrom,
@@ -143,6 +146,21 @@ describe("roles", () => {
   });
 });
 
+describe("the till PIN", () => {
+  it("takes 4 to 6 digits that aren't a run or a repeat", () => {
+    for (const ok of ["2580", "190319", "7741", "13579"]) expect(pinProblem(ok)).toBeNull();
+    for (const easy of ["1111", "1234", "4321", "987654", "000000"]) expect(pinProblem(easy)).toBe("PIN_TOO_EASY");
+    for (const bad of ["123", "1234567", "12a4", " 2580"]) expect(pinProblem(bad)).toBe("PIN_FORMAT");
+  });
+
+  it("opens only the till's own work", () => {
+    expect(TILL_PERMISSIONS).toEqual(["till.use", "till.history", "till.correct", "bills.add", "cash.drawer", "shifts.view", "tasks.view", "peni.till"]);
+    for (const p of ["team.manage", "roles.manage", "reports.view", "cash.manage", "devices.manage", "assistant.use"]) {
+      expect(TILL_PERMISSIONS).not.toContain(p);
+    }
+  });
+});
+
 describe("moving Shelby's roles across", () => {
   it("has a place for every Shelby permission", () => {
     const missing = Object.keys(SHELBY_DEFAULTS).filter((k) => !FROM_SHELBY[k] && !NOT_CARRIED.includes(k));
@@ -179,7 +197,7 @@ describe("InMemoryStaffStore", () => {
     const store = new InMemoryStaffStore();
     await store.saveAccount({ id: "a1", email: " Selin@Moda.TEST ", name: "Selin", passwordHash: null, customerId: null, disabledAt: null });
     expect((await store.getAccountByEmail("selin@moda.test"))?.id).toBe("a1");
-    const base = { cafeId: "moda", accountId: "a1", role: "barista" as const, removedAt: null };
+    const base = { cafeId: "moda", accountId: "a1", role: "barista" as const, removedAt: null, ...NO_PIN };
     await store.saveMember({ ...base, id: "m1", createdAt: new Date(1) });
     await store.saveMember({ ...base, id: "m2", cafeId: "kuzguncuk", createdAt: new Date(2), removedAt: new Date(3) });
     expect((await store.membershipsOf("a1")).map((m) => m.id)).toEqual(["m1"]);

@@ -63,7 +63,21 @@ export const addStaffSchema = z.object({
 export const updateStaffSchema = z.object({
   role: staffRoleSchema.optional(),
   removed: z.literal(true).optional(),
+  /** They set a new PIN themselves, signed in with their password. */
+  clearPin: z.literal(true).optional(),
 });
+
+/** 4 to 6 digits. The server also refuses runs and repeats such as 1234 or 1111. */
+export const pinSchema = z.string().regex(/^\d{4,6}$/, "PIN 4-6 rakam olmalı");
+
+/** `POST /staff/:slug/pin`: the caller's own till PIN at this café. */
+export const setPinSchema = z.object({ pin: pinSchema });
+
+/** `POST /staff/:slug/devices`: makes this computer a till. */
+export const registerDeviceSchema = z.object({ name: z.string().trim().min(1).max(40) });
+
+/** `POST /till/pin`, on a computer set up as a till. */
+export const pinSignInSchema = z.object({ memberId: z.string().min(1).max(100), pin: pinSchema });
 
 /** `POST /staff/:slug/team/:memberId/password`: the owner sets a new password for someone. */
 export const resetStaffPasswordSchema = z.object({ password: newPassword });
@@ -85,3 +99,6 @@ export type AddStaffInput = z.input<typeof addStaffSchema>;
 export type UpdateStaffInput = z.input<typeof updateStaffSchema>;
 export type ResetStaffPasswordInput = z.input<typeof resetStaffPasswordSchema>;
 export type SaveRolesInput = z.input<typeof saveRolesSchema>;
+export type SetPinInput = z.input<typeof setPinSchema>;
+export type RegisterDeviceInput = z.input<typeof registerDeviceSchema>;
+export type PinSignInInput = z.input<typeof pinSignInSchema>;
