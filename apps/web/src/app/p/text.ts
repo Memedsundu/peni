@@ -131,6 +131,39 @@ const TEXT = {
   from: { tr: "Gönderen", en: "From" },
   to: { tr: "Alan", en: "To" },
 
+  // Askıda kahve (piece 13)
+  askidaTitle: { tr: "Askıda kahve", en: "Askıda kahve" },
+  askidaWaiting: { tr: "Askıda {goods} var", en: "{goods} waiting on the askı" },
+  askidaNothing: { tr: "Askı şu an boş", en: "The askı is empty right now" },
+  askidaPeni: { tr: "Askıda {n} peni", en: "{n} peni on the askı" },
+  askidaHow: {
+    tr: "Kasada isteyen herkes askıdan alabilir. Hesap ya da sınır yok; birinin bıraktığını ihtiyacı olan alır.",
+    en: "Anyone can ask for one at the till. No account, no limit: what someone leaves goes to whoever needs it.",
+  },
+  askidaWeek: { tr: "Son 7 günde askıdan {n} ikram", en: "{n} treats from the askı in the last 7 days" },
+  askidaOff: { tr: "Bu kafede askı kapalı.", en: "This café has no askı." },
+  askidaLeave: { tr: "Askıya bırak", en: "Leave some on the askı" },
+  askidaLeaveN: { tr: "Askıya {n} peni bırak", en: "Leave {n} peni on the askı" },
+  askidaShowName: { tr: "Adım duvarda görünsün", en: "Show my name on the wall" },
+  askidaMatch: { tr: "Kafe her bırakılana %{n} ekliyor.", en: "The café adds {n}% to everything left." },
+  askidaLeft: { tr: "Askıya {n} peni bıraktın. Teşekkürler!", en: "You left {n} peni on the askı. Thank you!" },
+  askidaMatched: { tr: "Kafe de {n} peni ekledi.", en: "The café added {n} peni too." },
+  askidaAtTill: {
+    tr: "Kasada nakit ya da kartla da bırakabilirsin: siparişine “Askıya çay” ekletmen yeter.",
+    en: "You can also leave one at the till with cash or card: just ask for “Askıya çay” on your order.",
+  },
+  askidaSignIn: { tr: "Peninle askıya bırakmak için giriş yap.", en: "Sign in to leave peni on the askı." },
+  askidaNoPeni: {
+    tr: "Bu kafede henüz penin yok. Bir alışverişin penisini aldığında buradan askıya bırakabilirsin.",
+    en: "You have no peni at this café yet. Once you take the peni from a purchase, you can leave some here.",
+  },
+  askidaWall: { tr: "Askı duvarı", en: "The askı wall" },
+  wallDonation: { tr: "{name} {n} peni bıraktı", en: "{name} left {n} peni" },
+  wallSomeone: { tr: "Bir üye", en: "A member" },
+  wallTill: { tr: "Kasada {n} peni bırakıldı", en: "{n} peni left at the till" },
+  wallMatch: { tr: "Kafe {n} peni ekledi", en: "The café added {n} peni" },
+  wallEmpty: { tr: "Henüz kimse bırakmadı. İlk sen ol.", en: "Nobody has left any yet. Be the first." },
+
   // Typing the code
   codeTitle: { tr: "Ekrandaki kodu yaz", en: "Type the code on the screen" },
   codeBody: {

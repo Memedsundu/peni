@@ -2,6 +2,7 @@ import type {
   AuthProvidersDTO,
   ClaimDTO,
   PeniCheckDTO,
+  TillAskidaDTO,
   SpendCodeDTO,
   CafeDetailDTO,
   CafeMembersDTO,
@@ -55,6 +56,7 @@ import type {
   TakeClaimInput,
   CheckPeniInput,
   UsePeniInput,
+  GiveAskidaInput,
   TillDonationInput,
   UpdateProfileInput,
 } from "./schemas";
@@ -275,6 +277,14 @@ export function createPeniClient(options: PeniClientOptions) {
         /** "Peni'yi geri ver": the peni on an unpaid order go back to the wallet. */
         returnPeni: (cafeSlug: string, orderId: string) =>
           call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/peni/return`, {}, true),
+        /** The askı as the till sees it: the pool and the askı items it pays for (plan piece 13). */
+        askida: (cafeSlug: string) => call<TillAskidaDTO>("GET", `/staff/${slug(cafeSlug)}/askida`, undefined, true),
+        /** "Askıdan ver": the askı pays for askı items on the order, for anyone who asks (D8). */
+        giveAskida: (cafeSlug: string, orderId: string, input: GiveAskidaInput) =>
+          call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/askida`, input, true),
+        /** "Askıya geri koy": what the askı paid for on an unpaid order goes back to it. */
+        returnAskida: (cafeSlug: string, orderId: string) =>
+          call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/askida/return`, {}, true),
         void: (cafeSlug: string, orderId: string, reason: string) =>
           call<OrderDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/void`, { reason }, true),
         refund: (cafeSlug: string, orderId: string, reason: string) =>

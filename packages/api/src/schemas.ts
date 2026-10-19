@@ -134,6 +134,9 @@ export const checkPeniSchema = z.object({ code: spendCode });
 /** Takes `peni` from that wallet for the order; the same `payKey` again takes them once. */
 export const usePeniSchema = z.object({ code: spendCode, peni: z.number().int().min(1).max(1_000_000), payKey: actionKey });
 
+/** "Askıdan ver": the askı pays for `quantity` of an askı item on the order. */
+export const giveAskidaSchema = z.object({ productId: z.string().min(1).max(100), quantity: z.number().int().min(1).max(20), payKey: actionKey });
+
 /** `POST /me/spend-code` */
 export const spendCodeSchema = z.object({ cafeSlug: z.string().min(1).max(100) });
 
@@ -273,3 +276,4 @@ export type AppleSignInInput = z.input<typeof appleSignInSchema>;
 export type TakeClaimInput = z.input<typeof takeClaimSchema>;
 export type CheckPeniInput = z.input<typeof checkPeniSchema>;
 export type UsePeniInput = z.input<typeof usePeniSchema>;
+export type GiveAskidaInput = z.input<typeof giveAskidaSchema>;

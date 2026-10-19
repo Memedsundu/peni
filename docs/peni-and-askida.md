@@ -73,22 +73,21 @@ The askı is a shared pool owned by no one: a modern *askıda kahve*.
 **Filling it**
 
 - **Members** leave peni (`donateToAskida`). They choose whether their name appears on the askı wall (default: no).
-- **The till**: a guest pays cash for an askı coffee and staff record it in the panel (`recordTillDonation`). The sale itself is ordinary; Peni only records the askı credit.
+- **The till**: a guest adds "Askıya çay" (any askı item, `askida:<productId>` on the order) and pays for it with the rest of their order, by cash or card. Once the order is paid, its value goes on the askı (`recordTillDonation`, keyed by the order); a refund takes it back off, as far as the askı still holds it. Staff can also record askı cash on its own from the panel.
 - **The café** can add a matching share on top of member donations (`askidaMatchBps`, e.g. 50 %), up to a monthly cap (`askidaMatchMonthlyCapPeni`).
 
-**Taking from it**
+**Taking from it** (D8: anyone, no limit, on trust)
 
-- Only items the café put on the askı (`askidaProductIds`), usually tea, filter coffee or a simit.
-- One item per order. The pool pays the item's full price (rounded up to whole peni); the member's own wallet isn't touched.
-- Limits:
-  - `askidaClaimsPerDay` per member (default 1), per local day
-  - an optional minimum membership age (`askidaMinMembershipDays`)
-  - blocked members can't take from it
-- If the order is voided, the item goes back to the askı and doesn't count against the daily limit.
+- At the till, anyone who asks gets an askı item: no account, no app, no daily limit. The barista adds the item to the order and taps "Askıdan ver"; the askı pays for it as an `askida` payment, approved at once, and the rest of the order is paid as usual.
+- Only items the café put on the askı (`askidaProductIds`), usually tea, filter coffee or a simit. The askı pays the item's price on that order, discounts included (rounded up to whole peni), and only while it holds enough (`ASKIDA_EMPTY` otherwise).
+- While askı items are on an order it can't be changed; "Askıya geri koy" puts them back first. Voiding or refunding the order puts them back too.
+- The askı part never earns peni; only money does.
+- `/aski?kafe=<slug>` shows anyone what's waiting on the askı and its wall, and lets members leave peni on it.
+- The core still has member claims with limits (`claimFromAskida`: `askidaClaimsPerDay`, `askidaMinMembershipDays`, blocked members). Nothing uses them since D8; they stay for a café that wants limits later.
 
 **Who sees what**
 
-- The askı wall shows donations (with a name only if the donor chose that), till donations, café matching, and "someone took a tea".
+- The askı wall shows donations (with a name only if the donor chose that), till donations and café matching. Takings are never listed.
 - **Takers are never named**: not on the wall, not in the API, not in reports. Staff see an "askı" tag on the till line, because they need it to ring it up.
 
 ## Refunds

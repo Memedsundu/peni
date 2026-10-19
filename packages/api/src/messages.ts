@@ -36,6 +36,8 @@ export const errorMessagesTr: Record<string, string> = {
   ASKIDA_LIMIT: "Bugünkü ikramını aldın. Yarın yine gel.",
   ASKIDA_TOO_NEW: "Askıdan almak için üyeliğinin biraz daha eski olması gerekiyor.",
   PRODUCT_NOT_ELIGIBLE: "Bu ürün askıdan alınamıyor.",
+  ASKIDA_ON_ORDER: "Siparişte askıdan verilen ürün var. Değiştirmeden önce askıya geri koy.",
+  ASKIDA_NOT_ON_ORDER: "Askıdan vermek için önce ürünü siparişe ekle.",
   EVENT_FULL: "Masa doldu.",
   EMAIL_CODE_LIMITED: "Çok fazla kod istedin. Biraz sonra tekrar dene.",
   EMAIL_NOT_CONFIGURED: "E-postayla giriş şu an kullanılamıyor.",

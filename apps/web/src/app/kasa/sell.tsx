@@ -1,7 +1,16 @@
 "use client";
 
-import { newIdempotencyKey, PeniApiError, type OrderDTO, type PaymentAnswerDTO, type PaymentDTO, type PeniCheckDTO, type TillMenuDTO } from "@peni/api";
-import { formatPercent, formatTL } from "@peni/brand/format";
+import {
+  newIdempotencyKey,
+  PeniApiError,
+  type OrderDTO,
+  type PaymentAnswerDTO,
+  type PaymentDTO,
+  type PeniCheckDTO,
+  type TillAskidaDTO,
+  type TillMenuDTO,
+} from "@peni/api";
+import { formatPercent, formatTL, goodsName } from "@peni/brand/format";
 import { lineTotal, orderTotals, QUICK_DISCOUNTS, type OrderLine } from "@peni/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
@@ -25,7 +34,11 @@ type Panel =
   | { kind: "payment"; orderId: string; payment: PaymentDTO; tenderedKurus?: number }
   | { kind: "discount"; productId: string | null }
   /** Peni from the customer's wallet, with their ödeme kodu (piece 11). */
-  | { kind: "peni"; orderId: string };
+  | { kind: "peni"; orderId: string }
+  /** Askıda kahve: give from it, or leave one on it (piece 13). */
+  | { kind: "askida" };
+
+type AskidaItem = TillAskidaDTO["items"][number];
 
 const emptyCart = (): Cart => ({ lines: [], discountPercent: 0, createKey: newIdempotencyKey(), order: null });
 
@@ -80,9 +93,11 @@ export function Sell({
   }, [loadMenu]);
 
   const totals = useMemo(() => orderTotals(cart.lines, cart.discountPercent), [cart.lines, cart.discountPercent]);
-  // Peni on the order fix its lines until they're given back.
+  // Peni or askı items on the order fix its lines until they're given back.
   const peniOn = cart.order?.peni ?? null;
-  const dueKurus = peniOn && cart.order ? cart.order.dueKurus : totals.totalKurus;
+  const askidaOn = cart.order?.askida ?? null;
+  const locked = peniOn ? t("peniLocked") : askidaOn ? t("askidaLocked") : null;
+  const dueKurus = (peniOn || askidaOn) && cart.order ? cart.order.dueKurus : totals.totalKurus;
 
   // What the customer screen shows: the order as it's entered, then the paid order and its peni.
   const shown = useMemo<DisplayState>(() => {
@@ -103,11 +118,12 @@ export function Sell({
         changeKurus: paid.changeKurus,
         claim: paid.claim,
         peni: paid.peni?.peni,
+        askidaKurus: paid.askida?.kurus,
       };
     }
     if (cart.lines.length === 0) return { kind: "idle" };
-    return { kind: "order", lines: cart.lines.map((l) => line({ ...l, totalKurus: lineTotal(l) })), ...totals, peni: peniOn?.peni, dueKurus };
-  }, [paid, cart.lines, totals, peniOn, dueKurus]);
+    return { kind: "order", lines: cart.lines.map((l) => line({ ...l, totalKurus: lineTotal(l) })), ...totals, peni: peniOn?.peni, askidaKurus: askidaOn?.kurus, dueKurus };
+  }, [paid, cart.lines, totals, peniOn, askidaOn, dueKurus]);
   const shownRef = useRef(shown);
   shownRef.current = shown;
   const screen = useRef<ReturnType<typeof displayLink> | null>(null);
@@ -124,12 +140,12 @@ export function Sell({
   }, [shown]);
 
   const edit = (change: (c: Cart) => Partial<Cart>) => {
-    if (peniOn) return setError(t("peniLocked"));
+    if (locked) return setError(locked);
     setError(null);
     setCart((c) => ({ ...c, ...change(c) }));
   };
-  const add = (p: TillMenuDTO["categories"][number]["products"][number]) => {
-    if (peniOn) return setError(t("peniLocked"));
+  const add = (p: Pick<TillMenuDTO["categories"][number]["products"][number], "productId" | "name" | "priceKurus">) => {
+    if (locked) return setError(locked);
     setPaid(null);
     edit((c) => {
       const existing = c.lines.find((l) => l.productId === p.productId);
@@ -146,9 +162,9 @@ export function Sell({
       productId === null ? { discountPercent: percent } : { lines: c.lines.map((l) => (l.productId === productId ? { ...l, discountPercent: percent } : l)) },
     );
 
-  /** Creates the order, or brings the server's copy in line with the screen. */
-  const ensureOrder = async (): Promise<OrderDTO | null> => {
-    const lines = cart.lines.map(({ productId, quantity, discountPercent }) => ({ productId, quantity, discountPercent }));
+  /** Creates the order, or brings the server's copy in line with the screen (or with `onScreen`, about to be). */
+  const ensureOrder = async (onScreen: OrderLine[] = cart.lines): Promise<OrderDTO | null> => {
+    const lines = onScreen.map(({ productId, quantity, discountPercent }) => ({ productId, quantity, discountPercent }));
     let order = cart.order;
     if (!order) order = await api.staff.till.create(slug, { createKey: cart.createKey, lines, discountPercent: cart.discountPercent });
     if (signature(order.lines, order.discountPercent) !== signature(lines, cart.discountPercent)) {
@@ -156,7 +172,7 @@ export function Sell({
     }
     const serverOrder = order;
     setCart((c) => ({ ...c, order: serverOrder }));
-    if (serverOrder.totalKurus !== totals.totalKurus) {
+    if (serverOrder.totalKurus !== orderTotals(onScreen, cart.discountPercent).totalKurus) {
       // A price changed on the menu since the tiles loaded: show the server's prices first.
       setCart((c) => ({ ...c, lines: serverOrder.lines.map(({ totalKurus: _, ...l }) => l) }));
       void loadMenu();
@@ -254,6 +270,61 @@ export function Sell({
     }
   };
 
+  /**
+   * "Askıdan ver": the askı pays for this item on the order, for whoever asked (D8). With
+   * none on the order yet, one goes on first; with some already, all of them not yet given.
+   */
+  const giveFromAskida = async (item: AskidaItem) => {
+    if (busy) return;
+    if (peniOn) return setError(t("peniLocked"));
+    const given = askidaOn?.items.find((i) => i.productId === item.productId)?.quantity ?? 0;
+    const onOrder = cart.lines.find((l) => l.productId === item.productId)?.quantity ?? 0;
+    let lines = cart.lines;
+    if (onOrder <= given) {
+      if (askidaOn) return setError(t("askidaLocked"));
+      lines = [...lines, { productId: item.productId, name: item.name, unitPriceKurus: item.priceKurus, quantity: 1, discountPercent: 0 }];
+    }
+    const quantity = Math.min(20, Math.max(1, onOrder - given));
+    setBusy(true);
+    setError(null);
+    setPaid(null);
+    setCart((c) => ({ ...c, lines }));
+    try {
+      const order = await ensureOrder(lines);
+      if (!order) return setPanel(null);
+      const attempt = `${order.id}|askida|${item.productId}|${quantity}|${given}`;
+      const payKey = payKeys.current.get(attempt) ?? newIdempotencyKey();
+      payKeys.current.set(attempt, payKey);
+      settled(await api.staff.till.giveAskida(slug, order.id, { productId: item.productId, quantity, payKey }));
+    } catch (e) {
+      setError(onError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** "Askıya bırak": the guest pays for one more for someone else; it goes on the askı once paid. */
+  const hangOnAskida = (item: AskidaItem) => {
+    if (locked) return setError(locked);
+    setPanel(null);
+    add({ productId: `askida:${item.productId}`, name: `Askıya ${goodsName(item.name)}`, priceKurus: item.priceKurus });
+  };
+
+  const putBackAskida = async () => {
+    if (!cart.order || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const order = await api.staff.till.returnAskida(slug, cart.order.id);
+      setCart((c) => ({ ...c, order }));
+      payKeys.current.clear();
+    } catch (e) {
+      setError(onError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const closePayment = () => {
     if (panel?.kind === "payment" && panel.payment.status === "pending") {
       const { orderId, payment } = panel;
@@ -313,7 +384,7 @@ export function Sell({
           <>
             <div className="flex items-center justify-between px-6 pt-5 pb-3">
               <h2 className="text-xl font-semibold">{t("order")}</h2>
-              <Button kind="bare" size="sm" onClick={() => setCart(emptyCart())} disabled={cart.lines.length === 0 || !!peniOn}>
+              <Button kind="bare" size="sm" onClick={() => setCart(emptyCart())} disabled={cart.lines.length === 0 || !!locked}>
                 {t("clear")}
               </Button>
             </div>
@@ -386,19 +457,35 @@ export function Sell({
                     <span className="tabular">{formatTL(-peniOn.peni * 100)}</span>
                   </div>
                 )}
+                {askidaOn && (
+                  <div className="-my-1 flex min-h-11 items-center justify-between text-green">
+                    <span className="flex items-center gap-2">
+                      {t("askidaOnOrder")} · {askidaOn.items.map((i) => `${i.quantity} ${i.name}`).join(", ")}
+                      <Button kind="bare" size="sm" className="min-h-9 px-2 underline underline-offset-4" onClick={() => void putBackAskida()} disabled={busy}>
+                        {t("askidaPutBack")}
+                      </Button>
+                    </span>
+                    <span className="tabular">{formatTL(-askidaOn.kurus)}</span>
+                  </div>
+                )}
                 <div className="mt-1 flex items-baseline justify-between">
-                  <span className="text-[17px] font-semibold">{peniOn ? t("left") : t("due")}</span>
+                  <span className="text-[17px] font-semibold">{peniOn || askidaOn ? t("left") : t("due")}</span>
                   <span className="tabular font-serif text-[40px] leading-none">{formatTL(dueKurus)}</span>
                 </div>
               </div>
-              <Button kind="quiet" size="md" disabled={cart.lines.length === 0 || busy || dueKurus < 100} onClick={() => void openPeni()}>
-                {t("peniTitle")}
-              </Button>
               <div className="grid grid-cols-2 gap-3">
-                <Button kind="secondary" size="lg" disabled={cart.lines.length === 0 || busy} onClick={() => setPanel({ kind: "cash" })}>
+                <Button kind="quiet" size="md" disabled={cart.lines.length === 0 || busy || dueKurus < 100} onClick={() => void openPeni()}>
+                  {t("peniTitle")}
+                </Button>
+                <Button kind="quiet" size="md" disabled={busy} onClick={() => setPanel({ kind: "askida" })}>
+                  {t("askida")}
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Button kind="secondary" size="lg" disabled={cart.lines.length === 0 || busy || dueKurus <= 0} onClick={() => setPanel({ kind: "cash" })}>
                   {t("cash")}
                 </Button>
-                <Button kind="primary" size="lg" disabled={cart.lines.length === 0 || busy} onClick={() => void pay("card")}>
+                <Button kind="primary" size="lg" disabled={cart.lines.length === 0 || busy || dueKurus <= 0} onClick={() => void pay("card")}>
                   {t("card")}
                 </Button>
               </div>
@@ -411,6 +498,20 @@ export function Sell({
       {panel?.kind === "peni" && (
         <PeniPanel t={t} slug={slug} orderId={panel.orderId} onError={onError} onClose={() => setPanel(null)} onDone={(answer) => settled(answer)} />
       )}
+      {panel?.kind === "askida" && (
+        <AskidaPanel
+          t={t}
+          slug={slug}
+          lines={cart.lines}
+          given={askidaOn?.items ?? []}
+          busy={busy}
+          error={error}
+          onError={onError}
+          onClose={() => setPanel(null)}
+          onGive={(item) => void giveFromAskida(item)}
+          onHang={hangOnAskida}
+        />
+      )}
       {panel?.kind === "payment" && (
         <PaymentSheet
           t={t}
@@ -420,7 +521,7 @@ export function Sell({
           onConfirm={() => void settle((o, p) => api.staff.till.confirmPayment(slug, o, p))}
           onDecline={() => void settle((o, p) => api.staff.till.cancelPayment(slug, o, p, { declined: true }))}
           onCheck={() => void settle((o, p) => api.staff.till.payment(slug, o, p))}
-          onRetry={() => panel.payment.method !== "peni" && void pay(panel.payment.method, panel.tenderedKurus)}
+          onRetry={() => (panel.payment.method === "cash" || panel.payment.method === "card") && void pay(panel.payment.method, panel.tenderedKurus)}
         />
       )}
       {panel?.kind === "discount" && (panel.productId === null || discountLine) && (
@@ -542,8 +643,17 @@ function PaidView({ t, order, onNext }: { t: TillProps["t"]; order: OrderDTO; on
       <h2 className="font-serif text-4xl font-normal">{t("paid")}</h2>
       <p className="tabular text-base text-muted">
         #{order.number} · {t(order.paymentMethod ?? "card")} ·{" "}
-        {formatTL(order.paymentMethod === "peni" ? order.totalKurus : order.totalKurus - (order.peni?.peni ?? 0) * 100)}
+        {formatTL(
+          order.paymentMethod === "peni" || order.paymentMethod === "askida"
+            ? order.totalKurus
+            : order.totalKurus - (order.peni?.peni ?? 0) * 100 - (order.askida?.kurus ?? 0),
+        )}
       </p>
+      {order.askida && order.paymentMethod !== "askida" && (
+        <p className="tabular text-base text-muted">
+          {t("askidaOnOrder")} · {order.askida.items.map((i) => `${i.quantity} ${i.name}`).join(", ")}: <strong className="text-ink">{formatTL(order.askida.kurus)}</strong>
+        </p>
+      )}
       {order.peni && order.paymentMethod !== "peni" && (
         <p className="text-base text-muted">
           {t("peni")} · {order.peni.name}: <strong className="tabular text-ink">{order.peni.peni}</strong> peni
@@ -678,6 +788,85 @@ function PeniPanel({
             onOk={() => void take()}
             okDisabled={busy || peni < 1}
           />
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+/**
+ * "Askı": what the askı can pay for now. Anyone who asks gets an item from it, on trust
+ * (D8); a guest who wants to leave one adds "Askıya …" to their own order.
+ */
+function AskidaPanel({
+  t,
+  slug,
+  lines,
+  given,
+  busy,
+  error,
+  onError,
+  onClose,
+  onGive,
+  onHang,
+}: {
+  t: TillProps["t"];
+  slug: string;
+  lines: OrderLine[];
+  given: { productId: string; quantity: number }[];
+  busy: boolean;
+  error: string | null;
+  onError: TillProps["onError"];
+  onClose: () => void;
+  onGive: (item: AskidaItem) => void;
+  onHang: (item: AskidaItem) => void;
+}) {
+  const [askida, setAskida] = useState<TillAskidaDTO | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    api.staff.till.askida(slug).then(setAskida, (e: unknown) => setProblem(onError(e)));
+  }, [slug, onError]);
+
+  return (
+    <Sheet title={t("askidaTitle")} onClose={onClose} labelClose={t("close")}>
+      {!askida && !problem && <p className="text-muted">{t("loading")}</p>}
+      {problem && <Notice tone="red">{problem}</Notice>}
+      {askida && !askida.enabled && <Notice>{t("askidaOff")}</Notice>}
+      {askida?.enabled && (
+        <>
+          <div className="flex items-baseline justify-between">
+            <span className="text-muted">{t("askidaPool")}</span>
+            <span className="tabular font-serif text-4xl text-green">{askida.balancePeni} peni</span>
+          </div>
+          <p className="text-[15px] leading-normal text-muted">{t("askidaHelp")}</p>
+          {error && <Notice tone="red">{error}</Notice>}
+          <ul className="flex flex-col">
+            {askida.items.map((item) => {
+              const onOrder = lines.find((l) => l.productId === item.productId)?.quantity ?? 0;
+              const toGive = Math.max(1, onOrder - (given.find((g) => g.productId === item.productId)?.quantity ?? 0));
+              const short = item.available < toGive;
+              return (
+                <li key={item.productId} className="flex flex-col gap-3 border-t border-line-soft py-4">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-lg font-medium">{item.name}</span>
+                    <span className="tabular text-[15px] text-muted">
+                      {formatTL(item.priceKurus)} · {t("askidaFor").replace("{n}", String(item.available))}
+                      {onOrder > 0 && ` · ${t("askidaOnOrderCount").replace("{n}", String(onOrder))}`}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button kind="quiet" disabled={busy} onClick={() => onHang(item)}>
+                      {t("askidaHang")}
+                    </Button>
+                    <Button kind="primary" disabled={busy || short} onClick={() => onGive(item)}>
+                      {toGive > 1 ? t("askidaGiveN").replace("{n}", String(toGive)) : t("askidaGive")}
+                    </Button>
+                  </div>
+                  {short && <p className="text-sm text-muted">{t("askidaEmpty")}</p>}
+                </li>
+              );
+            })}
+          </ul>
         </>
       )}
     </Sheet>

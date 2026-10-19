@@ -99,6 +99,11 @@ export class PeniService {
 
   // ---------------------------------------------------------------- wallet
 
+  /** What the café's askı holds now. */
+  askidaBalance(cafeId: string): Promise<Peni> {
+    return this.ledger.balance(account.askida(cafeId));
+  }
+
   walletBalance(membershipId: string): Promise<Peni> {
     return this.ledger.balance(account.member(membershipId));
   }
@@ -307,9 +312,14 @@ export class PeniService {
    * An order that will never be paid (voided at the till):
    * peni spent on it goes back to the wallet and askı items go back to the askı.
    */
-  async releaseOrder(cafeId: string, orderId: string, reason: string): Promise<LedgerTransaction[]> {
+  async releaseOrder(
+    cafeId: string,
+    orderId: string,
+    reason: string,
+    kinds: ("redeem" | "askida_claim")[] = ["redeem", "askida_claim"],
+  ): Promise<LedgerTransaction[]> {
     return this.ledger.atomically(async () => {
-      const spent = await this.ledger.query({ cafeId, kinds: ["redeem", "askida_claim"] });
+      const spent = await this.ledger.query({ cafeId, kinds });
       const reversed: LedgerTransaction[] = [];
       for (const tx of spent.filter((t) => t.meta.orderId === orderId)) {
         reversed.push(await this.ledger.reverse(tx.id, { orderId, reason }, this.clock()));
@@ -528,12 +538,17 @@ export class PeniService {
     });
   }
 
-  /** A guest paid for an askı coffee in cash at the till. Staff records it so it appears in the pool. */
+  /**
+   * A guest paid for an askı coffee in cash at the till. Staff records it so it appears in
+   * the pool. With `orderId` (plan piece 13), it was an "Askıya bırak" line of that order,
+   * and refunding the order takes it back out (`unhangOrder`).
+   */
   async recordTillDonation(input: {
     cafeId: string;
     peni: Peni;
     staffUserId: string;
     idempotencyKey: string;
+    orderId?: string;
   }): Promise<LedgerTransaction> {
     assertPositivePeni(input.peni);
     await this.requireAskida(input.cafeId);
@@ -546,10 +561,73 @@ export class PeniService {
           { account: account.askida(input.cafeId), delta: input.peni },
         ],
         idempotencyKey: `askida_till:${input.idempotencyKey}`,
-        meta: { staffUserId: input.staffUserId },
+        meta: input.orderId ? { staffUserId: input.staffUserId, orderId: input.orderId } : { staffUserId: input.staffUserId },
         createdAt: this.clock(),
       }),
     );
+  }
+
+  /**
+   * A refunded order's "Askıya bırak" items come back out of the askı: as much as is still
+   * there, since someone may have been given one already.
+   */
+  async unhangOrder(cafeId: string, orderId: string): Promise<LedgerTransaction[]> {
+    return this.ledger.atomically(async () => {
+      const hung = (await this.ledger.query({ cafeId, kinds: ["askida_till"] })).filter((t) => t.meta.orderId === orderId);
+      const result: LedgerTransaction[] = [];
+      for (const tx of hung) {
+        const peni = inflow(tx, account.askida(cafeId));
+        const takeBack = Math.min(peni, await this.ledger.balance(account.askida(cafeId)));
+        if (takeBack <= 0) continue;
+        result.push(
+          await this.ledger.post({
+            cafeId,
+            kind: "reversal",
+            entries: [
+              { account: account.askida(cafeId), delta: -takeBack },
+              { account: account.tillDonation(cafeId), delta: takeBack },
+            ],
+            idempotencyKey: `reversal:${tx.id}`,
+            reversesId: tx.id,
+            meta: { orderId, reason: "refund", reversedKind: "askida_till", shortfallPeni: peni - takeBack },
+            createdAt: this.clock(),
+          }),
+        );
+      }
+      return result;
+    });
+  }
+
+  /**
+   * "Askıdan ver" (plan piece 13, D8): the askı pays for askı items on a till order, for
+   * anyone who asks, with no limit and no account: it runs on trust. The caller works out
+   * the price; the pool must cover it. The same `key` again pays once.
+   */
+  async giveFromAskidaAtTill(input: { cafeId: string; orderId: string; key: string; peni: Peni; productId: string; quantity: number }): Promise<Peni> {
+    assertPositivePeni(input.peni);
+    const settings = await this.requireAskida(input.cafeId);
+    if (!settings.askidaProductIds.includes(input.productId)) {
+      throw new PeniError("PRODUCT_NOT_ELIGIBLE", "This product cannot be taken from the askı");
+    }
+    return this.ledger.atomically(async () => {
+      const replay = await this.ledger.findByIdempotencyKey(`askida_claim:${input.key}`);
+      if (replay) return -inflow(replay, account.askida(input.cafeId));
+      if ((await this.ledger.balance(account.askida(input.cafeId))) < input.peni) {
+        throw new PeniError("ASKIDA_EMPTY", "The askı is empty right now");
+      }
+      await this.ledger.post({
+        cafeId: input.cafeId,
+        kind: "askida_claim",
+        entries: [
+          { account: account.askida(input.cafeId), delta: -input.peni },
+          { account: account.redemption(input.cafeId), delta: input.peni },
+        ],
+        idempotencyKey: `askida_claim:${input.key}`,
+        meta: { orderId: input.orderId, productId: input.productId, quantity: input.quantity, atTill: true },
+        createdAt: this.clock(),
+      });
+      return input.peni;
+    });
   }
 
   /** A member takes one askı item for an order. The pool pays; the member's own wallet is untouched. */

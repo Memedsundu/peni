@@ -109,7 +109,7 @@ export interface TillMenuDTO {
 
 export type OrderStatusDTO = "open" | "paid" | "voided" | "refunded";
 /** "peni": from the customer's wallet, with their ödeme kodu (piece 11). */
-export type PaymentMethodDTO = "cash" | "card" | "peni";
+export type PaymentMethodDTO = "cash" | "card" | "peni" | "askida";
 
 export interface OrderLineDTO {
   productId: string;
@@ -119,6 +119,8 @@ export interface OrderLineDTO {
   discountPercent: number;
   /** After the line's discount. */
   totalKurus: number;
+  /** "Askıya bırak" (plan piece 13): paid for now, left on the askı for someone else. */
+  hang: boolean;
 }
 
 export interface OrderDTO {
@@ -146,6 +148,8 @@ export interface OrderDTO {
   dueKurus: number;
   /** Peni on the order, and whose wallet they came from ("Ayşe Y."). */
   peni: { peni: number; name: string } | null;
+  /** What the askı paid for on the order (plan piece 13): "1 Çay", in kuruş. */
+  askida: { kurus: number; items: { productId: string; name: string; quantity: number }[] } | null;
   /** What the viewer may do with it now. */
   canVoid: boolean;
   canRefund: boolean;
@@ -268,6 +272,8 @@ export interface OrderListDTO {
     cardKurus: number;
     /** Paid with peni: what the café gave in goods. */
     peniKurus: number;
+    /** Paid by the askı. */
+    askidaKurus: number;
     refundedCount: number;
     refundedKurus: number;
     voidedCount: number;
@@ -398,6 +404,14 @@ export interface PeniCheckDTO {
   balancePeni: number;
   /** The most that can go on this order now: within the balance and the café's rules. */
   maxPeni: number;
+}
+
+/** `GET /staff/:slug/askida`: the askı as the till sees it (plan piece 13). */
+export interface TillAskidaDTO {
+  enabled: boolean;
+  balancePeni: number;
+  /** The café's askı items, cheapest first, with how many the pool pays for now. */
+  items: { productId: string; name: string; priceKurus: number; peni: number; available: number }[];
 }
 
 /** `POST /me/spend-code`: the ödeme kodu to show at the till, for one café. */
