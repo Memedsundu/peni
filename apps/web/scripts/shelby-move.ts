@@ -4,7 +4,8 @@
 //   SHELBY_DATABASE_URL=… DATABASE_URL=… pnpm --filter @peni/web shelby-move --write
 //
 // Options: --cafe <Shelby café id> (when Shelby has several), --slug <Peni slug> (shelby),
-// --all (also the previous owner's records), --report <file.md>, --now <ISO time>.
+// --all (also the previous owner's records), --report <file.md>, --now <ISO time>,
+// --rehearsal (lets --write run while Shelby isn't frozen: for a copy, never for the real move).
 // Shelby is only read. Exits 1 when a total doesn't match.
 import { writeFileSync } from "node:fs";
 import { createPrismaClient, createPrismaStores } from "@peni/db";
@@ -36,6 +37,9 @@ async function main(): Promise<number> {
 
   console.log(`Reading Shelby (${cafes.find((c) => c.id === shelbyCafe)?.name ?? shelbyCafe})…`);
   const snap = await readShelby(shelbyUrl, shelbyCafe);
+  if (write && !flag("rehearsal") && !snap.cafe.financialWritesPaused) {
+    throw new Error("Shelby still takes money: freeze it first (pnpm --filter @peni/web shelby-freeze --on), or add --rehearsal when this is a copy");
+  }
   const from = flag("all") ? null : defaultFrom(snap);
   const { records, report } = mapShelby(snap, { cafeId: `cafe_${slug}`, slug, now, from });
 
@@ -43,8 +47,12 @@ async function main(): Promise<number> {
   console.log(write ? "Writing into Peni…" : "Dry run: writing into memory…");
   await writeShelby(stores, records, (step) => console.log(`  ${step}`));
   const rows = await checkMove(snap, stores, records.cafe.id, from);
+  if ((await stores.identity.listCafes()).some((c) => c.id === "cafe_moda")) {
+    console.warn("This Peni database also has the demo cafés. The live site runs with PENI_DEMO=0 on a database without them (docs/switch-day.md).");
+  }
 
-  const md = reportMarkdown(report, rows, { when: now, mode: write ? "Moved into Peni" : "Dry run" });
+  const mode = !write ? "Dry run" : flag("rehearsal") ? "Rehearsal into Peni" : "Moved into Peni, Shelby frozen";
+  const md = reportMarkdown(report, rows, { when: now, mode });
   const file = arg("report");
   if (file) writeFileSync(file, md);
   console.log(`\n${md}`);

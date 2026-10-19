@@ -6,7 +6,17 @@ import pg from "pg";
  */
 export interface ShelbySnapshot {
   readAt: Date;
-  cafe: { id: string; name: string; timezone: string; moneyInitializedAt: Date | null; vatRate: number; bankCommissionRate: number; createdAt: Date };
+  cafe: {
+    id: string;
+    name: string;
+    timezone: string;
+    moneyInitializedAt: Date | null;
+    vatRate: number;
+    bankCommissionRate: number;
+    createdAt: Date;
+    /** Shelby's own pause on money writes: on from the switch-day freeze. Missing in older Shelby. */
+    financialWritesPaused?: boolean;
+  };
   users: { id: string; email: string; password: string; name: string; role: string; hourlyRate: number | null; createdAt: Date }[];
   categories: { id: number; name: string; sortOrder: number }[];
   products: {
@@ -338,6 +348,34 @@ export async function readShelby(url: string, cafeId: string): Promise<ShelbySna
     };
     await client.query("COMMIT");
     return out as ShelbySnapshot;
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Switch day (plan piece 35): stops Shelby taking money in or out for the café, with Shelby's
+ * own pause (its triggers refuse every sale, payment and count while it's on, and its pages say
+ * a period change is under way). `paused: false` lifts it again if the switch is called off.
+ * Refuses to pause while Shelby's drawer is open, so the last count is the drawer's money.
+ */
+export async function pauseShelby(url: string, cafeId: string, paused: boolean): Promise<{ name: string; paused: boolean }> {
+  const client = clientFor(url);
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    const cafe = (await client.query<{ name: string }>(`SELECT name FROM "Cafe" WHERE id = $1 FOR UPDATE`, [cafeId])).rows[0];
+    if (!cafe) throw new Error(`No café ${cafeId} in Shelby`);
+    if (paused) {
+      const open = Number((await client.query(`SELECT count(*) AS n FROM "CashSession" WHERE "cafeId" = $1 AND "closedAt" IS NULL`, [cafeId])).rows[0].n);
+      if (open) throw new Error("Shelby's drawer is still open: count and close it in Shelby (Kasa kapat) first");
+    }
+    await client.query(`UPDATE "Cafe" SET "financialWritesPaused" = $2 WHERE id = $1`, [cafeId, paused]);
+    await client.query("COMMIT");
+    return { name: cafe.name, paused };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
   } finally {
     await client.end();
   }
