@@ -1,5 +1,5 @@
-import { defaultSettings, startOfLocalDay } from "@peni/core";
-import type { Cafe, MenuItem, Post, StaffMember, StaffRole, StockBatch, StockItem, StockMode } from "@peni/core";
+import { defaultSettings, localDateKey, startOfLocalDay } from "@peni/core";
+import type { Bill, BillLine, Cafe, MenuItem, Post, StaffMember, StaffRole, StockBatch, StockItem, StockMode, Supplier } from "@peni/core";
 import type { CustomerRecord, PeniApp } from "./app";
 
 export const DEMO_CUSTOMERS = {
@@ -141,6 +141,7 @@ export async function seed(app: PeniApp): Promise<void> {
     on,
     earlierToday,
   });
+  await seedBills(app, { leyla: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id, ece: staffAt[`${DEMO_STAFF.ece.email}:moda`]!.id, on });
 
   // ─────────────────────────────────────────── people and memberships
 
@@ -517,8 +518,9 @@ async function seedStock(
   await batch("count:seed_week1", p.on(7, 22), "count", [
     ["stk_espresso", { counted: kg(2.65) }], ["stk_sut", { counted: kg(10.5) }], ["stk_simit", { counted: pcs(17) }], ["stk_sansebastian", { counted: pcs(5) }],
   ], { note: "Pazar sayımı" });
-  // Until bills arrive (piece 18), a delivery is entered as a count.
-  await batch("count:seed_delivery", p.on(6, 10), "count", [["stk_sut", { counted: kg(22.5) }], ["stk_simit", { counted: pcs(47) }]], { note: "Süt ve simit geldi" });
+  // Deliveries come with bills (seedBills writes the bills themselves).
+  await batch("bill:bil_seed_sut2:1", p.on(6, 10), "bill", [["stk_sut", kg(12)]], { note: "Moda Süt" });
+  await batch("bill:bil_seed_simit:1", p.on(6, 10, 5), "bill", [["stk_simit", pcs(30)]], { note: "Fırıncı Hasan", memberId: p.ece });
   await batch("waste:seed_1", p.on(4, 18), "waste", [["stk_sut", -kg(2)]], { why: "expired", memberId: p.ece });
   await batch("waste:seed_2", p.on(2, 15), "waste", [["stk_sansebastian", -pcs(1)]], { why: "broken", note: "Vitrinden düştü", memberId: p.ece });
   await batch("sale:seed_week2", p.on(1, 21), "sale", [
@@ -536,4 +538,90 @@ async function seedStock(
   await recipe("limonata", "recipe", [["stk_limon", g(150)], ["stk_nane", 200]]);
   await recipe("simit", "counted", [["stk_simit", pcs(1)]]);
   await recipe("cheesecake", "counted", [["stk_sansebastian", pcs(1)]]);
+}
+
+/**
+ * Moda's suppliers and a month of bills (plan piece 18). The two deliveries of last week
+ * moved stock in seedStock; the older bills came before Peni counted stock, so their
+ * amounts are in the starting counts. Prices match the items' prices on Stok.
+ */
+async function seedBills(app: PeniApp, p: { leyla: string; ece: string; on: (daysAgo: number, hh: number, mm?: number) => Date }): Promise<void> {
+  const cafeId = "cafe_moda";
+  const timeZone = (await app.directory.getSettings(cafeId)).timeZone;
+  const day = (daysAgo: number) => localDateKey(p.on(daysAgo, 12), timeZone);
+  const supplier = (id: string, name: string, more: Partial<Supplier> = {}): Supplier => ({
+    id, cafeId, name, phone: null, email: null, taxNo: null, iban: null, note: null, archivedAt: null, createdAt: p.on(30, 9), ...more,
+  });
+  const suppliers = [
+    supplier("sup_seed_sut", "Moda Süt", { phone: "0532 410 22 18", note: "Salı ve cuma sabah getirir." }),
+    supplier("sup_seed_kahve", "Kuzey Kahve Kavurma", {
+      phone: "0216 345 67 89", email: "siparis@kuzeykahve.test", taxNo: "5730412298", iban: "TR330006100519786457841326", note: "30 gün vadeli çalışıyoruz.",
+    }),
+    supplier("sup_seed_firin", "Fırıncı Hasan", { phone: "0535 902 11 40" }),
+    supplier("sup_seed_ambalaj", "Ambalaj Dünyası", { email: "satis@ambalajdunyasi.test" }),
+    supplier("sup_seed_elektrik", "Boğaziçi Elektrik"),
+    supplier("sup_seed_ev", "Ali Rıza Bey (mal sahibi)", { iban: "TR120001200945200058000017" }),
+  ];
+  for (const s of suppliers) await app.billStore.saveSupplier(s);
+
+  const stock = (itemId: string, name: string, category: BillLine["category"], qtyMilli: number, totalKurus: number): BillLine => ({ itemId, name, category, qtyMilli, totalKurus });
+  const other = (name: string, category: BillLine["category"], totalKurus: number): BillLine => ({ itemId: null, name, category, qtyMilli: null, totalKurus });
+  const thisMonth = day(0).slice(0, 8);
+  const rentPaidOn = [`${thisMonth}03`, day(0)].sort()[0]!;
+  const bills: (Omit<Bill, "cafeId" | "totalKurus" | "paidKurus" | "paidAt" | "payments" | "version" | "voidedAt" | "voidedById" | "voidReason" | "updatedAt" | "createKey"> & {
+    paid?: { method: "cash" | "card" | "bank"; on: string; daysAgo: number };
+  })[] = [
+    {
+      id: "bil_seed_ambalaj", supplierId: "sup_seed_ambalaj", number: "A-20418", date: day(20), dueDate: null, note: null,
+      lines: [stock("stk_bardak", "Karton bardak (8 oz)", "supplies", 1_000_000, 250_000), stock("stk_kapak", "Bardak kapağı", "supplies", 1_000_000, 120_000)],
+      createdById: p.leyla, createdAt: p.on(20, 15), paid: { method: "bank", on: day(19), daysAgo: 19 },
+    },
+    {
+      id: "bil_seed_sut1", supplierId: "sup_seed_sut", number: null, date: day(16), dueDate: null, note: null,
+      lines: [stock("stk_sut", "Süt", "ingredients", 20_000, 86_000)],
+      createdById: p.ece, createdAt: p.on(16, 9), paid: { method: "cash", on: day(16), daysAgo: 16 },
+    },
+    {
+      id: "bil_seed_kahve", supplierId: "sup_seed_kahve", number: "KK-2026-1187", date: day(15), dueDate: day(-15), note: "Ekim kavrumu",
+      lines: [
+        stock("stk_espresso", "Espresso çekirdeği", "ingredients", 4_000, 360_000),
+        stock("stk_filtre", "Filtre kahve çekirdeği", "ingredients", 2_000, 220_000),
+        stock("stk_turk", "Türk kahvesi", "ingredients", 2_000, 120_000),
+      ],
+      createdById: p.leyla, createdAt: p.on(15, 11),
+    },
+    {
+      id: "bil_seed_elektrik", supplierId: "sup_seed_elektrik", number: "EL-0928114", date: day(10), dueDate: day(2), note: null,
+      lines: [other("Elektrik, geçen ay", "utilities", 385_000)],
+      createdById: p.leyla, createdAt: p.on(10, 18),
+    },
+    {
+      id: "bil_seed_sut2", supplierId: "sup_seed_sut", number: null, date: day(6), dueDate: null, note: null,
+      lines: [stock("stk_sut", "Süt", "ingredients", 12_000, 54_000)],
+      createdById: p.leyla, createdAt: p.on(6, 10), paid: { method: "cash", on: day(6), daysAgo: 6 },
+    },
+    {
+      id: "bil_seed_simit", supplierId: "sup_seed_firin", number: null, date: day(6), dueDate: null, note: "Hafta sonu ödenecek",
+      lines: [stock("stk_simit", "Simit", "ingredients", 30_000, 30_000)],
+      createdById: p.ece, createdAt: p.on(6, 10, 5),
+    },
+    {
+      id: "bil_seed_kira", supplierId: "sup_seed_ev", number: null, date: `${thisMonth}01`, dueDate: `${thisMonth}05`, note: null,
+      lines: [other("Dükkân kirası", "rent", 4_500_000)],
+      createdById: p.leyla, createdAt: new Date(`${thisMonth}01T08:00:00Z`), paid: { method: "bank", on: rentPaidOn, daysAgo: 0 },
+    },
+  ];
+  for (const { paid, ...b } of bills) {
+    const totalKurus = b.lines.reduce((s, l) => s + l.totalKurus, 0);
+    const paidAt = paid ? (paid.on === rentPaidOn && b.id === "bil_seed_kira" ? new Date(`${rentPaidOn}T09:00:00Z`) : p.on(paid.daysAgo, 17)) : null;
+    await app.billStore.saveBill({
+      ...b, cafeId, totalKurus, paidKurus: paid ? totalKurus : 0, paidAt, payments: [], version: 1,
+      voidedAt: null, voidedById: null, voidReason: null, updatedAt: b.createdAt, createKey: `seed:${b.id}`,
+    });
+    if (paid) {
+      await app.billStore.addPayment({
+        id: `bpy_${b.id}`, cafeId, billId: b.id, amountKurus: totalKurus, method: paid.method, paidOn: paid.on, memberId: p.leyla, createdAt: paidAt!,
+      });
+    }
+  }
 }

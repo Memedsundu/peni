@@ -403,6 +403,39 @@ assert.ok((await call("GET", "/staff/moda", { headers: STAFF })).json.lowStock.s
 assert.equal((await call("GET", "/staff/moda/stock", { headers: ecePos3 })).json.error.code, "FORBIDDEN");
 step("Leyla adds oat milk (once despite a retry) and a latte that uses it; Ece sells one and 200 ml go; Leyla counts 2.5 L (once) and records a 1.6 L spill; Bugün shows it low; Ece can't see Stok");
 
+// 5m. Suppliers and bills (piece 18): Leyla adds a supplier (a retry adds one); Ece, at the
+//     till, enters its bill for 6 L of oat milk (once despite a retry), which adds the stock
+//     and prices it; Leyla corrects it to 5 L, pays it in cash, and the supplier page shows
+//     the price; Ece can't pay a bill.
+const supplierKey = key();
+const supplierName = `Manav ${key()}`;
+await call("POST", "/staff/moda/suppliers", { headers: STAFF, body: { key: supplierKey, name: supplierName, phone: "0532 111 22 33" } });
+const manav = (await call("POST", "/staff/moda/suppliers", { headers: STAFF, body: { key: supplierKey, name: supplierName } })).json;
+assert.equal((await call("GET", "/staff/moda/suppliers", { headers: STAFF })).json.suppliers.filter((s) => s.name === supplierName).length, 1, "a retried add adds one");
+const today = (await call("GET", "/staff/moda/bills", { headers: STAFF })).json.today;
+const billInput = { key: key(), supplierId: manav.supplier.id, date: today, lines: [{ itemId: oatItem[0].id, qtyMilli: 6_000, totalKurus: 54_000 }] };
+await call("POST", "/staff/moda/bills", { headers: ecePos3, body: billInput });
+const oatBill = (await call("POST", "/staff/moda/bills", { headers: ecePos3, body: billInput })).json;
+assert.deepEqual([oatBill.state, oatBill.totalKurus, oatBill.lines[0].unitKurus], ["unpaid", 54_000, 9_000]);
+let oatNow = (await call("GET", `/staff/moda/stock/items/${oatItem[0].id}`, { headers: STAFF })).json;
+assert.deepEqual([oatNow.item.qtyMilli, oatNow.item.costKurus, oatNow.moves[0].reason], [6_900, 9_000, "bill"], "the bill added 6 L once and set ₺90/L");
+const corrected = (await call("POST", `/staff/moda/bills/${oatBill.id}`, {
+  headers: STAFF,
+  body: { version: oatBill.version, supplierId: manav.supplier.id, date: today, lines: [{ itemId: oatItem[0].id, qtyMilli: 5_000, totalKurus: 45_000 }] },
+})).json;
+assert.equal(corrected.version, 2);
+oatNow = (await call("GET", `/staff/moda/stock/items/${oatItem[0].id}`, { headers: STAFF })).json;
+assert.deepEqual([oatNow.item.qtyMilli, oatNow.moves[0].changeMilli], [5_900, -1_000], "the correction moved the difference");
+assert.equal((await call("POST", `/staff/moda/bills/${oatBill.id}/pay`, { headers: ecePos3, body: { method: "cash" } })).json.error.code, "FORBIDDEN");
+const owedBefore = (await call("GET", "/staff/moda", { headers: STAFF })).json.billsOwed;
+const paidBill = (await call("POST", `/staff/moda/bills/${oatBill.id}/pay`, { headers: STAFF, body: { method: "cash" } })).json;
+assert.deepEqual([paidBill.state, paidBill.payments.length], ["paid", 1]);
+const owedAfter = (await call("GET", "/staff/moda", { headers: STAFF })).json.billsOwed;
+assert.deepEqual([owedBefore.count - owedAfter.count, owedBefore.totalKurus - owedAfter.totalKurus], [1, 45_000]);
+const manavPage = (await call("GET", `/staff/moda/suppliers/${manav.supplier.id}`, { headers: STAFF })).json;
+assert.deepEqual([manavPage.owedKurus, manavPage.prices[0].points[0].unitKurus], [0, 9_000]);
+step("Leyla adds a supplier (once despite a retry); Ece enters its bill for 6 L of oat milk at the till (once), which adds stock and sets ₺90/L; Leyla corrects it to 5 L and pays it in cash; Ece can't pay bills");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

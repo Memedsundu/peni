@@ -29,6 +29,8 @@ import {
   InMemoryReportStore,
   InMemoryStockStore,
   type StockStore,
+  InMemoryBillStore,
+  type BillStore,
   type ImageStore,
   type ReportStore,
   InMemoryDirectory,
@@ -87,6 +89,7 @@ import { OrderService } from "./orders";
 import { PaymentService } from "./payments";
 import { CashService } from "./cash";
 import { StockService } from "./stock";
+import { BillService } from "./bills";
 import { bare, eventCapacity, eventTime, FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 
@@ -118,6 +121,7 @@ export interface PeniStores {
   images: ImageStore;
   reports: ReportStore;
   stock: StockStore;
+  bills: BillStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -136,6 +140,7 @@ export function inMemoryStores(): PeniStores {
     images: new InMemoryImageStore(),
     reports: new InMemoryReportStore(),
     stock: new InMemoryStockStore(),
+    bills: new InMemoryBillStore(),
   };
 }
 
@@ -182,6 +187,10 @@ export class PeniApp {
   readonly stock: StockService;
   /** Stock items, moves and recipes as stored; for the demo seed and the data move from Shelby. */
   readonly stockStore: StockStore;
+  /** Faturalar and Tedarikçiler (plan piece 18). */
+  readonly bills: BillService;
+  /** Suppliers, bills and their payments as stored; for the demo seed and the data move from Shelby. */
+  readonly billStore: BillStore;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
   readonly feed: FeedService;
@@ -231,6 +240,8 @@ export class PeniApp {
     this.stockStore = stores.stock;
     this.stock = new StockService(stores.stock, this.menu, stores.staff, () => this.now());
     this.till.stock = this.stock;
+    this.billStore = stores.bills;
+    this.bills = new BillService(stores.bills, stores.stock, this.directory, stores.staff, (fn) => stores.ledger.atomically(fn), () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
@@ -727,6 +738,7 @@ export class PeniApp {
       },
       memberCount: members.length,
       lowStock: permissions?.has("stock.view") ? await this.stock.lowStock(cafe.id) : null,
+      billsOwed: permissions?.has("bills.view") ? await this.bills.owed(cafe.id) : null,
     };
   }
 
