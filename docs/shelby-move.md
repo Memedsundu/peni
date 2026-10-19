@@ -16,6 +16,7 @@ SHELBY_DATABASE_URL="postgres://…" DATABASE_URL="postgres://…" pnpm --filter
 - `--slug <slug>`: the Peni café's address, `shelby` by default (`/kafe/shelby`). Its id is `cafe_<slug>`.
 - `--all`: also the previous owner's records (see below).
 - `--now <ISO time>`: the moment of the move, for rehearsals.
+- `--rehearsal`: lets `--write` run while Shelby isn't frozen. Only for a copy; the real move refuses to run until `shelby-freeze --on` (see [switch-day.md](switch-day.md)).
 - It exits with 1 when a total doesn't match, and 2 on an error.
 
 It only writes into an empty café, so a rehearsal goes into a fresh database (or a Neon branch) each time and the real move runs once. Staff whose email already has a Peni account keep that account and join the café.
@@ -23,7 +24,7 @@ It only writes into an empty café, so a rehearsal goes into a fresh database (o
 ## Rehearsing
 
 1. Make a Neon branch of Shelby's production database (or a copy), and a fresh Peni database with `pnpm --filter @peni/db migrate:deploy`.
-2. Run the dry run, then `--write` into the fresh database.
+2. Run the dry run, then `--write --rehearsal` into the fresh database.
 3. Read the report: every total should say ✓, and "Not moved" and "To look at" should hold no surprises.
 4. Start Peni on that database and sign in with a Shelby email and password.
 
