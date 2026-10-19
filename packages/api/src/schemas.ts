@@ -48,6 +48,23 @@ export const tillDonationSchema = z.object({
 
 export const commentSchema = z.object({ body: z.string().trim().min(1).max(500) });
 
+/** A café post (plan piece 14): words, photos or both. Events come with piece 15. */
+export const createPostSchema = z.object({
+  /** Made once per post on the device, so a retried tap posts once. */
+  createKey: z.string().trim().min(8).max(100),
+  kind: z.enum(["post", "question"]).default("post"),
+  body: z.string().trim().max(2000).default(""),
+  imageUrls: z.array(z.string().max(200)).max(6).default([]),
+  pinned: z.boolean().default(false),
+});
+
+/** Send only what changes. */
+export const updatePostSchema = z.object({
+  body: z.string().trim().max(2000).optional(),
+  imageUrls: z.array(z.string().max(200)).max(6).optional(),
+  pinned: z.boolean().optional(),
+});
+
 /** `POST /cafes/:slug/members/lookup`: by phone or by Peni kodu, one of them. [G6, D28] */
 export const memberLookupSchema = z
   .object({ phone: phoneSchema.optional(), code: memberCodeSchema.optional() })
@@ -277,3 +294,5 @@ export type TakeClaimInput = z.input<typeof takeClaimSchema>;
 export type CheckPeniInput = z.input<typeof checkPeniSchema>;
 export type UsePeniInput = z.input<typeof usePeniSchema>;
 export type GiveAskidaInput = z.input<typeof giveAskidaSchema>;
+export type CreatePostInput = z.input<typeof createPostSchema>;
+export type UpdatePostInput = z.input<typeof updatePostSchema>;

@@ -25,6 +25,8 @@ import type {
 } from "@peni/api";
 import {
   InMemoryCommunityStore,
+  InMemoryImageStore,
+  type ImageStore,
   InMemoryDirectory,
   InMemoryIdentityStore,
   InMemoryLedgerStore,
@@ -79,6 +81,7 @@ import { MenuService } from "./menu";
 import { OrderService } from "./orders";
 import { PaymentService } from "./payments";
 import { CashService } from "./cash";
+import { FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 
 /**
@@ -106,6 +109,7 @@ export interface PeniStores {
   payments: PaymentStore;
   cash: CashStore;
   staff: StaffStore;
+  images: ImageStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -121,6 +125,7 @@ export function inMemoryStores(): PeniStores {
     payments: new InMemoryPaymentStore(),
     cash: new InMemoryCashStore(),
     staff: new InMemoryStaffStore(),
+    images: new InMemoryImageStore(),
   };
 }
 
@@ -165,6 +170,8 @@ export class PeniApp {
   readonly cash: CashService;
   /** Staff sign-in, the team and roles. */
   readonly staff: StaffService;
+  readonly feed: FeedService;
+  readonly images: ImageStore;
   /** Customer sign-in with Google, Apple or an email code. */
   readonly auth: CustomerAuth;
   /** Paid orders' peni codes (plan pieces 7 and 10). */
@@ -188,6 +195,8 @@ export class PeniApp {
       email: options.auth?.email ?? null,
     });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
+    this.images = stores.images;
+    this.feed = new FeedService(stores.community, stores.images, stores.staff, (ids) => this.publicNames(ids), () => this.now());
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
     this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
     this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
@@ -715,6 +724,19 @@ export class PeniApp {
     return { ok: true as const };
   }
 
+  /** Takes back the viewer's own comment, for good. Someone else's isn't theirs to take. */
+  async deleteComment(customer: CustomerRecord, slug: string, postId: string, commentId: string) {
+    const post = await this.requirePost(slug, postId, customer);
+    const comment = post.comments.find((c) => c.id === commentId);
+    if (!comment || comment.customerId !== customer.id) throw new AppError("COMMENT_NOT_FOUND", "No such comment of yours", 404);
+    await this.community.deleteComment(postId, commentId);
+    return { ok: true as const };
+  }
+
+  private async publicNames(customerIds: string[]): Promise<Map<string, string>> {
+    return new Map((await this.identity.getCustomers(customerIds)).map((c) => [c.id, publicName(c)]));
+  }
+
   /** A Peni masası as an .ics file. Public, so a phone can hand the link to its calendar. [G22] */
   async eventIcs(slug: string, postId: string): Promise<{ filename: string; body: string }> {
     const cafe = await this.requireCafe(slug);
@@ -829,7 +851,9 @@ export class PeniApp {
           authorName: publicName(people.get(c.customerId)),
           body: c.body,
           createdAt: c.createdAt.toISOString(),
+          mine: c.customerId === viewer,
         })),
+        imageUrls: p.imageUrls ?? [],
         title: p.title,
         attendees: p.rsvps.map((id) => {
           const c = people.get(id);

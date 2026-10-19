@@ -186,6 +186,32 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.community.listPosts(cafeId))[0]!.rsvps).toEqual([ayse]);
   });
 
+  it("keeps photos, hidden comments for moderators only, and posts taken down", async () => {
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    await stores.images.save({ id: `img_${run}`, cafeId, contentType: "image/png", bytes: png, uploadedBy: "staff_x", createdAt: at });
+    const image = (await stores.images.get(`img_${run}`))!;
+    expect([image.contentType, [...image.bytes]]).toEqual(["image/png", [...png]]);
+    expect(await stores.images.get("img_nope")).toBeNull();
+
+    const postId = `post_photo_${run}`;
+    const post = { id: postId, cafeId, kind: "post" as const, title: null, body: "Yeni kavurduk", publishedAt: at, pinned: false, eventStartsAt: null, eventCapacity: null };
+    await stores.community.savePost({ ...post, imageUrls: [`/api/v1/images/img_${run}`] });
+    await stores.community.addComment(postId, { id: `cmt_a_${run}`, customerId: ayse, body: "Güzel", createdAt: at });
+    await stores.community.addComment(postId, { id: `cmt_b_${run}`, customerId: mehmet, body: "Reklam", createdAt: at });
+    await stores.community.setCommentHidden(postId, `cmt_b_${run}`, at);
+    expect((await stores.community.getPost(postId))!.comments.map((c) => c.body)).toEqual(["Güzel"]);
+    const forModerators = (await stores.community.getPost(postId, { hiddenComments: true }))!;
+    expect(forModerators.comments.map((c) => [c.body, !!c.hiddenAt])).toEqual([["Güzel", false], ["Reklam", true]]);
+    expect(forModerators.imageUrls).toEqual([`/api/v1/images/img_${run}`]);
+    await stores.community.deleteComment(postId, `cmt_a_${run}`);
+    await stores.community.setCommentHidden(postId, `cmt_b_${run}`, null);
+    expect((await stores.community.getPost(postId))!.comments.map((c) => c.body)).toEqual(["Reklam"]);
+
+    await stores.community.savePost({ ...post, hiddenAt: at });
+    expect(await stores.community.getPost(postId)).toBeNull();
+    expect((await stores.community.listPosts(cafeId)).map((p) => p.id)).not.toContain(postId);
+  });
+
   it("commits a gift with the ledger, and keeps its thank-you", async () => {
     const service = new PeniService(new Ledger(stores.ledger), stores.directory, () => at);
     await service.earnForPaidOrder({ membershipId: `m_ayse_${run}`, orderId: `o_${run}`, paidTotalKurus: 100_000 }); // 70 peni

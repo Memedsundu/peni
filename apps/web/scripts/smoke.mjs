@@ -308,6 +308,39 @@ assert.deepEqual([closedDrawer.open, closedDrawer.last.closing.differenceKurus],
 await call("POST", `/staff/moda/devices/${till2.device.id}/revoke`, { headers: STAFF });
 step("No cash until the drawer is opened; Ece opens it with ₺500 counted by notes, sells 2 latte and a simit (one order despite a retry), starts a card payment and backs out of it, takes 300 TL cash with 59 TL change and a 12-peni code for the customer screen, which Ayşe takes once by QR before Mehmet types it; Leyla voids an unpaid order and refunds the paid one, recorded as a refund payment, which takes Ayşe's peni back; Mehmet types the code of a card sale (a wrong code first); Ayşe pays 40 peni of a ₺265 order with her ödeme kodu and the rest by card; Ece takes ₺45 out for milk and closes the drawer ₺5 short with a reason");
 
+// 5j. The café feed (piece 14): Leyla posts a photo, pinned; Ayşe comments, Leyla hides it, Ayşe
+//     deletes another of hers; Ece (barista) can't post.
+const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const upload = await fetch(`${BASE}/api/v1/staff/moda/images`, { method: "POST", headers: { ...STAFF, "content-type": "image/png" }, body: png });
+const { url: photoUrl } = await upload.json();
+assert.match(photoUrl, /^\/api\/v1\/images\/img_/);
+const photo = await fetch(`${BASE}${photoUrl}`);
+assert.deepEqual([photo.status, photo.headers.get("content-type"), Buffer.from(await photo.arrayBuffer()).equals(png)], [200, "image/png", true]);
+const notAPhoto = await fetch(`${BASE}/api/v1/staff/moda/images`, { method: "POST", headers: { ...STAFF, "content-type": "image/png" }, body: "<svg/>" });
+assert.equal((await notAPhoto.json()).error.code, "IMAGE_TYPE");
+const postKey = key();
+const newPost = { createKey: postKey, body: "Yeni kavurduk: Etiyopya Guji.", imageUrls: [photoUrl], pinned: true };
+await call("POST", "/staff/moda/feed", { headers: STAFF, body: newPost });
+const staffFeed = (await call("POST", "/staff/moda/feed", { headers: STAFF, body: newPost })).json;
+assert.equal(staffFeed.posts.filter((p) => p.body === newPost.body).length, 1, "a retried post posts once");
+const postId = `post_${postKey}`;
+assert.equal((await call("GET", "/cafes/moda")).json.posts[0].imageUrls[0], photoUrl);
+const ecePassword = await staffSignIn("ece@moda.test");
+assert.equal((await call("POST", "/staff/moda/feed", { headers: ecePassword, body: { ...newPost, createKey: key() } })).json.error.code, "FORBIDDEN");
+await call("POST", `/cafes/moda/posts/${postId}/comments`, { token: ayse, body: { body: "Çekirdek de satıyor musunuz?" } });
+await call("POST", `/cafes/moda/posts/${postId}/comments`, { token: ayse, body: { body: "Yanlış yazdım" } });
+const seenPost = (await call("GET", "/cafes/moda", { token: ayse })).json.posts.find((p) => p.id === postId);
+const [asked, oops] = seenPost.comments;
+assert.ok(asked.mine && oops.mine);
+assert.equal((await call("POST", `/cafes/moda/posts/${postId}/comments/${oops.id}/delete`, { token: mehmet })).json.error.code, "COMMENT_NOT_FOUND");
+await call("POST", `/cafes/moda/posts/${postId}/comments/${oops.id}/delete`, { token: ayse });
+const moderated = (await call("POST", `/staff/moda/feed/${postId}/comments/${asked.id}`, { headers: STAFF, body: { hidden: true } })).json;
+assert.deepEqual(moderated.posts.find((p) => p.id === postId).comments.map((c) => [c.body, c.hidden]), [["Çekirdek de satıyor musunuz?", true]]);
+assert.equal((await call("GET", "/cafes/moda", { token: ayse })).json.posts.find((p) => p.id === postId).comments.length, 0);
+await call("POST", `/staff/moda/feed/${postId}/remove`, { headers: STAFF });
+assert.ok(!(await call("GET", "/cafes/moda")).json.posts.some((p) => p.id === postId));
+step("Leyla posts a photo, pinned (a retry posts once; Ece can't post); Ayşe comments twice and deletes one; Leyla hides the other, then takes the post down");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");
