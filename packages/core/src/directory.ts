@@ -9,6 +9,11 @@ export interface Membership {
   joinedAt: Date;
   /** Removed from the café's community by staff. Cannot earn, spend or take from the askı. */
   blocked: boolean;
+  /**
+   * Paused in the café's community by a moderator (plan piece 15): reads the feed but can't
+   * post, comment, react, join or report. Peni and the askı are untouched.
+   */
+  pausedAt?: Date | null;
 }
 
 export type GiftStatus = "pending" | "accepted" | "declined" | "expired";

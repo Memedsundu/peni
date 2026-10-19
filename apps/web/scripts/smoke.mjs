@@ -341,6 +341,32 @@ await call("POST", `/staff/moda/feed/${postId}/remove`, { headers: STAFF });
 assert.ok(!(await call("GET", "/cafes/moda")).json.posts.some((p) => p.id === postId));
 step("Leyla posts a photo, pinned (a retry posts once; Ece can't post); Ayşe comments twice and deletes one; Leyla hides the other, then takes the post down");
 
+// 5k. Events (piece 15): Mehmet opens one (a retry opens once), Ayşe joins and reports it; Leyla
+//     takes it down and pauses Mehmet, who can then read but not write; Leyla lets him back in
+//     and opens a café event of her own.
+const inTwoDays = new Date(Date.now() + 2 * 86_400_000).toISOString();
+const eventKey = key();
+const mehmetEvent = { createKey: eventKey, title: "Cumartesi tavla", body: "Tavlamı getiriyorum.", startsAt: inTwoDays, capacity: 4 };
+const opened = (await call("POST", "/cafes/moda/events", { token: mehmet, body: mehmetEvent })).json;
+await call("POST", "/cafes/moda/events", { token: mehmet, body: mehmetEvent });
+assert.equal((await call("GET", "/cafes/moda")).json.posts.filter((p) => p.title === mehmetEvent.title).length, 1, "a retried event opens once");
+await call("POST", `/cafes/moda/posts/${opened.postId}/rsvp`, { token: ayse });
+const asSeen = (await call("GET", "/cafes/moda", { token: ayse })).json.posts.find((p) => p.id === opened.postId);
+assert.deepEqual([asSeen.host.mine, asSeen.rsvpCount, asSeen.rsvpedByMe], [false, 2, true]);
+assert.equal((await call("POST", "/cafes/moda/reports", { token: mehmet, body: { targetType: "post", targetId: opened.postId, reason: "spam" } })).json.error.code, "REPORT_OWN");
+await call("POST", "/cafes/moda/reports", { token: ayse, body: { targetType: "post", targetId: opened.postId, reason: "spam", note: "Satış yapıyor" } });
+const queue = (await call("GET", "/staff/moda/feed", { headers: STAFF })).json.reports;
+assert.ok(queue.some((r) => r.targetId === opened.postId && r.notes[0] === "Satış yapıyor"));
+const handled = (await call("POST", "/staff/moda/feed/reports", { headers: STAFF, body: { targetType: "post", targetId: opened.postId, action: "remove", pauseAuthor: true } })).json;
+assert.ok(!handled.reports.some((r) => r.targetId === opened.postId) && handled.paused.some((m) => m.customerId === "cus_mehmet"));
+assert.equal((await call("GET", "/cafes/moda", { token: mehmet })).json.membership.paused, true);
+assert.equal((await call("POST", `/cafes/moda/posts/post_1/comments`, { token: mehmet, body: { body: "Merhaba" } })).json.error.code, "MEMBER_PAUSED");
+await call("POST", "/staff/moda/feed/members/cus_mehmet", { headers: STAFF, body: { paused: false } });
+assert.equal((await call("GET", "/cafes/moda", { token: mehmet })).json.membership.paused, false);
+const cafeEvent = { createKey: key(), kind: "event", title: "Latte art atölyesi", body: "", eventStartsAt: inTwoDays, eventCapacity: 8 };
+assert.ok((await call("POST", "/staff/moda/feed", { headers: STAFF, body: cafeEvent })).json.posts.some((p) => p.title === cafeEvent.title && p.kind === "event"));
+step("Mehmet opens an event (a retry opens once), Ayşe joins and reports it; Leyla takes it down and pauses him, then lets him back; Leyla opens a café event");
+
 // 6. Profile, calendar.
 const me = (await call("GET", "/me", { token: ayse })).json;
 assert.equal(me.customer.displayName, "Ayşe Yılmaz");

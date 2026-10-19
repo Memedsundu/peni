@@ -26,7 +26,9 @@ import type {
 import {
   InMemoryCommunityStore,
   InMemoryImageStore,
+  InMemoryReportStore,
   type ImageStore,
+  type ReportStore,
   InMemoryDirectory,
   InMemoryIdentityStore,
   InMemoryLedgerStore,
@@ -69,6 +71,7 @@ import {
   type PeniDirectory,
   type Post,
   type PostWithActivity,
+  type ReportTargetType,
   type StaffStore,
 } from "@peni/core";
 import { goods, initials as initialsOf, trUpper } from "@peni/brand/format";
@@ -81,7 +84,7 @@ import { MenuService } from "./menu";
 import { OrderService } from "./orders";
 import { PaymentService } from "./payments";
 import { CashService } from "./cash";
-import { FeedService } from "./feed";
+import { bare, eventCapacity, eventTime, FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 
 /**
@@ -110,6 +113,7 @@ export interface PeniStores {
   cash: CashStore;
   staff: StaffStore;
   images: ImageStore;
+  reports: ReportStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -126,6 +130,7 @@ export function inMemoryStores(): PeniStores {
     cash: new InMemoryCashStore(),
     staff: new InMemoryStaffStore(),
     images: new InMemoryImageStore(),
+    reports: new InMemoryReportStore(),
   };
 }
 
@@ -176,6 +181,8 @@ export class PeniApp {
   readonly auth: CustomerAuth;
   /** Paid orders' peni codes (plan pieces 7 and 10). */
   private readonly claims: ClaimStore;
+  /** Members' reports on each other's comments and events (plan piece 15). */
+  private readonly reports: ReportStore;
   private clockOverride: Date | null = null;
 
   constructor(
@@ -188,6 +195,7 @@ export class PeniApp {
     this.community = stores.community;
     this.menu = stores.menu;
     this.claims = stores.claims;
+    this.reports = stores.reports;
     this.peni = new PeniService(this.ledger, this.directory, () => this.now(), stores.claims, stores.spendCodes);
     this.auth = new CustomerAuth(this.identity, {
       now: () => this.now(),
@@ -196,7 +204,16 @@ export class PeniApp {
     });
     this.staff = new StaffService(stores.staff, this.identity, { now: () => this.now(), bcryptRounds: options.bcryptRounds });
     this.images = stores.images;
-    this.feed = new FeedService(stores.community, stores.images, stores.staff, (ids) => this.publicNames(ids), () => this.now());
+    this.feed = new FeedService(
+      stores.community,
+      stores.images,
+      stores.staff,
+      stores.reports,
+      this.directory,
+      (ids) => this.publicNames(ids),
+      async (ids) => new Map((await this.identity.getCustomers(ids)).map((c) => [c.id, firstNameAndInitial(c.displayName) || "İsimsiz üye"])),
+      () => this.now(),
+    );
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
     this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
     this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
@@ -301,6 +318,7 @@ export class PeniApp {
             balancePeni: await this.peni.walletBalance(membership.id),
             joinedAt: membership.joinedAt.toISOString(),
             memberCode: await this.memberCodeFor(membership.id),
+            paused: !!membership.pausedAt,
           }
         : null,
     };
@@ -726,11 +744,90 @@ export class PeniApp {
 
   /** Takes back the viewer's own comment, for good. Someone else's isn't theirs to take. */
   async deleteComment(customer: CustomerRecord, slug: string, postId: string, commentId: string) {
-    const post = await this.requirePost(slug, postId, customer);
+    // Taking a comment back is fine even while paused.
+    const post = await this.requirePost(slug, postId, customer, false);
     const comment = post.comments.find((c) => c.id === commentId);
     if (!comment || comment.customerId !== customer.id) throw new AppError("COMMENT_NOT_FOUND", "No such comment of yours", 404);
     await this.community.deleteComment(postId, commentId);
     return { ok: true as const };
+  }
+
+  /** A member opens an event (D4): a topic, a time, maybe a limit. They're the first one going. */
+  async openEvent(
+    customer: CustomerRecord,
+    slug: string,
+    input: { createKey: string; title: string; body: string; startsAt: string; capacity: number | null },
+  ): Promise<{ ok: true; postId: string }> {
+    const cafe = await this.requireWriter(slug, customer);
+    const id = `post_${input.createKey}`;
+    const existing = await this.community.getPost(id, { hiddenPosts: true });
+    if (existing) {
+      if (existing.cafeId !== cafe.id || existing.hostCustomerId !== customer.id) throw new AppError("IDEMPOTENCY_CONFLICT", "This key is taken", 409);
+      return { ok: true, postId: id };
+    }
+    const now = this.now();
+    const startsAt = eventTime(input.startsAt, now);
+    const upcoming = (await this.community.listPosts(cafe.id)).filter((p) => p.hostCustomerId === customer.id && p.eventStartsAt && p.eventStartsAt > now);
+    if (upcoming.length >= MAX_OPEN_EVENTS) throw new AppError("EVENT_LIMIT", `At most ${MAX_OPEN_EVENTS} upcoming events each`, 409);
+    await this.community.savePost({
+      id,
+      cafeId: cafe.id,
+      kind: "event",
+      title: input.title,
+      body: input.body,
+      imageUrls: [],
+      pinned: false,
+      publishedAt: now,
+      eventStartsAt: startsAt,
+      eventCapacity: input.capacity,
+      authorId: null,
+      hostCustomerId: customer.id,
+      hiddenAt: null,
+    });
+    await this.community.addRsvp(id, customer.id, now);
+    return { ok: true, postId: id };
+  }
+
+  /** The host changes their event's topic, words, time or limit. */
+  async updateEvent(
+    customer: CustomerRecord,
+    slug: string,
+    postId: string,
+    input: { title?: string; body?: string; startsAt?: string; capacity?: number | null },
+  ): Promise<{ ok: true }> {
+    const post = await this.hostedEvent(slug, postId, customer);
+    await this.community.savePost({
+      ...bare(post),
+      title: input.title ?? post.title,
+      body: input.body ?? post.body,
+      eventStartsAt: input.startsAt ? eventTime(input.startsAt, this.now()) : post.eventStartsAt,
+      eventCapacity: input.capacity !== undefined ? eventCapacity(input.capacity, post.rsvps.length) : post.eventCapacity,
+    });
+    return { ok: true };
+  }
+
+  /** The host calls their event off: gone from the feed, and any reports on it are closed. */
+  async cancelEvent(customer: CustomerRecord, slug: string, postId: string): Promise<{ ok: true }> {
+    const post = await this.hostedEvent(slug, postId, customer, false);
+    await this.community.savePost({ ...bare(post), hiddenAt: this.now() });
+    await this.reports.resolve("post", post.id, "dismissed", customer.id, this.now());
+    return { ok: true };
+  }
+
+  /** Reports another member's comment or event to the café's moderators, once. */
+  async report(
+    customer: CustomerRecord,
+    slug: string,
+    input: { targetType: ReportTargetType; targetId: string; reason: "spam" | "rude" | "unsafe" | "other"; note?: string },
+  ): Promise<{ ok: true }> {
+    const cafe = await this.requireWriter(slug, customer);
+    const postId =
+      input.targetType === "post"
+        ? input.targetId
+        : (await this.community.listPosts(cafe.id)).find((p) => p.comments.some((c) => c.id === input.targetId))?.id;
+    if (!postId) throw new AppError("COMMENT_NOT_FOUND", "No such comment", 404);
+    await this.feed.report(cafe.id, customer.id, { ...input, postId });
+    return { ok: true };
   }
 
   private async publicNames(customerIds: string[]): Promise<Map<string, string>> {
@@ -826,10 +923,13 @@ export class PeniApp {
     const today = startOfLocalDay(this.now(), timeZone);
     const viewer = customer?.id ?? null;
     const posts = await this.community.listPosts(cafeId);
+    const reported = viewer ? await this.reports.reportedBy(cafeId, viewer) : new Set<string>();
     const people = new Map(
-      (await this.identity.getCustomers([...new Set(posts.flatMap((p) => [...p.rsvps, ...p.comments.map((c) => c.customerId)]))])).map(
-        (c) => [c.id, c],
-      ),
+      (
+        await this.identity.getCustomers([
+          ...new Set(posts.flatMap((p) => [...p.rsvps, ...p.comments.map((c) => c.customerId), ...(p.hostCustomerId ? [p.hostCustomerId] : [])])),
+        ])
+      ).map((c) => [c.id, c]),
     );
     return [...posts]
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.publishedAt.getTime() - a.publishedAt.getTime())
@@ -852,6 +952,7 @@ export class PeniApp {
           body: c.body,
           createdAt: c.createdAt.toISOString(),
           mine: c.customerId === viewer,
+          reportedByMe: reported.has(`comment:${c.id}`),
         })),
         imageUrls: p.imageUrls ?? [],
         title: p.title,
@@ -862,6 +963,8 @@ export class PeniApp {
         }),
         answeredTodayByMe:
           p.kind === "question" && !!viewer && p.comments.some((c) => c.customerId === viewer && c.createdAt >= today),
+        host: p.hostCustomerId ? { name: publicName(people.get(p.hostCustomerId)), mine: p.hostCustomerId === viewer } : null,
+        reportedByMe: reported.has(`post:${p.id}`),
       }));
   }
 
@@ -963,11 +1066,29 @@ export class PeniApp {
     return c ? firstNameAndInitial(c.displayName) : null;
   }
 
-  private async requirePost(slug: string, postId: string, customer: CustomerRecord): Promise<PostWithActivity> {
+  /** A post on this café's feed, for a member who may write there (`write`: not paused). */
+  private async requirePost(slug: string, postId: string, customer: CustomerRecord, write = true): Promise<PostWithActivity> {
     const cafe = await this.requireCafe(slug);
     const post = await this.community.getPost(postId);
     if (!post || post.cafeId !== cafe.id) throw new AppError("NOT_FOUND", "Post not found", 404);
-    await this.requireMembershipId(customer.id, cafe.id);
+    if (write) await this.requireWriter(slug, customer);
+    else await this.requireMembershipId(customer.id, cafe.id);
+    return post;
+  }
+
+  /** The café, for a member the moderators haven't paused. */
+  private async requireWriter(slug: string, customer: CustomerRecord): Promise<Cafe> {
+    const cafe = await this.requireCafe(slug);
+    const m = await this.directory.findMembership(customer.id, cafe.id);
+    if (!m) throw new AppError("NOT_A_MEMBER", "Join the café first", 403);
+    if (m.pausedAt) throw new AppError("MEMBER_PAUSED", "Paused in this café's community", 403);
+    return cafe;
+  }
+
+  /** An event this member opened. */
+  private async hostedEvent(slug: string, postId: string, customer: CustomerRecord, write = true): Promise<PostWithActivity> {
+    const post = await this.requirePost(slug, postId, customer, write);
+    if (post.hostCustomerId !== customer.id) throw new AppError("NOT_FOUND", "No such event of yours", 404);
     return post;
   }
 
@@ -989,6 +1110,9 @@ export class PeniApp {
     return m.id;
   }
 }
+
+/** Upcoming events one member can have open at a café at once. */
+const MAX_OPEN_EVENTS = 3;
 
 /** Who a gift goes to: a phone number, a Peni kodu, or a member picked from a list. [G6, D28] */
 export type RecipientRef = { phone: string } | { code: string } | { memberId: string };

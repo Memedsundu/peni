@@ -24,7 +24,7 @@ export class PrismaCommunityStore implements CommunityStore {
   }
 
   async getPost(id: string, opts: ListOptions = {}): Promise<PostWithActivity | null> {
-    const row = await this.db().cafePost.findFirst({ where: { id, hiddenAt: null }, include: activity(opts) });
+    const row = await this.db().cafePost.findFirst({ where: { id, ...(opts.hiddenPosts ? {} : { hiddenAt: null }) }, include: activity(opts) });
     return row ? toDomain(row) : null;
   }
 
@@ -78,6 +78,7 @@ function toDomain(row: Row): PostWithActivity {
     eventCapacity: row.eventCapacity,
     imageUrls: row.imageUrls,
     authorId: row.authorId,
+    hostCustomerId: row.hostCustomerId,
     hiddenAt: row.hiddenAt,
     reactions: row.reactions.map((r) => r.customerId),
     rsvps: row.rsvps.map((r) => r.customerId),

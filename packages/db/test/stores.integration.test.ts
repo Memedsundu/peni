@@ -212,6 +212,39 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.community.listPosts(cafeId)).map((p) => p.id)).not.toContain(postId);
   });
 
+  it("keeps members' events, one report per member, and paused members", async () => {
+    const event = {
+      id: `post_m_${run}`, cafeId, kind: "event" as const, title: "Satranç", body: "", publishedAt: at, pinned: false,
+      eventStartsAt: new Date(at.getTime() + 86_400_000), eventCapacity: 4, imageUrls: [], authorId: null, hostCustomerId: mehmet, hiddenAt: null,
+    };
+    await stores.community.savePost(event);
+    expect((await stores.community.getPost(event.id))!.hostCustomerId).toBe(mehmet);
+    await stores.community.savePost({ ...event, hiddenAt: at });
+    expect(await stores.community.getPost(event.id)).toBeNull();
+    expect((await stores.community.getPost(event.id, { hiddenPosts: true }))!.hiddenAt).toEqual(at);
+
+    const report = {
+      id: `rep_${run}`, cafeId, targetType: "post" as const, targetId: event.id, postId: event.id, reporterId: ayse, reason: "spam" as const,
+      note: "Reklam", status: "open" as const, createdAt: at, resolvedAt: null, resolvedBy: null,
+    };
+    expect(await stores.reports.add(report)).toBe(true);
+    expect(await stores.reports.add({ ...report, id: `rep_dup_${run}` })).toBe(false);
+    expect(await stores.reports.listOpen(cafeId)).toEqual([report]);
+    expect(await stores.reports.reportedBy(cafeId, ayse)).toEqual(new Set([`post:${event.id}`]));
+    await stores.reports.resolve("post", event.id, "upheld", "sm_x", at);
+    expect(await stores.reports.openFor("post", event.id)).toEqual([]);
+
+    const m = (await stores.directory.findMembership(mehmet, cafeId))!;
+    await stores.directory.saveMembership({ ...m, pausedAt: at });
+    expect((await stores.directory.findMembership(mehmet, cafeId))!.pausedAt).toEqual(at);
+    // Saving a membership without a pause leaves the pause alone.
+    const { pausedAt: _p, ...unpaused } = m;
+    await stores.directory.saveMembership({ ...unpaused, blocked: false });
+    expect((await stores.directory.getMembership(m.id))!.pausedAt).toEqual(at);
+    await stores.directory.saveMembership({ ...m, pausedAt: null });
+    expect((await stores.directory.getMembership(m.id))!.pausedAt).toBeNull();
+  });
+
   it("commits a gift with the ledger, and keeps its thank-you", async () => {
     const service = new PeniService(new Ledger(stores.ledger), stores.directory, () => at);
     await service.earnForPaidOrder({ membershipId: `m_ayse_${run}`, orderId: `o_${run}`, paidTotalKurus: 100_000 }); // 70 peni

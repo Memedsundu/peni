@@ -336,6 +336,8 @@ export interface MembershipDTO {
   joinedAt: string;
   /** Peni kodu for the till, e.g. "M7K-42Q". Encode exactly this string in the QR code. [G7b] */
   memberCode: string;
+  /** Paused in the community by the café (plan piece 15): reads, but can't write. */
+  paused: boolean;
 }
 
 /** One chair at the long table. Initials only when that member's profile is visible. [G4] */
@@ -360,22 +362,49 @@ export interface PostDTO {
   /** Photos, in order (plan piece 14). */
   imageUrls: string[];
   /** "Bir üye" for hidden profiles, otherwise "Ayşe Y.". `mine` when the viewer wrote it and can delete it. */
-  comments: { id: string; authorName: string; body: string; createdAt: string; mine: boolean }[];
+  comments: { id: string; authorName: string; body: string; createdAt: string; mine: boolean; reportedByMe: boolean }[];
   /** Event topic. Null for posts and questions. [G4] */
   title: string | null;
   /** RSVPs in arrival order. Declines are never listed. [G4] */
   attendees: AttendeeDTO[];
   /** Questions only: the viewer already answered today ("Bugünkü cevabın masada."). [G13] */
   answeredTodayByMe: boolean;
+  /** The member who opened this event (D4); null when the café posted it. `mine` can edit and cancel it. */
+  host: { name: string; mine: boolean } | null;
+  /** Members can report a member's event, once. */
+  reportedByMe: boolean;
 }
 
 /** `GET /staff/:slug/feed`: the café's own feed, as its Topluluk page shows it (plan piece 14). */
 export interface StaffFeedDTO {
   /** "posts.write": post, edit, pin and take down. */
   canWrite: boolean;
-  /** "posts.moderate": hide comments and bring them back. */
+  /** "posts.moderate": hide comments, take down members' events, handle reports and pause members. */
   canModerate: boolean;
   posts: StaffPostDTO[];
+  /** Open reports, one per reported thing, oldest first. Empty without "posts.moderate". */
+  reports: StaffReportDTO[];
+  /** Members paused in the community. Empty without "posts.moderate". */
+  paused: { customerId: string; name: string; pausedAt: string }[];
+}
+
+/** Everything members reported about one comment or event (plan piece 15). */
+export interface StaffReportDTO {
+  targetType: "post" | "comment";
+  targetId: string;
+  postId: string;
+  /** The event's topic, or the post a comment is under. */
+  postTitle: string;
+  /** What was written: the event's words, or the comment. */
+  body: string;
+  authorName: string;
+  authorCustomerId: string;
+  authorPaused: boolean;
+  /** Hidden until someone looks, because enough members reported it. */
+  hidden: boolean;
+  reasons: { reason: "spam" | "rude" | "unsafe" | "other"; count: number }[];
+  notes: string[];
+  firstReportedAt: string;
 }
 
 export interface StaffPostDTO {
@@ -387,12 +416,17 @@ export interface StaffPostDTO {
   pinned: boolean;
   publishedAt: string;
   eventStartsAt: string | null;
-  /** The staff member who posted it; null for older posts. */
+  eventCapacity: number | null;
+  /** The staff member who posted it; null for older posts and members' events. */
   authorName: string | null;
+  /** The member who opened this event; the café can take it down or pin it, not edit it. */
+  hostName: string | null;
   reactionCount: number;
   rsvpCount: number;
   /** Every comment, hidden ones too, oldest first. Names as customers see them. */
   comments: { id: string; authorName: string; body: string; createdAt: string; hidden: boolean }[];
+  /** Open reports on the post itself. */
+  openReports: number;
 }
 
 export interface CafeDetailDTO extends CafeSummaryDTO {
