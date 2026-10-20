@@ -42,10 +42,11 @@ interface Row {
 }
 
 /** The tooltip: the point's label, then each series with its colour and value. */
-export function ChartTooltip({ config, format }: { config: ChartConfig; format: (value: number, key: string) => string }) {
+export function ChartTooltip({ config, format, line = true }: { config: ChartConfig; format: (value: number, key: string) => string; line?: boolean }) {
   return (
     <Tooltip
-      cursor={{ stroke: "var(--line)", strokeWidth: 1 }}
+      // A thin line on line and area charts; nothing on bars, where the bar itself is the mark.
+      cursor={line ? { stroke: "var(--line)", strokeWidth: 1 } : false}
       isAnimationActive={false}
       content={(props) => {
         const { active, payload, label } = props as { active?: boolean; payload?: readonly Row[]; label?: unknown };

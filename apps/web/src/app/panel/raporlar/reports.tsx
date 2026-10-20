@@ -343,7 +343,7 @@ function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang 
             </defs>
             <CartesianGrid vertical={false} />
             <XAxis dataKey="x" {...AXIS} minTickGap={24} />
-            <YAxis {...AXIS} width={52} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
+            <YAxis {...AXIS} width={64} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
             <ChartTooltip config={config} format={(v) => lira(v * 100)} />
             <ChartLegend config={config} dashed={["previous"]} />
             <Area dataKey="previous" type="monotone" stroke="var(--color-previous)" strokeWidth={2} strokeDasharray="4 4" fill="none" dot={false} activeDot={false} connectNulls isAnimationActive={false} />
@@ -366,7 +366,7 @@ function HoursChart({ data, t }: { data: SalesReportDTO; t: T }) {
           <CartesianGrid vertical={false} />
           <XAxis dataKey="x" {...AXIS} />
           <YAxis {...AXIS} width={36} allowDecimals={false} />
-          <ChartTooltip config={config} format={(v) => String(v)} />
+          <ChartTooltip config={config} format={(v) => String(v)} line={false} />
           <Bar dataKey="orders" radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
             {data.hours.map((h) => (
               <Cell key={h.hour} fill={h.hour === busiest.hour ? "var(--green)" : "var(--color-orders)"} />
@@ -388,8 +388,8 @@ function WeekdayChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lan
         <BarChart data={data.weekdays.map((w) => ({ x: t(`wd_${w.weekday}` as TextKey), sales: w.avgKurus / 100 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey="x" {...AXIS} />
-          <YAxis {...AXIS} width={52} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
-          <ChartTooltip config={config} format={(v) => lira(v * 100)} />
+          <YAxis {...AXIS} width={64} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
+          <ChartTooltip config={config} format={(v) => lira(v * 100)} line={false} />
           <Bar dataKey="sales" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false}>
             {data.weekdays.map((w) => (
               <Cell key={w.weekday} fill={w.weekday === best.weekday ? "var(--green)" : "var(--color-sales)"} />
@@ -420,7 +420,7 @@ function MonthsChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang
         <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} />
           <XAxis dataKey="x" {...AXIS} />
-          <YAxis {...AXIS} width={52} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
+          <YAxis {...AXIS} width={64} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
           <ChartTooltip config={config} format={(v) => lira(v * 100)} />
           <ChartLegend config={config} />
           <Bar dataKey="sales" fill="var(--color-sales)" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
