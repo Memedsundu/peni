@@ -2076,6 +2076,8 @@ export interface WatchPriceDTO {
   billId: string;
   date: string;
   supplier: string | null;
+  /** How many of this item's price findings were let go lately, when that means only moves of twice the usual size are shown; 0 otherwise. */
+  letGo: number;
   products: {
     productId: string;
     name: string;
@@ -2090,9 +2092,10 @@ export interface WatchPriceDTO {
 }
 
 /**
- * Something out of the ordinary (C13). cashGap: a drawer count off by ₺50 or more. voids: one
- * person voided or refunded more than usual. billSpike: a bill twice the supplier's usual.
- * billTwice: two bills from one supplier for the same amount within days.
+ * Something out of the ordinary (C13), judged by the café's own numbers. cashGap: a drawer
+ * count off by more than this café's counts usually are. voids: one person voided or refunded
+ * more than they usually do. billSpike: a bill well above the supplier's usual. billTwice: two
+ * bills from one supplier for the same amount within days.
  */
 export interface WatchUnusualDTO {
   key: string;
@@ -2104,6 +2107,16 @@ export interface WatchUnusualDTO {
   usual: number | null;
   /** Voids and refunds this week. */
   count: number | null;
+  /**
+   * The bar it went over, from this café's own numbers: the gap or bill total in kuruş, the
+   * number of voids and refunds; null for two same-amount bills.
+   */
+  limit: number | null;
+  /**
+   * How many such findings about this person or supplier were let go lately, when that raised
+   * the bar (only ones twice as big, or same-amount bills twice as close, are shown); 0 otherwise.
+   */
+  letGo: number;
   /** The person or the supplier. */
   name: string | null;
   /** The note written at the count. */
@@ -2140,7 +2153,20 @@ export interface OrderSuggestionDTO {
   supplierId: string | null;
   name: string;
   phone: string | null;
-  lines: { itemId: string; name: string; unit: StockUnitDTO; qtyMilli: number; usedPerDayMilli: number; daysLeft: number; orderMilli: number }[];
+  lines: {
+    itemId: string;
+    name: string;
+    unit: StockUnitDTO;
+    qtyMilli: number;
+    usedPerDayMilli: number;
+    daysLeft: number;
+    /** What to order: the rule's amount, or as this café usually orders it when it has a habit. */
+    orderMilli: number;
+    /** What the rule alone says: enough for 10 days above the low mark. */
+    ruleMilli: number;
+    /** When the café keeps ordering more or less than suggested: how many bills showed it, and their middle as a share of the suggestion (160 = 1,6 times). */
+    habit: { times: number; pct: number } | null;
+  }[];
   /** "Merhaba, Moda Kahvesi için: Süt 24 L, …" */
   message: string;
 }
@@ -2152,6 +2178,11 @@ export interface StaffingDTO {
   /** Usual orders an hour for one person; from the last four weeks' shifts, or a default. */
   usualLoad: number;
   fromHistory: boolean;
+  /** Orders an hour for one person that count as busy and as quiet here. */
+  busyAt: number;
+  quietAt: number;
+  /** Busy and quiet come from this café's own past hours, not the default multiples. */
+  barsFromHistory: boolean;
   hints: { kind: "busy" | "nobody" | "quiet"; day: string; fromHour: number; toHour: number; orders: number; people: number }[];
 }
 
@@ -2162,6 +2193,8 @@ export interface WatchDTO {
   unusual: WatchUnusualDTO[];
   /** How many findings were looked at and let go (they stay hidden). */
   seen: number;
+  /** How many findings weren't shown because the owner kept letting such ones go. */
+  quiet: number;
   forecast: ForecastDTO | null;
   orders: OrderSuggestionDTO[] | null;
   staffing: StaffingDTO | null;

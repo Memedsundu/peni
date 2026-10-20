@@ -860,16 +860,29 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
   });
 
   it("remembers which Gözcü findings were seen, the first look standing", async () => {
-    const seen = { cafeId, key: `twice:a_${run}:b_${run}`, memberId: "stf_a", note: "Doğru, iki teslimat", at };
+    const seen = { cafeId, key: `twice:a_${run}:b_${run}`, kind: "billTwice" as const, subject: "sup_a", memberId: "stf_a", note: "Doğru, iki teslimat", at };
     await Promise.all([stores.watch.dismiss(seen), stores.watch.dismiss({ ...seen, memberId: "stf_b", note: null, at: new Date(at.getTime() + 1000) })]);
     const kept = await stores.watch.listDismissed(cafeId);
     expect(kept).toHaveLength(1);
     expect(kept[0]!.key).toBe(seen.key);
-    await stores.watch.dismiss({ ...seen, key: "voids:stf_c:2026-10-12", at: new Date(at.getTime() + 2000) });
+    await stores.watch.dismiss({ ...seen, key: "voids:stf_c:2026-10-12", kind: "voids", subject: "stf_c", at: new Date(at.getTime() + 2000) });
     expect((await stores.watch.listDismissed(cafeId)).map((d) => d.key)).toEqual([seen.key, "voids:stf_c:2026-10-12"]);
     await stores.watch.undismiss(cafeId, seen.key);
     expect((await stores.watch.listDismissed(cafeId)).map((d) => d.key)).toEqual(["voids:stf_c:2026-10-12"]);
     expect(await stores.watch.listDismissed("other")).toEqual([]);
+    expect((await stores.watch.listDismissed(cafeId))[0]).toMatchObject({ kind: "voids", subject: "stf_c" });
+  });
+
+  it("keeps the day's latest order suggestion per item", async () => {
+    await stores.watch.noteSuggestions(cafeId, "2026-10-15", [{ itemId: `stk_${run}`, orderMilli: 11_000 }]);
+    await stores.watch.noteSuggestions(cafeId, "2026-10-16", [{ itemId: `stk_${run}`, orderMilli: 11_000 }]);
+    await stores.watch.noteSuggestions(cafeId, "2026-10-16", [{ itemId: `stk_${run}`, orderMilli: 13_000 }]);
+    const mine = (await stores.watch.listSuggestions(cafeId, "2026-10-01")).filter((x) => x.itemId === `stk_${run}`);
+    expect(mine.map((x) => [x.day, x.orderMilli])).toEqual([
+      ["2026-10-15", 11_000],
+      ["2026-10-16", 13_000],
+    ]);
+    expect(await stores.watch.listSuggestions("other", "2026-10-01")).toEqual([]);
   });
 
   it("keeps the assistant's recipe drafts as written, open ones newest first, and counts the day's", async () => {
