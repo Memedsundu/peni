@@ -14,8 +14,9 @@
   --line: #e6e6e6;
   --line-soft: #ecece8;
   --muted: #5c5c5c;
-  --green: #1e4d3b;
-  --green-soft: #e8efeb;
+  /* 'Good' and 'paid': a green that reads as green, not black, and still passes for text (5.0:1 on white). */
+  --green: #15803d;
+  --green-soft: #dcfce7;
   --red: #a3342b;
   --red-soft: #f7e9e7;
   /* A liked heart: the one live colour on the café page. */
@@ -35,8 +36,8 @@
   --line: #2c2c2a;
   --line-soft: #232321;
   --muted: #a3a3a0;
-  --green: #8cc4a6;
-  --green-soft: #1b2a22;
+  --green: #4ade80;
+  --green-soft: #14301f;
   --red: #e59a91;
   --red-soft: #2e1c1a;
   --heart: #f4607f;
