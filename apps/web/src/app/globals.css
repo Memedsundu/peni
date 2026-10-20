@@ -22,6 +22,8 @@
   --heart: #e0245e;
   /* Charts: last period's line, spending's bars. */
   --mark: #b9beba;
+  /* What a chart points out (the busiest hour, the best day, what was left): far from black and grey. */
+  --chart-accent: #e08a00;
   color-scheme: light;
 }
 
@@ -39,6 +41,7 @@
   --red-soft: #2e1c1a;
   --heart: #f4607f;
   --mark: #4b524e;
+  --chart-accent: #f5a524;
   color-scheme: dark;
 }
 
@@ -58,6 +61,7 @@
   --color-red-soft: var(--red-soft);
   --color-heart: var(--heart);
   --color-mark: var(--mark);
+  --color-chart-accent: var(--chart-accent);
 }
 
 body {
