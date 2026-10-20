@@ -221,7 +221,7 @@ function ReadingRow({ t, lang, r }: { t: T; lang: Lang; r: ReadingDTO }) {
       </span>
       {r.state === "reading" ? (
         <span className="flex items-center gap-2 text-sm text-muted" role="status">
-          <span className="size-3 animate-pulse rounded-full bg-green" aria-hidden="true" />
+          <span className="size-3 animate-pulse rounded-full bg-chart-accent" aria-hidden="true" />
           {t("drReading")}
         </span>
       ) : (

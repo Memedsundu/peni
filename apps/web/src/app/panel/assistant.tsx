@@ -268,7 +268,7 @@ function Panel({
           )}
           {waiting && (
             <p className="flex items-center gap-2 text-muted" role="status">
-              <span className="inline-block size-2 animate-pulse rounded-full bg-green" />
+              <span className="inline-block size-2 animate-pulse rounded-full bg-chart-accent" />
               {t("asThinking")}
             </p>
           )}

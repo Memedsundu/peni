@@ -599,7 +599,7 @@ function PaymentSheet({
       ) : waitingOnTerminal ? (
         <>
           <p className="flex items-center gap-3 text-muted" role="status">
-            <span aria-hidden="true" className="h-3 w-3 animate-pulse rounded-full bg-green" />
+            <span aria-hidden="true" className="h-3 w-3 animate-pulse rounded-full bg-chart-accent" />
             {payment.method === "cash" ? t("waiting_cash") : t("waiting_card")}
           </p>
           <Button onClick={onClose}>{t("cancel")}</Button>

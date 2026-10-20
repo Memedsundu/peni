@@ -75,7 +75,7 @@ function LettersPage({ cafe, t, lang, signedOut, initial }: PanelProps & { initi
       {error && <Notice tone="red">{error}</Notice>}
       {data && data.state !== "ready" && !week && (
         <p className={`flex items-center gap-2 rounded-3xl bg-panel px-5 py-4 ${data.state === "failed" ? "text-red" : "text-muted"}`} role="status">
-          {data.state === "writing" && <span className="inline-block size-2 animate-pulse rounded-full bg-green" />}
+          {data.state === "writing" && <span className="inline-block size-2 animate-pulse rounded-full bg-chart-accent" />}
           {status[data.state]}
         </p>
       )}

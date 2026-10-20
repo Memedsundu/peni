@@ -235,7 +235,7 @@ export function ListCard({
               >
                 <span
                   aria-hidden="true"
-                  className={`flex size-7 shrink-0 items-center justify-center rounded-full border-2 ${done ? "border-green bg-green text-paper" : skipped ? "border-muted text-muted" : "border-ink"}`}
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-full border-2 ${done ? "border-chart-accent bg-chart-accent text-ink" : skipped ? "border-muted text-muted" : "border-ink"}`}
                 >
                   {done && (
                     <svg

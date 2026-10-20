@@ -209,7 +209,7 @@ function BillsPage({ cafe, t, lang, signedOut, billId, adding }: PanelProps & { 
 
 /** The month's spending by kind, as one bar and a legend. */
 function Categories({ t, byCategory, total }: { t: T; byCategory: BillsDTO["byCategory"]; total: number }) {
-  const shades = ["bg-ink", "bg-green", "bg-muted", "bg-line", "bg-tile", "bg-line-soft", "bg-panel"];
+  const shades = ["bg-ink", "bg-chart-accent", "bg-muted", "bg-line", "bg-tile", "bg-line-soft", "bg-panel"];
   return (
     <section className="flex flex-col gap-3">
       <div className="flex h-3 w-full overflow-hidden rounded-full bg-panel" aria-hidden="true">
