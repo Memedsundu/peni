@@ -34,7 +34,7 @@ const expense = (more: Partial<Expense>): Expense => ({
   date: day(0),
   dueDate: null,
   paid: "unknown",
-  lines: [{ name: "Gider", quantity: null, unit: null, total: 100, category: "other", stockItem: null, stockQuantity: null }],
+  lines: [{ name: "Gider", quantity: null, unit: null, total: 100, category: "other", stockItem: null, stockQuantity: null, newItem: null }],
   ...more,
 });
 
@@ -69,7 +69,7 @@ describe("Quick entry (plan piece 28, A7)", () => {
             supplier: 4,
             date: day(-1),
             paid: "cash",
-            lines: [{ name: "Simit", quantity: 40, unit: "adet", total: 400, category: "ingredients", stockItem: Number(simit), stockQuantity: 40 }],
+            lines: [{ name: "Simit", quantity: 40, unit: "adet", total: 400, category: "ingredients", stockItem: Number(simit), stockQuantity: 40, newItem: null }],
           }),
         ],
         doubts: [],
@@ -149,7 +149,7 @@ describe("Quick entry (plan piece 28, A7)", () => {
             supplierName: "Tesisatçı Ahmet",
             paid: "unpaid",
             dueDate: day(10),
-            lines: [{ name: "Musluk tamiri", quantity: null, unit: null, total: 450, category: "services", stockItem: null, stockQuantity: null }],
+            lines: [{ name: "Musluk tamiri", quantity: null, unit: null, total: 450, category: "services", stockItem: null, stockQuantity: null, newItem: null }],
           }),
           expense({ supplier: 99, supplierName: null, paid: "credit", date: day(5) }),
         ],

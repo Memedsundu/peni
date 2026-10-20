@@ -90,9 +90,9 @@ describe("Reading a bill", () => {
     dueDate: "2026-02-30",
     total: 1234.5,
     lines: [
-      { name: "Süt 1 L", quantity: 24, unit: "adet", total: 984.5, category: "ingredients", stockItem: 1, stockQuantity: 24 },
-      { name: "Bardak", quantity: null, unit: null, total: 200, category: "supplies", stockItem: 7, stockQuantity: 50 },
-      { name: " ", quantity: 1, unit: null, total: 5, category: "other", stockItem: null, stockQuantity: null },
+      { name: "Süt 1 L", quantity: 24, unit: "adet", total: 984.5, category: "ingredients", stockItem: 1, stockQuantity: 24, newItem: null },
+      { name: "Bardak", quantity: null, unit: null, total: 200, category: "supplies", stockItem: 7, stockQuantity: 50, newItem: null },
+      { name: " ", quantity: 1, unit: null, total: 5, category: "other", stockItem: null, stockQuantity: null, newItem: null },
     ],
     kdv: [
       { rate: 1, amount: 9.75 },
@@ -117,9 +117,9 @@ describe("Reading a bill", () => {
     const r = readBill(reading, 2);
     expect(r).toMatchObject({ supplierName: "Moda Süt Ürünleri", number: "A-1024", date: "2026-10-14", dueDate: null, totalKurus: 123_450 });
     expect(r.lines).toEqual([
-      { name: "Süt 1 L", quantityMilli: 24_000, unit: "adet", totalKurus: 98_450, category: "ingredients", stockIndex: 0, stockQtyMilli: 24_000 },
+      { name: "Süt 1 L", quantityMilli: 24_000, unit: "adet", totalKurus: 98_450, category: "ingredients", stockIndex: 0, newItem: null, stockQtyMilli: 24_000 },
       // Item 7 isn't one of the two given.
-      { name: "Bardak", quantityMilli: null, unit: null, totalKurus: 20_000, category: "supplies", stockIndex: null, stockQtyMilli: null },
+      { name: "Bardak", quantityMilli: null, unit: null, totalKurus: 20_000, category: "supplies", stockIndex: null, newItem: null, stockQtyMilli: null },
     ]);
     expect(r.kdv).toEqual([
       { ratePct: 1, amountKurus: 975 },
@@ -139,8 +139,38 @@ describe("Reading a bill", () => {
       { name: "Karton  bardak", unit: "adet" },
     ]);
     expect(req.parts[0]).toEqual({ type: "text", text: "Read this document.\n\nStock items:\n1. Süt (l)\n2. Karton bardak (adet)" });
-    expect(req.instructions).toContain("stockQuantity");
-    expect(billReadingRequest({ name: "", contentType: "image/png", bytes: new Uint8Array([1]) }).instructions).not.toContain("stockQuantity");
+    expect(req.instructions).toContain("set stockItem to its number");
+    // With no stock yet, the model can still suggest new items, but has none to pick from.
+    const bare = billReadingRequest({ name: "", contentType: "image/png", bytes: new Uint8Array([1]) }).instructions;
+    expect(bare).not.toContain("set stockItem to its number");
+    expect(bare).toContain("newItem");
+  });
+
+  it("keeps a suggested new stock item only for an ingredient or supply line, with how much came", () => {
+    const line = (l: Partial<BillReading["lines"][number]>): BillReading["lines"][number] => ({
+      name: "Laktozsuz Süt 1 L",
+      quantity: 2,
+      unit: "koli",
+      total: 900,
+      category: "ingredients",
+      stockItem: null,
+      stockQuantity: 24,
+      newItem: { name: "  Laktozsuz   süt ", unit: "l" },
+      ...l,
+    });
+    const r = readBill({ ...reading, total: null, kdv: [], lines: [
+      line({}),
+      // The amount left out is the printed one when it's in the item's unit (or grams for kg).
+      line({ name: "Kakao 500 g", quantity: 500, unit: "g", stockQuantity: null, newItem: { name: "Kakao", unit: "kg" } }),
+      line({ name: "Tamir", category: "services" }),
+      line({ name: "Bardak", stockItem: 1, stockQuantity: 50 }),
+    ] }, 1);
+    expect(r.lines.map((l) => [l.name, l.stockIndex, l.newItem, l.stockQtyMilli])).toEqual([
+      ["Laktozsuz Süt 1 L", null, { name: "Laktozsuz süt", unit: "l" }, 24_000],
+      ["Kakao 500 g", null, { name: "Kakao", unit: "kg" }, 500],
+      ["Tamir", null, null, null],
+      ["Bardak", 0, null, 50_000],
+    ]);
   });
 
   it("drops KDV that can't be right", () => {

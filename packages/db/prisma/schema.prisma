@@ -1516,8 +1516,12 @@ model AiLineMatch {
   /// "" for a bill with no supplier.
   supplierKey  String
   readKey      String
-  itemId       String
+  /// Null when the person kept the line as an expense: it isn't offered as stock again.
+  itemId       String?
+  /// The pack size: thousandths of the item's unit per one printed unit ("1 koli = 12 l" is 12000).
   perUnitMilli Int?
+  /// The printed unit the pack size is for: "koli", "adet"; null when none was printed.
+  readUnit     String?
   updatedAt    DateTime
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)

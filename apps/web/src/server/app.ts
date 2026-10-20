@@ -409,6 +409,7 @@ export class PeniApp {
       email: () => this.options.auth?.email ?? null,
       publicUrl: () => this.options.publicUrl ?? null,
       letter: (cafeId) => this.letters.latest(cafeId),
+      setup: { menu: this.menu, stock: stores.stock, bills: stores.bills, matches: stores.assistant },
       watch: (cafeId, permissions) => this.watch.attention(cafeId, permissions),
       now: () => this.now(),
     });

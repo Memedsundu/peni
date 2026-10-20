@@ -33,6 +33,9 @@ import {
   isSheet,
   lineKey,
   localDateKey,
+  packAmount,
+  packSize,
+  sameMenuName,
   sniffAudioType,
   sniffDocumentType,
   startOfLocalDay,
@@ -376,7 +379,8 @@ export class AssistantService {
       allowDuplicate: allowDuplicate || draft.status !== "open",
     });
     if (draft.status === "open") {
-      await this.learn(ctx.cafe.id, draft.proposal, input);
+      // A line that started a stock item is learned as that item, by the id the bill gave it.
+      await this.learn(ctx.cafe.id, draft.proposal, { ...input, lines: input.lines.map((l, i) => ({ ...l, itemId: bill.lines[i]?.itemId ?? l.itemId })) });
       const changed = changedFields(draft.proposal, input, input.paid?.method ?? null);
       Object.assign(draft, { status: "confirmed", decidedById: ctx.member.id, decidedAt: this.now(), resultId: bill.id, changed });
       await this.store.saveDraft(draft);
@@ -744,7 +748,11 @@ export class AssistantService {
   /**
    * What was read, as a bill for this café: a known supplier when the name or tax number
    * matches, and each line as the stock item a person confirmed it to be before, or the
-   * one the model picked (piece 25). Anything that needs a second look becomes a doubt.
+   * one the model picked (piece 25). A line a person confirmed before also comes with its
+   * pack size: "3 koli" is worked out as they confirmed "2 koli", not as the model reads it.
+   * An ingredient or supply line that is none of the café's items, with an amount, is
+   * offered as a new stock item; one a person kept as an expense before stays an expense.
+   * Anything that needs a second look becomes a doubt.
    */
   private async propose(cafeId: string, read: ReadBill, items: StockItem[], sender: string | null): Promise<{ proposal: BillProposal; doubts: string[] }> {
     const suppliers = await this.billStore.listSuppliers(cafeId);
@@ -754,26 +762,59 @@ export class AssistantService {
     const live = new Map(items.map((i) => [i.id, i]));
     const doubts: string[] = [];
     const used = new Set<string>();
+    const named = new Set<string>();
     const lines: ProposalLine[] = read.lines.map((l) => {
       const printed = { readName: l.name, readQtyMilli: l.quantityMilli, readUnit: l.unit };
-      const expense: ProposalLine = { itemId: null, name: l.name, category: l.category, qtyMilli: null, totalKurus: l.totalKurus, ...printed, matchedBy: null };
+      const expense: ProposalLine = {
+        itemId: null,
+        newItem: null,
+        name: l.name,
+        category: l.category,
+        qtyMilli: null,
+        totalKurus: l.totalKurus,
+        ...printed,
+        matchedBy: null,
+      };
       const known = learned.get(lineKey(l.name));
+      // Kept as an expense before: not offered as stock again.
+      if (known && !known.itemId) return expense;
       const picked = l.stockIndex !== null ? items[l.stockIndex] : undefined;
-      const item = known ? live.get(known.itemId) : picked;
+      // A new item named like one the café has is that one.
+      const sameName = !known && !picked && l.newItem ? items.find((i) => sameMenuName(i.name, l.newItem!.name)) : undefined;
+      const item = known ? live.get(known.itemId!) : (picked ?? sameName);
+      if (!item && !known && l.newItem && l.stockQtyMilli) {
+        const key = trLower(l.newItem.name);
+        if (named.has(key)) {
+          doubts.push(`"${l.name}" satırını yeni stok kalemi yapmadım: ${l.newItem.name} başka bir satırda var.`);
+          return expense;
+        }
+        named.add(key);
+        const kind = l.category === "supplies" ? "supply" : "ingredient";
+        return {
+          ...expense,
+          newItem: { name: l.newItem.name, unit: l.newItem.unit, kind },
+          name: l.newItem.name,
+          category: kind === "supply" ? "supplies" : "ingredients",
+          qtyMilli: l.stockQtyMilli,
+          matchedBy: "model",
+        };
+      }
       if (!item) return expense;
       if (used.has(item.id)) {
         doubts.push(`"${l.name}" satırını stoğa bağlamadım: ${item.name} başka bir satırda var.`);
         return expense;
       }
       used.add(item.id);
-      let qtyMilli = picked?.id === item.id ? l.stockQtyMilli : null;
-      if (known?.perUnitMilli && l.quantityMilli) qtyMilli = Math.round((l.quantityMilli * known.perUnitMilli) / 1000);
+      let qtyMilli = picked?.id === item.id || (sameName?.id === item.id && sameName.unit === l.newItem?.unit) ? l.stockQtyMilli : null;
+      const packed = known ? packAmount(known, { qtyMilli: l.quantityMilli, unit: l.unit }) : null;
+      if (packed) qtyMilli = packed;
       if (!qtyMilli || qtyMilli <= 0 || qtyMilli > 1_000_000_000) {
         qtyMilli = null;
         doubts.push(`${item.name} için gelen miktarı yaz.`);
       }
       return {
         itemId: item.id,
+        newItem: null,
         name: item.name,
         category: item.kind === "supply" ? "supplies" : "ingredients",
         qtyMilli,
@@ -798,7 +839,11 @@ export class AssistantService {
     };
   }
 
-  /** What the person confirmed each read line to be, kept for the supplier's next bill. */
+  /**
+   * What the person confirmed each read line to be, kept for the supplier's next bill: the
+   * item, and the pack size in the unit it was printed in ("2 koli" as 24 l is 12 l a koli).
+   * A line offered as stock that they kept as an expense is remembered too, so it isn't offered again.
+   */
   private async learn(
     cafeId: string,
     proposal: BillProposal,
@@ -809,12 +854,12 @@ export class AssistantService {
       if (!read?.readName) continue;
       const readKey = lineKey(read.readName);
       if (!readKey) continue;
+      const base = { cafeId, supplierId: input.supplierId, readKey, updatedAt: this.now() };
       if (l.itemId) {
-        const perUnitMilli = read.readQtyMilli && l.qtyMilli ? Math.round((l.qtyMilli * 1000) / read.readQtyMilli) : null;
-        await this.store.saveLineMatch({ cafeId, supplierId: input.supplierId, readKey, itemId: l.itemId, perUnitMilli, updatedAt: this.now() });
-      } else if (read.itemId) {
-        // It was matched and the person said it isn't stock: stop matching it.
-        await this.store.deleteLineMatch(cafeId, input.supplierId, readKey);
+        const perUnitMilli = packSize(read.readQtyMilli, l.qtyMilli ?? null);
+        await this.store.saveLineMatch({ ...base, itemId: l.itemId, perUnitMilli, readUnit: perUnitMilli ? read.readUnit : null });
+      } else if (read.itemId || read.newItem) {
+        await this.store.saveLineMatch({ ...base, itemId: null, perUnitMilli: null, readUnit: null });
       }
     }
   }
@@ -902,7 +947,11 @@ export class AssistantService {
       };
     if (d.kind === "zreport")
       return { ...base, kind: "zreport", zreport: d.status === "open" ? await this.checks.zreport(ctx, d.proposal) : null, outcome: outcomeDto(d.outcome) };
-    return { ...base, kind: "bill", proposal: { ...d.proposal, paid: d.proposal.paid ?? null } as BillProposalDTO };
+    return {
+      ...base,
+      kind: "bill",
+      proposal: { ...d.proposal, lines: d.proposal.lines.map((l) => ({ ...l, newItem: l.newItem ?? null })), paid: d.proposal.paid ?? null } as BillProposalDTO,
+    };
   }
 
   private async names(ids: string[]): Promise<Map<string, string>> {
@@ -995,7 +1044,10 @@ function learnedMatches(all: LineMatch[], supplierId: string | null): Map<string
   }
   for (const [key, ms] of elsewhere) {
     if (!out.has(key) && ms.every((m) => m.itemId === ms[0]!.itemId))
-      out.set(key, { ...ms[0]!, perUnitMilli: ms.every((m) => m.perUnitMilli === ms[0]!.perUnitMilli) ? ms[0]!.perUnitMilli : null });
+      out.set(key, {
+        ...ms[0]!,
+        ...(ms.every((m) => m.perUnitMilli === ms[0]!.perUnitMilli && m.readUnit === ms[0]!.readUnit) ? {} : { perUnitMilli: null, readUnit: null }),
+      });
   }
   return out;
 }
@@ -1022,8 +1074,22 @@ function changedFields(p: BillProposal, input: BillInput, paid: string | null): 
   if ((p.date ?? null) !== input.date) out.push("date");
   if ((p.number ?? null) !== (input.number ?? null)) out.push("number");
   if ((p.dueDate ?? null) !== (input.dueDate ?? null)) out.push("dueDate");
-  const line = (l: { itemId: string | null; name?: string; category?: string; qtyMilli?: number | null; totalKurus: number }) =>
-    [l.itemId ?? "", l.itemId ? "" : (l.name ?? ""), l.itemId ? "" : (l.category ?? ""), l.qtyMilli ?? "", l.totalKurus].join("|");
+  const line = (l: {
+    itemId: string | null;
+    newItem?: { name: string; unit: string } | null;
+    name?: string;
+    category?: string;
+    qtyMilli?: number | null;
+    totalKurus: number;
+  }) =>
+    [
+      l.itemId ?? "",
+      l.newItem ? `${l.newItem.name}/${l.newItem.unit}` : "",
+      l.itemId || l.newItem ? "" : (l.name ?? ""),
+      l.itemId || l.newItem ? "" : (l.category ?? ""),
+      l.qtyMilli ?? "",
+      l.totalKurus,
+    ].join("|");
   if (p.lines.map(line).join("\n") !== input.lines.map(line).join("\n")) out.push("lines");
   const kdv = (k: { ratePct: number; amountKurus: number }[] = []) => k.map((x) => `${x.ratePct}:${x.amountKurus}`).join(",");
   if (kdv(p.kdv) !== kdv(input.kdv)) out.push("kdv");
@@ -1073,6 +1139,7 @@ export function demoModel(today: () => string): AiModel {
         doubts: [],
       } satisfies BillReading;
     const cups = /^(\d+)\. Karton bardak/m.exec(list);
+    const napkins = /^(\d+)\. Peçete/m.exec(list);
     return {
       kind: "bill",
       supplierName: "Ambalaj Dünyası Tic. Ltd. Şti.",
@@ -1090,8 +1157,19 @@ export function demoModel(today: () => string): AiModel {
           category: "supplies",
           stockItem: cups ? Number(cups[1]) : null,
           stockQuantity: cups ? 1000 : null,
+          newItem: null,
         },
-        { name: "Peçete", quantity: 20, unit: "adet", total: 360, category: "supplies", stockItem: null, stockQuantity: null },
+        // Napkins come in packs of 100; a café that doesn't keep them yet is offered a new item.
+        {
+          name: "Peçete 100'lü",
+          quantity: 20,
+          unit: "paket",
+          total: 360,
+          category: "supplies",
+          stockItem: napkins ? Number(napkins[1]) : null,
+          stockQuantity: 2000,
+          newItem: napkins ? null : { name: "Peçete", unit: "adet" },
+        },
       ],
       kdv: [{ rate: 20, amount: 301.67 }],
       doubts: ["Demo: belge gerçekten okunmadı, bu örnek bir okuma."],
@@ -1162,7 +1240,7 @@ function demoQuick([context = "", said = ""]: string[]): QuickReading {
         date: /dün/.test(lower) ? yesterday : today,
         dueDate: null,
         paid: paidOf(part) ?? everyPaid,
-        lines: [{ name: category === "services" ? "İşçilik" : name, quantity: null, unit: null, total, category, stockItem: null, stockQuantity: null }],
+        lines: [{ name: category === "services" ? "İşçilik" : name, quantity: null, unit: null, total, category, stockItem: null, stockQuantity: null, newItem: null }],
       } satisfies QuickReading["expenses"][number],
     ];
   });

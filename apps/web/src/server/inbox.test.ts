@@ -59,7 +59,7 @@ const reading: BillReading = {
   date: "2026-10-15",
   dueDate: null,
   total: 1810,
-  lines: [{ name: "Karton bardak 8 oz", quantity: 1000, unit: "adet", total: 1810, category: "supplies", stockItem: null, stockQuantity: null }],
+  lines: [{ name: "Karton bardak 8 oz", quantity: 1000, unit: "adet", total: 1810, category: "supplies", stockItem: null, stockQuantity: null, newItem: null }],
   kdv: [],
   doubts: [],
 };

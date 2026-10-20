@@ -316,6 +316,15 @@ const billLine = z.object({
   totalKurus: z.number().int().min(0).max(100_000_000),
   /** Confirming a draft: which of its read lines this is, so the match is learned (piece 25). */
   from: z.number().int().min(0).max(49).optional(),
+  /** Adding a bill: a stock item to create for this line ("Yeni stok kalemi"); `qtyMilli` is how much came. */
+  newItem: z
+    .object({
+      name: z.string().trim().min(1, "Bir ad yaz").max(60, "En çok 60 karakter"),
+      unit: z.enum(["kg", "l", "adet"]),
+      kind: z.enum(["ingredient", "supply"]),
+    })
+    .nullable()
+    .optional(),
 });
 
 /** The KDV printed on the bill, per rate (piece 25). */

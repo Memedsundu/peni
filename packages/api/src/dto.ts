@@ -326,6 +326,8 @@ export interface BillsDTO {
   canManage: boolean;
   /** Can add a supplier from the bill form ("suppliers.edit"). */
   canAddSupplier: boolean;
+  /** Can start a stock item from a bill line, as a scanned bill offers ("stock.edit"). */
+  canAddStock: boolean;
   /** Can send a photo or PDF for the assistant to read ("bills.add", with the assistant on). */
   canScan: boolean;
   /** Can see Taslaklar, where scans wait to be checked ("assistant.use"). */
@@ -1508,6 +1510,23 @@ export interface TodayDTO {
   sales: TodaySalesDTO | null;
   /** Last week's letter once it's written (piece 30); null without "reports.view". */
   letter: { weekStart: string; weekEnd: string; headline: string } | null;
+  /** What keeps the café's stock from being complete, for those who manage stock or the menu; null once all is in order. */
+  setup: SetupDTO | null;
+}
+
+/**
+ * Bugün's setup checklist: each part null when it's done or the viewer can't act on it.
+ * Names are the first few; `count` is all of them.
+ */
+export interface SetupDTO {
+  /** Products on the menu with no recipe, of how many ("menu.recipes"). */
+  noRecipe: { count: number; total: number; names: string[] } | null;
+  /** Bill lines of the last 30 days that looked like stock and reached none, by bill ("stock.edit" and "bills.view"). */
+  unstocked: { count: number; bills: { id: string; supplierName: string | null; date: string; lines: string[] }[] } | null;
+  /** Stock items no bill has brought ("stock.edit"). */
+  neverBought: { count: number; names: string[] } | null;
+  /** Items a recipe uses that weren't counted in 30 days ("stock.edit"). */
+  notCounted: { count: number; names: string[] } | null;
 }
 
 export interface TodaySalesDTO {
@@ -1602,6 +1621,8 @@ export interface BillProposalDTO {
 export interface ProposalLineDTO {
   /** The stock item it was matched to (piece 25), or null for an expense line. */
   itemId: string | null;
+  /** Or the stock item it could start ("Yeni stok kalemi: Laktozsuz süt (l)"), with `qtyMilli` how much came. */
+  newItem: { name: string; unit: StockUnitDTO; kind: "ingredient" | "supply" } | null;
   name: string;
   category: BillCategoryDTO;
   /** Stock lines: thousandths of the item's unit; null when it couldn't be worked out. */

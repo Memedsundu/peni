@@ -1,7 +1,25 @@
-import type { AlertDTO, TodayDTO } from "@peni/api";
+import type { AlertDTO, SetupDTO, TodayDTO } from "@peni/api";
 import { alertWords } from "@peni/api/alert-text";
 import { formatTL } from "@peni/brand/format";
-import { localDateKey, localHour, permissionsFor, plusDays, type Cafe, type PeniDirectory, type Permission, type StaffStore, type TaskStore } from "@peni/core";
+import {
+  lineKey,
+  localDateKey,
+  localHour,
+  permissionsFor,
+  plusDays,
+  SETUP_DAYS,
+  setupChecklist,
+  setupOpen,
+  type AssistantStore,
+  type BillStore,
+  type Cafe,
+  type MenuStore,
+  type PeniDirectory,
+  type Permission,
+  type StaffStore,
+  type StockStore,
+  type TaskStore,
+} from "@peni/core";
 import type { EmailMessage, EmailSender } from "./customer-auth";
 import type { DebtService } from "./debts";
 import type { PayService } from "./pay";
@@ -46,6 +64,8 @@ export interface AlertDeps {
   publicUrl: () => string | null;
   /** Last week's letter for Bugün (piece 30), once it's written. */
   letter?: (cafeId: string) => Promise<TodayDTO["letter"]>;
+  /** What the setup checklist reads: the menu, stock, bills and what people kept as expenses. */
+  setup?: { menu: MenuStore; stock: StockStore; bills: BillStore; matches: Pick<AssistantStore, "listLineMatches"> };
   /** Gözcü's findings and the day money may run short (piece 31). */
   watch?: (
     cafeId: string,
@@ -168,15 +188,68 @@ export class AlertService {
     return out.sort((a, b) => Number(b.level === "critical") - Number(a.level === "critical") || ORDER.indexOf(a.type) - ORDER.indexOf(b.type));
   }
 
+  /**
+   * Bugün's setup checklist, for those who manage stock or the menu: products with no recipe,
+   * bill lines that looked like stock but reached none, items never bought on a bill, recipe
+   * items not counted in 30 days. Null when there's nothing on it the viewer can act on.
+   */
+  async setup(cafeId: string, permissions: ReadonlySet<Permission>): Promise<SetupDTO | null> {
+    const s = this.d.setup;
+    const recipesToo = permissions.has("menu.recipes");
+    const stock = permissions.has("stock.edit");
+    const bills = stock && permissions.has("bills.view");
+    if (!s || (!recipesToo && !stock)) return null;
+    const now = this.d.now();
+    const since = new Date(now.getTime() - SETUP_DAYS * 86_400_000);
+    const today = await this.dayOf(cafeId);
+    const [products, recipes, items, recent, bought, counts, matches, suppliers] = await Promise.all([
+      recipesToo ? s.menu.listMenu(cafeId) : null,
+      s.stock.listRecipes(cafeId),
+      stock ? s.stock.listItems(cafeId) : null,
+      bills ? s.bills.listBills(cafeId, { from: plusDays(today, -SETUP_DAYS) }) : null,
+      stock ? s.bills.boughtItems(cafeId) : [],
+      stock ? s.stock.listMoves(cafeId, { reasons: ["count", "start"], from: since, limit: 10_000 }) : [],
+      bills ? s.matches.listLineMatches(cafeId) : [],
+      bills ? s.bills.listSuppliers(cafeId, { includeArchived: true }) : [],
+    ]);
+    const lastCounted = new Map<string, Date>();
+    // A starting amount of nothing isn't a count; a count that found what was expected is.
+    for (const m of counts) if ((m.reason === "count" || m.changeMilli !== 0) && !lastCounted.has(m.itemId)) lastCounted.set(m.itemId, m.at);
+    const kept = new Set(matches.filter((m) => !m.itemId).map((m) => `${m.supplierId ?? ""}|${m.readKey}`));
+    const c = setupChecklist({
+      products,
+      recipes,
+      items,
+      bills: recent,
+      bought: new Set(bought),
+      lastCounted,
+      notStock: (supplierId, name) => kept.has(`${supplierId ?? ""}|${lineKey(name)}`),
+      now,
+    });
+    if (!setupOpen(c)) return null;
+    const names = new Map(suppliers.map((x) => [x.id, x.name]));
+    const short = <T extends { names: string[] }>(x: T | null) => x && { ...x, names: x.names.slice(0, NAMES) };
+    return {
+      noRecipe: short(c.noRecipe),
+      unstocked: c.unstocked && {
+        count: c.unstocked.count,
+        bills: c.unstocked.bills.slice(0, NAMES).map((b) => ({ id: b.id, supplierName: b.supplierId ? (names.get(b.supplierId) ?? null) : null, date: b.date, lines: b.lines })),
+      },
+      neverBought: short(c.neverBought),
+      notCounted: short(c.notCounted),
+    };
+  }
+
   /** Bugün: the viewer's alerts and today's tasks. */
   async today(ctx: StaffContext): Promise<TodayDTO> {
     const cafeId = ctx.cafe.id;
-    const [alerts, tasks, muted, sales, letter] = await Promise.all([
+    const [alerts, tasks, muted, sales, letter, setup] = await Promise.all([
       this.list(cafeId, ctx.permissions),
       this.d.tasks.summary(ctx),
       this.d.store.listMuted(cafeId),
       this.d.sales.today(ctx),
       ctx.permissions.has("reports.view") && this.d.letter ? this.d.letter(cafeId) : null,
+      this.setup(cafeId, ctx.permissions),
     ]);
     return {
       cafe: { slug: ctx.cafe.slug, name: ctx.cafe.name },
@@ -187,6 +260,7 @@ export class AlertService {
       email: { eligible: this.mayEmail(ctx.rolePermissions), on: !muted.includes(ctx.member.id) },
       sales,
       letter,
+      setup,
     };
   }
 

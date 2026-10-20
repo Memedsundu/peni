@@ -1,12 +1,12 @@
 "use client";
 
-import { PeniApiError, type AlertDTO, type TodayDTO, type TodaySalesDTO } from "@peni/api";
+import { PeniApiError, type AlertDTO, type SetupDTO, type TodayDTO, type TodaySalesDTO } from "@peni/api";
 import { alertWords } from "@peni/api/alert-text";
 import { formatTL } from "@peni/brand/format";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
-import { rangeLabel } from "../amounts";
+import { formatDay, rangeLabel } from "../amounts";
 import { axisLabel, change, Chart, compactTL, signedPercent, type ChartColors } from "../chart";
 import { useSave } from "../controls";
 import { has, PanelShell, type PanelProps } from "../shell";
@@ -98,6 +98,8 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
             )}
           </section>
 
+          {data.setup && <SetupList setup={data.setup} slug={cafe.slug} t={t} lang={lang} />}
+
           {data.tasks && (
             <section className="flex flex-col gap-3" aria-labelledby="tasks">
               <div className="flex items-baseline justify-between gap-3">
@@ -175,6 +177,80 @@ function AlertCard({ alert: a, today, slug, t, lang }: { alert: AlertDTO; today:
         {words.action}
       </a>
     </li>
+  );
+}
+
+/**
+ * The setup checklist: what keeps the café's stock from being complete, each with where to
+ * fix it. It's only here while something is left; each row goes once it's done.
+ */
+function SetupList({ setup, slug, t, lang }: { setup: SetupDTO; slug: string; t: T; lang: Lang }) {
+  const names = (xs: string[], count: number) => (count > xs.length ? fill(t("setupMore"), { names: xs.join(", "), n: count - xs.length }) : xs.join(", "));
+  const rows: { key: string; title: string; detail: string; help: string; links: { href: string; label: string }[] }[] = [];
+  if (setup.noRecipe)
+    rows.push({
+      key: "recipe",
+      title: fill(t("setupNoRecipe"), { count: setup.noRecipe.count, total: setup.noRecipe.total }),
+      detail: names(setup.noRecipe.names, setup.noRecipe.count),
+      help: t("setupNoRecipeHelp"),
+      links: [{ href: "/panel/menu", label: t("setupOpenMenu") }],
+    });
+  if (setup.unstocked)
+    rows.push({
+      key: "bills",
+      title: fill(t("setupUnstocked"), { count: setup.unstocked.count }),
+      detail: setup.unstocked.bills.flatMap((b) => b.lines).join(", "),
+      help: t("setupUnstockedHelp"),
+      links: setup.unstocked.bills.map((b) => ({
+        href: `/panel/faturalar?fatura=${encodeURIComponent(b.id)}`,
+        label: [b.supplierName ?? t("noSupplier"), formatDay(b.date, lang)].join(" · "),
+      })),
+    });
+  if (setup.neverBought)
+    rows.push({
+      key: "bought",
+      title: fill(t("setupNeverBought"), { count: setup.neverBought.count }),
+      detail: names(setup.neverBought.names, setup.neverBought.count),
+      help: t("setupNeverBoughtHelp"),
+      links: [{ href: "/panel/stok", label: t("setupOpenStock") }],
+    });
+  if (setup.notCounted)
+    rows.push({
+      key: "counted",
+      title: fill(t("setupNotCounted"), { count: setup.notCounted.count }),
+      detail: names(setup.notCounted.names, setup.notCounted.count),
+      help: t("setupNotCountedHelp"),
+      links: [{ href: "/panel/stok", label: t("setupCount") }],
+    });
+  return (
+    <section className="flex flex-col gap-3" aria-labelledby="setup">
+      <div className="flex flex-col gap-1">
+        <h2 id="setup" className="text-sm text-muted">
+          {t("setupTitle")}
+        </h2>
+        <p className="text-sm leading-normal text-muted">{t("setupHelp")}</p>
+      </div>
+      <ul className="flex flex-col rounded-3xl border border-line">
+        {rows.map((r) => (
+          <li key={r.key} className="flex flex-col gap-2 border-b border-line-soft p-5 last:border-b-0">
+            <p className="font-semibold">{r.title}</p>
+            {r.detail && <p className="text-sm leading-normal">{r.detail}</p>}
+            <p className="text-sm leading-normal text-muted">{r.help}</p>
+            <span className="flex flex-wrap gap-2">
+              {r.links.map((l) => (
+                <a
+                  key={l.href}
+                  href={withCafe(l.href, slug)}
+                  className="inline-flex min-h-11 items-center rounded-full border border-line bg-paper px-4 text-sm font-semibold"
+                >
+                  {l.label}
+                </a>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

@@ -142,6 +142,32 @@ describe("Faturalar (plan piece 18)", () => {
     expect(await code(app.bills.void(murat, bill.id, { reason: " " }))).toBe("REASON_REQUIRED");
   });
 
+  it("starts a stock item from a bill line, at nothing plus what came, priced from the line; a void takes the amount back out", async () => {
+    const view = await app.bills.list(murat);
+    expect([view.canAddStock, (await app.bills.list(ece)).canAddStock]).toEqual([true, false]);
+    const fresh = { name: " Laktozsuz   süt ", unit: "l" as const, kind: "ingredient" as const };
+    const bill = await app.bills.add(murat, {
+      key: key(),
+      supplierId: "sup_seed_sut",
+      date: "2026-10-16",
+      lines: [
+        { itemId: null, newItem: fresh, qtyMilli: 24_000, totalKurus: 90_000 },
+        // Named like an item the café has: that item, not a second one.
+        { itemId: null, newItem: { ...fresh, name: "SÜT" }, qtyMilli: 12_000, totalKurus: 54_000 },
+      ],
+    });
+    const made = await item(bill.lines[0]!.itemId!);
+    expect(made).toMatchObject({ name: "Laktozsuz süt", unit: "l", kind: "ingredient", qtyMilli: 24_000, minMilli: 0, costKurus: 3_750 });
+    expect(bill.lines[1]).toMatchObject({ itemId: "stk_sut", name: "Süt" });
+    expect(await code(app.bills.add(murat, { key: key(), ...milk(1, 45), lines: [{ itemId: null, newItem: { ...fresh, name: " " }, qtyMilli: 1_000, totalKurus: 100 }] }))).toBe(
+      "NAME_REQUIRED",
+    );
+
+    await app.bills.void(murat, bill.id, { reason: "Yanlış fatura" });
+    // The item stays on Stok, with nothing in it.
+    expect(await item(made.id)).toMatchObject({ qtyMilli: 0, archivedAt: null });
+  });
+
   it("checks what a bill says", async () => {
     const add = (over: object) => code(app.bills.add(murat, { key: key(), ...milk(1, 45), ...over }));
     expect(await add({ date: "2026-10-17" })).toBe("BILL_DATE_INVALID");

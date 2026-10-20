@@ -1,6 +1,7 @@
 import type { BillCategory, BillKdv } from "./bills";
 import type { CheckOutcome, StatementProposal, ZReportProposal } from "./checks";
 import { sniffImageType, type ImageType } from "./images";
+import { MILLI, STOCK_MAX_MILLI, type StockKind, type StockUnit } from "./stock";
 
 /**
  * The assistant's ground (plan piece 24): the documents a café hands it, the drafts it
@@ -148,10 +149,17 @@ export interface BillProposal {
 export interface ProposalLine {
   /** The stock item it was matched to (piece 25), or null for an expense line. */
   itemId: string | null;
-  /** The item's name for a stock line, else what was read. */
+  /**
+   * Or the stock item it could start: a line that looks like something the café keeps (an
+   * ingredient or supply with an amount) but matches none of its items. Confirming it as is
+   * creates the item and adds the amount; the person can rename it, pick an existing item
+   * or keep it an expense. Drafts written before this have none.
+   */
+  newItem?: NewStockItem | null;
+  /** The item's name for a stock line (or the new item's), else what was read. */
   name: string;
   category: BillCategory;
-  /** Stock lines: how much came, in thousandths of the item's unit; null when it couldn't be worked out. */
+  /** Stock lines (and new items): how much came, in thousandths of the item's unit; null when it couldn't be worked out. */
   qtyMilli: number | null;
   totalKurus: number;
   /** The line as printed, so the person can see what it was matched from. */
@@ -160,6 +168,13 @@ export interface ProposalLine {
   readUnit: string | null;
   /** How it was matched: the model's guess, or what a person confirmed for this line before. */
   matchedBy: "model" | "learned" | null;
+}
+
+/** A stock item a bill line could start: "Laktozsuz süt", kept in litres, an ingredient. */
+export interface NewStockItem {
+  name: string;
+  unit: StockUnit;
+  kind: StockKind;
 }
 
 /** An earlier bill or draft that looks like the same document (piece 25's duplicate guard). */
@@ -208,6 +223,10 @@ interface DraftBase {
  * What a person confirmed a read line to be (piece 25): "SÜT 1LT TAM YAĞLI" from Moda Süt
  * is the stock item Süt, one of them being a litre. The next bill from them is matched the
  * same way without asking the model to guess again.
+ *
+ * The pack size comes with it: "Laktozsuz Süt 1 L, 2 koli" confirmed as 24 l means one koli
+ * from them is 12 l, so their next "3 koli" is 36 l whatever the model makes of it. It holds
+ * only for the unit it was learned in: "24 adet" of the same line isn't 288 l.
  */
 export interface LineMatch {
   cafeId: string;
@@ -215,10 +234,33 @@ export interface LineMatch {
   supplierId: string | null;
   /** The read name, tidied (see `lineKey`). */
   readKey: string;
-  itemId: string;
-  /** Thousandths of the item's unit per one read unit; null when the quantity wasn't read. */
+  /** The stock item it is; null when a person kept the line as an expense, so it isn't offered as stock again. */
+  itemId: string | null;
+  /** The pack size: thousandths of the item's unit per one read unit; null when the quantity wasn't read. */
   perUnitMilli: number | null;
+  /** The printed unit the pack size is for ("koli", "adet"); null when none was printed. */
+  readUnit: string | null;
   updatedAt: Date;
+}
+
+/**
+ * The amount a learned pack size gives for a line: "3 koli" at 12 l a koli is 36 l. Null when
+ * the line wasn't printed in the unit the pack size was learned in, or the result is no amount.
+ */
+export function packAmount(
+  match: Pick<LineMatch, "perUnitMilli" | "readUnit">,
+  read: { qtyMilli: number | null; unit: string | null },
+): number | null {
+  // A match learned before units were kept has none, and holds as it did then: for any unit.
+  if (!match.perUnitMilli || !read.qtyMilli || (match.readUnit && match.readUnit !== read.unit)) return null;
+  const milli = Math.round((read.qtyMilli * match.perUnitMilli) / MILLI);
+  return milli > 0 && milli <= STOCK_MAX_MILLI ? milli : null;
+}
+
+/** The pack size a confirmed line shows: 24 l from "2 koli" is 12 l a koli (12 000 thousandths). */
+export function packSize(readQtyMilli: number | null, qtyMilli: number | null): number | null {
+  if (!readQtyMilli || !qtyMilli || readQtyMilli <= 0 || qtyMilli <= 0) return null;
+  return Math.round((qtyMilli * MILLI) / readQtyMilli);
 }
 
 /** "SÜT 1 LT. Tam-Yağlı" and "süt 1 lt tam yağlı" are the same line. */
