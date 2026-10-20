@@ -175,6 +175,7 @@ model Cafe {
   savedReports   SavedReport[]
   weeklyLetters  WeeklyLetter[]
   watchSeen      WatchDismissal[]
+  watchSuggested WatchSuggestion[]
   inbox          CafeInbox?
   inboundEmails  InboundEmail[]
   memberships    Membership[]
@@ -1639,6 +1640,10 @@ model WeeklyLetter {
 model WatchDismissal {
   cafeId   String
   key      String
+  /// price, cashGap, voids, billSpike or billTwice: kinds let go again and again are shown less.
+  kind     String
+  /// Whom it was about: the supplier, the person or the stock item; null when nobody in particular.
+  subject  String?
   memberId String
   note     String?
   at       DateTime
@@ -1646,4 +1651,19 @@ model WatchDismissal {
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@id([cafeId, key])
+  @@index([cafeId, kind, subject])
+}
+
+/// Gözcü (plan piece 31, C15): what was suggested to order on a day, before anything learned, to
+/// compare with the bills that follow.
+model WatchSuggestion {
+  cafeId     String
+  itemId     String
+  /// YYYY-MM-DD in the café's time zone.
+  day        String
+  orderMilli Int
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, itemId, day])
 }
