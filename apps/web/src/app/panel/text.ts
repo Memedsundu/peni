@@ -777,6 +777,8 @@ const TEXT = {
   rpPrevPeriod: { tr: "Önceki dönem", en: "Previous period" },
   rpByHour: { tr: "Saatlere göre sipariş", en: "Orders by hour" },
   rpByHourHelp: { tr: "Dönemdeki tüm siparişler, saat saat.", en: "Every order in the period, hour by hour." },
+  rpBusiestNote: { tr: "Yeşil: en yoğun saat, {h}:00 ({n} sipariş)", en: "Green: the busiest hour, {h}:00 ({n} orders)" },
+  rpBestDayNote: { tr: "Yeşil: satışın en yüksek olduğu gün, {d} (ortalama {v})", en: "Green: the best day for sales, {d} (on average {v})" },
   rpByWeekday: { tr: "Günlere göre ortalama satış", en: "Average sales by weekday" },
   rpByWeekdayHelp: { tr: "Biten günlerin ortalaması.", en: "Average over whole days." },
   rpMonths: { tr: "Ay ay", en: "Month by month" },

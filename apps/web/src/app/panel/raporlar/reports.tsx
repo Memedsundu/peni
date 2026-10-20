@@ -308,12 +308,12 @@ function Headline({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang })
   );
 }
 
-/** "08:00", "16 Eki", "12 Eki haftası", "Eylül". */
-function pointLabel(key: string, step: SalesReportDTO["series"]["step"], lang: Lang): string {
+/** "08:00", "16 Eki", "12 Eki haftası", "Eylül"; with `year`, a month reads "Eki 2025". */
+function pointLabel(key: string, step: SalesReportDTO["series"]["step"], lang: Lang, year = false): string {
   if (step === "hour") return `${key}:00`;
   if (step === "day") return formatDay(key, lang);
   if (step === "week") return formatDay(key, lang);
-  return new Date(`${key}-15T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { month: "short", timeZone: "UTC" });
+  return new Date(`${key}-15T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { month: "short", ...(year ? { year: "numeric" } : {}), timeZone: "UTC" });
 }
 
 const AXIS = { tickLine: false, axisLine: false, tickMargin: 8 } as const;
@@ -321,11 +321,19 @@ const AXIS = { tickLine: false, axisLine: false, tickMargin: 8 } as const;
 function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang }) {
   const { step, points } = data.series;
   const fillId = useFillId("sales");
+  // The legend says which days are compared ("1–20 Eki", "1–20 Eyl"), not just "this" and "before".
   const config = {
-    sales: { label: t("rpThisPeriod"), color: "var(--ink)" },
-    previous: { label: t("rpPrevPeriod"), color: "var(--mark)" },
+    sales: { label: rangeLabel(data, lang), color: "var(--ink)" },
+    previous: { label: rangeLabel(data.previous, lang), color: "var(--mark)" },
   } satisfies ChartConfig;
-  const rows = points.map((p) => ({ x: pointLabel(p.key, step, lang), sales: p.salesKurus / 100, previous: p.previousKurus === null ? null : p.previousKurus / 100 }));
+  const day = (d: string, key: string) => (step === "hour" ? `${formatDay(d, lang)} ${pointLabel(key, step, lang)}` : pointLabel(key, step, lang, true));
+  const rows = points.map((p) => ({
+    x: pointLabel(p.key, step, lang),
+    now: day(data.from, p.key),
+    before: p.previousKey === null ? null : day(data.previous.from, p.previousKey),
+    sales: p.salesKurus / 100,
+    previous: p.previousKurus === null ? null : p.previousKurus / 100,
+  }));
   const total = points.reduce((s, p) => s + p.salesKurus, 0);
   return (
     <section className="flex flex-col gap-3">
@@ -344,7 +352,7 @@ function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang 
             <CartesianGrid vertical={false} />
             <XAxis dataKey="x" {...AXIS} minTickGap={24} />
             <YAxis {...AXIS} width={64} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
-            <ChartTooltip config={config} format={(v) => lira(v * 100)} />
+            <ChartTooltip config={config} format={(v) => lira(v * 100)} rowLabel={(key, row) => String((key === "sales" ? row.now : row.before) ?? "")} />
             <ChartLegend config={config} dashed={["previous"]} />
             <Area dataKey="previous" type="monotone" stroke="var(--color-previous)" strokeWidth={2} strokeDasharray="4 4" fill="none" dot={false} activeDot={false} connectNulls isAnimationActive={false} />
             <Area dataKey="sales" type="monotone" stroke="var(--color-sales)" strokeWidth={2} fill={`url(#${fillId})`} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
@@ -374,7 +382,18 @@ function HoursChart({ data, t }: { data: SalesReportDTO; t: T }) {
           </Bar>
         </BarChart>
       </ChartContainer>
+      <Note>{fill(t("rpBusiestNote"), { h: busiest.hour, n: busiest.orders })}</Note>
     </section>
+  );
+}
+
+/** What the green bar means, under the chart, with a swatch of it. */
+function Note({ children }: { children: string }) {
+  return (
+    <p className="flex items-center gap-2 text-sm text-muted">
+      <span aria-hidden="true" className="size-2.5 shrink-0 rounded-[3px] bg-green" />
+      {children}
+    </p>
   );
 }
 
@@ -397,6 +416,7 @@ function WeekdayChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lan
           </Bar>
         </BarChart>
       </ChartContainer>
+      <Note>{fill(t("rpBestDayNote"), { d: t(`wd_${best.weekday}` as TextKey), v: lira(best.avgKurus) })}</Note>
     </section>
   );
 }

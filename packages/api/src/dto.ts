@@ -1564,7 +1564,7 @@ export interface SalesReportDTO {
   /** How the period's orders were paid, net of refunds. Peni and askı aren't money in. */
   paidWith: { cashKurus: number; cardKurus: number; peniKurus: number; askidaKurus: number };
   /** Money in over the period, bucket by bucket, with the previous period's bucket at the same place. */
-  series: { step: ReportStepDTO; points: { key: string; salesKurus: number; previousKurus: number | null }[] };
+  series: { step: ReportStepDTO; points: { key: string; salesKurus: number; previousKurus: number | null; previousKey: string | null }[] };
   /** Paid orders by hour of the day, "07" to "22"; only hours with any. */
   hours: { hour: string; orders: number }[];
   /** Average money in per weekday (1 = Monday), whole days only; empty for periods under a week. */

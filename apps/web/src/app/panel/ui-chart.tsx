@@ -41,28 +41,43 @@ interface Row {
   color?: string;
 }
 
-/** The tooltip: the point's label, then each series with its colour and value. */
-export function ChartTooltip({ config, format, line = true }: { config: ChartConfig; format: (value: number, key: string) => string; line?: boolean }) {
+/**
+ * The tooltip: the point's label, then each series with its colour and value. `rowLabel`
+ * names a row by what it really is (its own date, "4 Eyl"), and then the heading goes:
+ * each row already says which day it is.
+ */
+export function ChartTooltip({
+  config,
+  format,
+  line = true,
+  rowLabel,
+}: {
+  config: ChartConfig;
+  format: (value: number, key: string) => string;
+  line?: boolean;
+  rowLabel?: (key: string, row: Record<string, unknown>) => string | null;
+}) {
   return (
     <Tooltip
       // A thin line on line and area charts; nothing on bars, where the bar itself is the mark.
       cursor={line ? { stroke: "var(--line)", strokeWidth: 1 } : false}
       isAnimationActive={false}
       content={(props) => {
-        const { active, payload, label } = props as { active?: boolean; payload?: readonly Row[]; label?: unknown };
+        const { active, payload, label } = props as { active?: boolean; payload?: readonly (Row & { payload?: Record<string, unknown> })[]; label?: unknown };
         if (!active || !payload?.length) return null;
         const rows = payload.filter((p) => typeof p.value === "number");
         if (!rows.length) return null;
         return (
           <div className="flex min-w-36 flex-col gap-1.5 rounded-xl border border-line bg-paper px-3 py-2 text-xs shadow-sm">
-            <span className="font-medium text-ink">{String(label ?? "")}</span>
+            {!rowLabel && <span className="font-medium text-ink">{String(label ?? "")}</span>}
             {rows.map((p) => {
               const key = String(p.dataKey ?? p.name ?? "");
+              const name = (rowLabel && p.payload ? rowLabel(key, p.payload) : null) ?? config[key]?.label ?? key;
               return (
                 <span key={key} className="flex items-center justify-between gap-4">
-                  <span className="flex items-center gap-1.5 text-muted">
+                  <span className={`flex items-center gap-1.5 ${rowLabel ? "text-ink" : "text-muted"}`}>
                     <span aria-hidden="true" className="size-2.5 shrink-0 rounded-[3px]" style={{ background: `var(--color-${key})` }} />
-                    {config[key]?.label ?? key}
+                    {name}
                   </span>
                   <span className="tabular font-medium text-ink">{format(p.value as number, key)}</span>
                 </span>
