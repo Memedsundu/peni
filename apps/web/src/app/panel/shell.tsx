@@ -163,6 +163,19 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
                   {t(p.label)}
                 </a>
               ))}
+              {/* The till runs at /kasa, on a computer set up as one; owners reach it from here. A new tab, because setting a till up signs that browser out of the panel. */}
+              {has(cafe!, "devices.manage") && (
+                <a
+                  href="/kasa"
+                  target="_blank"
+                  rel="noopener"
+                  className="flex min-h-11 shrink-0 items-center gap-1 rounded-full px-4 text-sm font-semibold whitespace-nowrap text-muted hover:text-ink"
+                >
+                  {t("navTill")}
+                  <span aria-hidden="true">↗</span>
+                  <span className="sr-only">{t("newTab")}</span>
+                </a>
+              )}
             </nav>
           )}
         </header>
