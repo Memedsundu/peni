@@ -186,6 +186,41 @@ export interface RecipesDTO {
   items: { id: string; name: string; unit: StockUnitDTO; kind: "ingredient" | "supply"; costKurus: number | null }[];
 }
 
+/**
+ * A recipe the assistant drafted for a product with none (D21). Lines point at one of the
+ * café's items or at one of `newItems`, which are added to Stok when it's confirmed.
+ */
+export interface RecipeDraftDTO {
+  id: string;
+  productId: string;
+  productName: string;
+  mode: StockModeDTO;
+  lines: { itemId: string | null; newItem: number | null; qtyMilli: number }[];
+  newItems: { name: string; unit: StockUnitDTO; kind: "ingredient" | "supply" }[];
+  /** With "none": why it uses no stock. */
+  reason: string | null;
+  /** What the assistant assumed, in Turkish. */
+  notes: string[];
+  /** What one would cost at the items' latest prices; null when an item (or a new one) has no price yet. */
+  costKurus: number | null;
+  /** Items in it with no price yet, new ones included, by name. */
+  unpriced: string[];
+  createdAt: string;
+}
+
+/** `GET /staff/:slug/menu/recipe-drafts`: the assistant's open recipe drafts, for Menü. Needs "menu.recipes". */
+export interface RecipeDraftsDTO {
+  /** One per product still without a recipe, newest first. */
+  drafts: RecipeDraftDTO[];
+  /** Products on the menu with no recipe and no draft: what "Eksik reçetelerin hepsini yaz" writes. */
+  missing: string[];
+  ai: "on" | "demo" | "off";
+  /** Drafts the café can still have written today. */
+  left: number;
+  /** The viewer can add the new items a draft needs ("stock.edit"). */
+  canAddItems: boolean;
+}
+
 // ─────────────────────────────────────────────── suppliers and bills (plan piece 18)
 
 export type BillCategoryDTO = "ingredients" | "supplies" | "rent" | "utilities" | "services" | "wages" | "other";
