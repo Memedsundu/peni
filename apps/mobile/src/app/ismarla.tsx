@@ -8,7 +8,7 @@ import { api, newKey } from "../lib/api";
 import { useSession } from "../lib/session";
 import { FONTS } from "../lib/theme";
 import { GiftActions, ShareLink } from "../ui/gifts";
-import { AmountPicker, Btn, CafeLine, CafePicker, Field, Label, Loading, Notice, Screen, styles, Title, Txt, useScreenColors } from "../ui/kit";
+import { AmountPicker, Btn, CafeLine, CafePicker, Coin, Field, Label, Loading, Notice, Screen, styles, Title, Txt, useScreenColors } from "../ui/kit";
 import { SignIn } from "../ui/sign-in";
 
 /** Whom the treat goes to, as the server wants it, and how to say their name. */
@@ -288,9 +288,12 @@ function HowMuch({ cafe, recipient, onChange, onSent, onError }: { cafe: WalletC
           <Txt muted>{`${t("yourBalance")}: ${balance}`}</Txt>
         </View>
         <AmountPicker amounts={[10, 20, 50]} value={peni} max={balance} onChange={setPeni} otherLabel={t("other")} label={t("howMuch")} />
-        <Txt serif size={60} color={c.cafe}>
-          {peni} <Txt serif size={30} color={c.cafe}>penny</Txt>
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Coin size={54} />
+          <Txt serif size={60} color={c.cafe}>
+            {peni} <Txt serif size={30} color={c.cafe}>penny</Txt>
+          </Txt>
+        </View>
         {asGoods ? <Txt muted>{`≈ ${asGoods}`}</Txt> : null}
       </View>
       <Field label={t("note")} value={note} onChangeText={setNote} maxLength={140} placeholder={t("notePlaceholder")} />

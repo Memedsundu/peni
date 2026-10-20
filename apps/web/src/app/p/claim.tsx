@@ -3,7 +3,7 @@
 import type { CafeHue, CafeSummaryDTO, ClaimDTO, TakeClaimInput } from "@peni/api";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api } from "../kasa/api";
-import { Button, Notice } from "../kasa/ui";
+import { Button, Coin, Notice } from "../kasa/ui";
 import { errorText, text, type Lang, type T } from "./text";
 
 /** Each café's own colour on its customer pages; Peni's green when it hasn't picked one. */
@@ -77,8 +77,11 @@ export function CafeLine({ name }: { name: string }) {
 export function Amount({ peni, goods, caption }: { peni: number; goods: string | null; caption: string }) {
   return (
     <div className="flex flex-col gap-1">
-      <p className="font-serif text-7xl leading-none text-[var(--cafe)] tabular">
-        {peni} <span className="text-4xl">penny</span>
+      <p className="flex items-center gap-4 font-serif text-7xl leading-none text-[var(--cafe)] tabular">
+        <Coin size={64} />
+        <span className="whitespace-nowrap">
+          {peni} <span className="text-4xl">penny</span>
+        </span>
       </p>
       <p className="text-lg">
         {caption}

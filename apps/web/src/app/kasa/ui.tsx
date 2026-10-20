@@ -89,6 +89,11 @@ export function Keypad({ onKey, eraseLabel, okLabel, onOk, okDisabled }: { onKey
   );
 }
 
+/** The penny: the silver goat coin, beside a penny amount. Decorative; the number says it. */
+export function Coin({ size }: { size: number }) {
+  return <img src="/coin.png" alt="" aria-hidden="true" width={size} height={size} className="inline-block shrink-0 select-none" draggable={false} />;
+}
+
 /** The photo, or a calm placeholder until the café adds one. */
 export function Photo({ src, alt, label, className = "" }: { src: string | null; alt: string; label: string; className?: string }) {
   if (src) return <img src={src} alt={alt} className={`object-cover ${className}`} />;

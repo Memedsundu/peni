@@ -4,7 +4,7 @@ import type { CafeMemberDTO, FullWalletDTO, GiftDTO, RecentRecipientDTO, SendGif
 import { dativeName, goods } from "@peni/brand/format";
 import { useEffect, useState } from "react";
 import { api } from "../kasa/api";
-import { Button, Notice } from "../kasa/ui";
+import { Button, Coin, Notice } from "../kasa/ui";
 import { CafeLine, EmailSignIn, Shell, useLang, useSignedIn } from "../p/claim";
 import { errorText, fill, text, type Lang, type T } from "../p/text";
 import { GiftActions, ShareLink } from "../hediye/parts";
@@ -368,8 +368,11 @@ function Amount({
             className="tabular min-h-14 rounded-2xl border border-line bg-paper px-5 text-2xl outline-none focus:border-ink"
           />
         )}
-        <p className="font-serif text-6xl leading-none text-[var(--cafe)] tabular">
-          {peni} <span className="text-3xl">penny</span>
+        <p className="flex items-center gap-3 font-serif text-6xl leading-none text-[var(--cafe)] tabular">
+          <Coin size={56} />
+          <span className="whitespace-nowrap">
+            {peni} <span className="text-3xl">penny</span>
+          </span>
         </p>
         {goods(peni, refItems) && <p className="text-muted">≈ {goods(peni, refItems)}</p>}
       </div>
