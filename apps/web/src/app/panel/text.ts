@@ -663,6 +663,8 @@ const TEXT = {
   // Bugün and Görevler (piece 22)
   navToday: { tr: "Bugün", en: "Today" },
   navTasks: { tr: "Görevler", en: "Tasks" },
+  navTill: { tr: "Satış ekranı", en: "Till" },
+  newTab: { tr: "(yeni sekmede açılır)", en: "(opens in a new tab)" },
   todayTitle: { tr: "Bugün", en: "Today" },
   todayAttention: { tr: "Bakılacaklar", en: "Needs attention" },
   todayAllGood: { tr: "Her şey yolunda; bakılacak bir şey yok.", en: "All good; nothing needs you right now." },
