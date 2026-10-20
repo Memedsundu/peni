@@ -1,0 +1,76 @@
+# Checks every pull request into main, and main itself after each merge:
+# the code type-checks, the unit tests pass, and the database tests pass against a real Postgres.
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same pull request cancels the run that's still going for the old one.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: peni
+          POSTGRES_PASSWORD: peni
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U peni"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Version comes from "packageManager" in package.json.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      # The database tests in packages/db skip themselves here; the next steps run them for real.
+      - run: pnpm test
+
+      # Same sorting rules as Neon (C.UTF-8): two tests depend on the order text sorts in.
+      - name: Create the test database
+        run: >-
+          docker exec ${{ job.services.postgres.id }}
+          psql -U peni -d postgres -v ON_ERROR_STOP=1
+          -c "CREATE DATABASE peni_test TEMPLATE template0 LOCALE 'C.UTF-8'"
+
+      - name: Database tests
+        working-directory: packages/db
+        env:
+          TEST_DATABASE_URL: postgresql://peni:peni@localhost:5432/peni_test
+        run: |
+          pnpm exec vitest run --reporter=default --reporter=json --outputFile=vitest-results.json
+          # Fail if any test was skipped, so a missing database can't pass for a green run.
+          node -e '
+            const r = require("./vitest-results.json");
+            const skipped = r.numPendingTests + r.numTodoTests;
+            console.log(`${r.numPassedTests} of ${r.numTotalTests} database tests passed, ${skipped} skipped`);
+            if (r.numTotalTests === 0 || skipped > 0) process.exit(1);
+          '
