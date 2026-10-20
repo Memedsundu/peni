@@ -14,6 +14,8 @@ const LIGHT = {
   greenSoft: "#e8efeb",
   red: "#a3342b",
   redSoft: "#f7e9e7",
+  /** A liked heart: the one live colour on a café's feed. */
+  heart: "#e0245e",
 };
 const DARK: typeof LIGHT = {
   ink: "#f2f2ee",
@@ -27,6 +29,7 @@ const DARK: typeof LIGHT = {
   greenSoft: "#1b2a22",
   red: "#e59a91",
   redSoft: "#2e1c1a",
+  heart: "#f4607f",
 };
 
 /** Each café's own colour on its pages; Peni's green when it hasn't picked one. */

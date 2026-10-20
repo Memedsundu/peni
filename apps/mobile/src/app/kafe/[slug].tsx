@@ -67,7 +67,12 @@ export default function CafePage() {
       }}
     >
       <View style={{ gap: 16 }}>
-        <Photo url={cafe.coverImageUrl} label={cafe.name} />
+        {cafe.coverImageUrl ? (
+          <Photo url={cafe.coverImageUrl} label={cafe.name} />
+        ) : (
+          // No cover yet: the café's initial, as on its posts, rather than an empty box.
+          <NoCover name={cafe.name} />
+        )}
         <View style={{ gap: 4 }}>
           <Txt serif size={48} accessibilityRole="header">
             {cafe.name}
@@ -95,14 +100,14 @@ export default function CafePage() {
       )}
 
       {message && <Notice tone="red">{message}</Notice>}
-      <View style={{ gap: 40 }} accessibilityLabel={t("fromCafe")}>
+      <View style={{ gap: 16 }} accessibilityLabel={t("fromCafe")}>
         {cafe.posts.length === 0 && (
           <Txt muted center style={{ paddingVertical: 24 }}>
             {t("noFeed")}
           </Txt>
         )}
         {cafe.posts.map((p) => (
-          <Post key={p.id} slug={cafe.slug} post={p} member={member} paused={paused} act={act} onEdit={() => setEventSheet(p)} onReport={setReporting} onNeedMember={join} />
+          <Post key={p.id} slug={cafe.slug} cafeName={cafe.name} post={p} member={member} paused={paused} act={act} onEdit={() => setEventSheet(p)} onReport={setReporting} onNeedMember={join} />
         ))}
       </View>
 
@@ -189,6 +194,7 @@ function AskiLink({ text, onPress }: { text: string; onPress: () => void }) {
 
 function Post({
   slug,
+  cafeName,
   post,
   member,
   paused,
@@ -198,6 +204,7 @@ function Post({
   onNeedMember,
 }: {
   slug: string;
+  cafeName: string;
   post: PostDTO;
   member: boolean;
   paused: boolean;
@@ -224,13 +231,20 @@ function Post({
   };
 
   return (
-    <View style={{ gap: 14 }}>
+    <View style={{ gap: 14, borderWidth: 1, borderColor: c.line, borderRadius: 24, padding: 16 }}>
+      {/* Who it's from comes first, as on every social feed: it's what tells one post from the next. */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+        <Initial name={post.host ? post.host.name : cafeName} cafe={!post.host} size={36} />
+        <Txt size={16} style={{ fontWeight: "600" }}>
+          {post.host ? post.host.name : cafeName}
+        </Txt>
+      </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         {post.pinned && <Chip filled>{t("pinnedPost")}</Chip>}
         {label && <Chip>{label}</Chip>}
-        {post.host && (
+        {post.host?.mine && (
           <Txt size={14} muted>
-            {post.host.mine ? t("hostedByYou") : fill(t("hostedBy"), { name: post.host.name })}
+            {t("hostedByYou")}
           </Txt>
         )}
         <Txt size={14} muted>
@@ -259,18 +273,18 @@ function Post({
           accessibilityRole="button"
           accessibilityLabel={post.reactedByMe ? t("unlike") : t("like")}
           accessibilityState={{ selected: post.reactedByMe, disabled: busy || paused }}
-          style={[styles.pill, { minHeight: 44, flexDirection: "row", gap: 8, borderColor: post.reactedByMe ? c.cafe : c.line }]}
+          style={[styles.pill, { minHeight: 44, flexDirection: "row", gap: 8, borderColor: post.reactedByMe ? c.heart : c.line }]}
         >
           <Svg width={20} height={20} viewBox="0 0 24 24">
             <Path
               d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"
-              fill={post.reactedByMe ? c.cafe : "none"}
-              stroke={post.reactedByMe ? c.cafe : c.ink}
+              fill={post.reactedByMe ? c.heart : "none"}
+              stroke={post.reactedByMe ? c.heart : c.ink}
               strokeWidth={1.8}
               strokeLinejoin="round"
             />
           </Svg>
-          <Txt size={15} color={post.reactedByMe ? c.cafe : c.ink}>
+          <Txt size={15} color={post.reactedByMe ? c.heart : c.ink}>
             {post.reactionCount}
           </Txt>
         </Pressable>
@@ -547,5 +561,26 @@ function ReportSheet({ slug, target, onClose }: { slug: string; target: ReportTa
         {t("reportSend")}
       </Btn>
     </Sheet>
+  );
+}
+
+/** A round initial: dark for the café, quiet grey for a member. Stands in for a photo. */
+function Initial({ name, cafe = false, size }: { name: string; cafe?: boolean; size: number }) {
+  const c = useScreenColors();
+  return (
+    <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: cafe ? c.ink : c.tile, alignItems: "center", justifyContent: "center" }}>
+      <Txt serif size={Math.round(size / 2)} color={cafe ? c.paper : c.ink}>
+        {name.trim().charAt(0).toLocaleUpperCase("tr-TR")}
+      </Txt>
+    </View>
+  );
+}
+
+function NoCover({ name }: { name: string }) {
+  const c = useScreenColors();
+  return (
+    <View style={{ aspectRatio: 5 / 2, borderRadius: 24, backgroundColor: c.tile, alignItems: "center", justifyContent: "center" }} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+      <Initial name={name} cafe size={80} />
+    </View>
   );
 }

@@ -57,7 +57,14 @@ export function CafePage({ slug }: { slug: string }) {
   return (
     <Shell lang={lang} onLang={toggleLang} hue={cafe.hue}>
       <section className="flex flex-col gap-4">
-        <Photo src={cafe.coverImageUrl} alt={cafe.name} label={t("photoN").replace("{n}", "")} className="aspect-[4/3] w-full rounded-3xl" />
+        {cafe.coverImageUrl ? (
+          <Photo src={cafe.coverImageUrl} alt={cafe.name} label={t("photoN").replace("{n}", "")} className="aspect-[4/3] w-full rounded-3xl" />
+        ) : (
+          // No cover yet: the café's initial, as on its posts, rather than an empty grey box.
+          <span aria-hidden="true" className="flex aspect-[5/2] w-full items-center justify-center rounded-3xl bg-tile">
+            <Initial name={cafe.name} cafe className="size-20 text-4xl" />
+          </span>
+        )}
         <div className="flex flex-col gap-1">
           <h1 className="font-serif text-5xl leading-[1.05]">{cafe.name}</h1>
           {(cafe.district || cafe.address) && <p className="text-muted">{[cafe.address, cafe.district].filter(Boolean).join(" · ")}</p>}
@@ -118,7 +125,7 @@ export function CafePage({ slug }: { slug: string }) {
       )}
 
       {error && <Notice tone="red">{error}</Notice>}
-      <section aria-label={t("fromCafe")} className="flex flex-col gap-10">
+      <section aria-label={t("fromCafe")} className="flex flex-col gap-4">
         {cafe.posts.length === 0 && <p className="py-6 text-center text-muted">{t("noFeed")}</p>}
         {cafe.posts.map((p) => (
           <Post
@@ -126,6 +133,7 @@ export function CafePage({ slug }: { slug: string }) {
             t={t}
             lang={lang}
             slug={cafe.slug}
+            cafeName={cafe.name}
             post={p}
             member={member}
             paused={paused}
@@ -187,6 +195,7 @@ function Post({
   t,
   lang,
   slug,
+  cafeName,
   post,
   member,
   paused,
@@ -198,6 +207,7 @@ function Post({
   t: T;
   lang: Lang;
   slug: string;
+  cafeName: string;
   post: PostDTO;
   member: boolean;
   paused: boolean;
@@ -226,11 +236,16 @@ function Post({
   const label = post.kind === "event" ? t("eventLabel") : post.kind === "question" ? t("questionOfDay") : null;
 
   return (
-    <article className="flex flex-col gap-4">
+    <article className="flex flex-col gap-4 rounded-3xl border border-line p-4">
+      {/* Who it's from comes first, as on every social feed: it's what tells one post from the next. */}
+      <p className="flex items-center gap-3 font-semibold">
+        <Initial name={post.host ? post.host.name : cafeName} cafe={!post.host} className="size-9 text-lg" />
+        {post.host ? post.host.name : cafeName}
+      </p>
       <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
         {post.pinned && <span className="rounded-full bg-[var(--cafe)] px-3 py-1 font-medium text-paper">{t("pinnedPost")}</span>}
         {label && <span className="rounded-full bg-panel px-3 py-1">{label}</span>}
-        {post.host && <span>{post.host.mine ? t("hostedByYou") : fill(t("hostedBy"), { name: post.host.name })}</span>}
+        {post.host?.mine && <span>{t("hostedByYou")}</span>}
         <span>{date(post.publishedAt)}</span>
         {post.host && !post.host.mine && canWrite && (
           <ReportButton t={t} done={post.reportedByMe} onClick={() => onReport({ targetType: "post", targetId: post.id })} className="ml-auto" />
@@ -256,7 +271,7 @@ function Post({
           aria-label={post.reactedByMe ? t("unlike") : t("like")}
           disabled={busy || paused}
           onClick={() => (member ? void run(() => api.cafes.react(slug, post.id)) : onNeedMember())}
-          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 ${post.reactedByMe ? "border-[var(--cafe)] text-[var(--cafe)]" : "border-line"}`}
+          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 ${post.reactedByMe ? "border-heart text-heart" : "border-line"}`}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill={post.reactedByMe ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
@@ -530,5 +545,14 @@ function ReportSheet({ t, lang, slug, target, onClose }: { t: T; lang: Lang; slu
         </>
       )}
     </Sheet>
+  );
+}
+
+/** A round initial: black for the café, quiet grey for a member. Stands in for a photo. */
+function Initial({ name, cafe = false, className = "" }: { name: string; cafe?: boolean; className?: string }) {
+  return (
+    <span aria-hidden="true" className={`inline-flex shrink-0 items-center justify-center rounded-full font-serif leading-none ${cafe ? "bg-ink text-paper" : "bg-tile text-ink"} ${className}`}>
+      {name.trim().charAt(0).toLocaleUpperCase("tr-TR")}
+    </span>
   );
 }

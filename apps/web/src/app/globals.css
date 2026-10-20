@@ -18,6 +18,8 @@
   --green-soft: #e8efeb;
   --red: #a3342b;
   --red-soft: #f7e9e7;
+  /* A liked heart: the one live colour on the café page. */
+  --heart: #e0245e;
   /* Charts: last period's line, spending's bars. */
   --mark: #b9beba;
   color-scheme: light;
@@ -35,6 +37,7 @@
   --green-soft: #1b2a22;
   --red: #e59a91;
   --red-soft: #2e1c1a;
+  --heart: #f4607f;
   --mark: #4b524e;
   color-scheme: dark;
 }
@@ -53,6 +56,7 @@
   --color-green-soft: var(--green-soft);
   --color-red: var(--red);
   --color-red-soft: var(--red-soft);
+  --color-heart: var(--heart);
   --color-mark: var(--mark);
 }
 
