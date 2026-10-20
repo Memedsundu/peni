@@ -142,6 +142,8 @@ export class SalesReportService {
       key,
       salesKurus: now.get(key) ?? 0,
       previousKurus: prevKeys[i] === undefined ? null : (before.get(prevKeys[i]!) ?? 0),
+      // Which bucket of the period before it is set against: "4 Eki" against "4 Eyl".
+      previousKey: prevKeys[i] ?? null,
     }));
     const series = { step, points: step === "hour" ? trimHours(points) : points };
 

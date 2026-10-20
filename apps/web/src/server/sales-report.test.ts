@@ -71,6 +71,7 @@ describe("Raporlar (plan piece 23)", () => {
       key: "2026-10-01",
       salesKurus: await moneyIn("2026-10-01", "2026-10-01"),
       previousKurus: await moneyIn("2026-09-01", "2026-09-01"),
+      previousKey: "2026-09-01",
     });
     expect(r.series.points.at(-1)).toMatchObject({ key: "2026-10-16", salesKurus: 0 });
     expect(r.weekdays.map((w) => w.weekday)).toEqual([1, 2, 3, 4, 5, 6, 7]);
@@ -110,7 +111,7 @@ describe("Raporlar (plan piece 23)", () => {
     expect(r.previous).toEqual({ from: "2026-10-03", through: "2026-10-03", untilTime: null });
     expect(r.previousTotals.salesKurus).toBe(await moneyIn("2026-10-03", "2026-10-03"));
     expect(r.series.step).toBe("hour");
-    expect(r.series.points[0]!.key).toBe("08");
+    expect(r.series.points[0]).toMatchObject({ key: "08", previousKey: "08" });
     expect(r.series.points.reduce((s, p) => s + p.salesKurus, 0)).toBe(await moneyIn("2026-10-10", "2026-10-10"));
     expect(r.weekdays).toEqual([]);
 
