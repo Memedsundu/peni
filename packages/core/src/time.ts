@@ -30,17 +30,30 @@ export function addDays(date: Date, days: number): Date {
   return addHours(date, days * 24);
 }
 
+/** The local hour of the day, 0–23. */
+export function localHour(date: Date, timeZone: string): number {
+  return localParts(date, timeZone).hour;
+}
+
+// Making a formatter is slow and reports read the time of every sale, so one per time zone is kept.
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
 function localParts(date: Date, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-    hourCycle: "h23",
-  }).formatToParts(date);
+  let formatter = formatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+      hourCycle: "h23",
+    });
+    formatters.set(timeZone, formatter);
+  }
+  const parts = formatter.formatToParts(date);
   const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
   return {
     year: get("year"),

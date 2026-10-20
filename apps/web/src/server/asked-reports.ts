@@ -8,6 +8,7 @@ import {
   dayPay,
   lineTotal,
   localDateKey,
+  localHour,
   plusDays,
   rateOn,
   recipeCost,
@@ -71,7 +72,7 @@ export class AskedReportService {
     const latest = compare && compare.through > range.through ? compare.through : range.through;
     const dayStart = (day: string) => startOfLocalDay(new Date(`${day}T12:00:00Z`), tz);
     const dayOf = (at: Date) => localDateKey(at, tz);
-    const hourOf = (at: Date) => new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone: tz }).format(at);
+    const hourOf = (at: Date) => String(localHour(at, tz)).padStart(2, "0");
 
     // The compared period's last day stops at this time of day when the report runs to now,
     // as on Raporlar; otherwise today always looks like a bad day.
