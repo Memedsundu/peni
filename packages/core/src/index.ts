@@ -32,3 +32,4 @@ export * from "./letters";
 export * from "./watch";
 export * from "./recipe-drafts";
 export * from "./insights";
+export * from "./setup";

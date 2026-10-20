@@ -507,6 +507,8 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await ids({ itemId: item.id, supplierId: supplier.id, limit: 1 })).toEqual([late.id]);
     // A voided bill no longer prices anything.
     expect((await stores.bills.lastPrice(cafeId, item.id))!.billId).toBe(late.id);
+    // Bought at least once: the item is on a live bill, once however many bills it's on.
+    expect(await stores.bills.boughtItems(cafeId)).toEqual([item.id]);
 
     // Paid in parts; the credit card's charges are the payments by "credit".
     const part = { cafeId, billId: late.id, method: "credit" as const, account: null, memberId: "stf_x", createdAt: at };
@@ -748,16 +750,32 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.assistant.getDraft(cafeId, said.id)).toEqual(said);
 
     // What people confirmed lines to be: one per supplier and read name.
-    const match = { cafeId, supplierId: null, readKey: "süt 1 lt", itemId: "stk_sut", perUnitMilli: 1000, updatedAt: at };
+    const match = { cafeId, supplierId: null, readKey: "süt 1 lt", itemId: "stk_sut" as string | null, perUnitMilli: 1000, readUnit: null as string | null, updatedAt: at };
     await stores.assistant.saveLineMatch(match);
-    await stores.assistant.saveLineMatch({ ...match, perUnitMilli: 500 });
+    // A pack size keeps the unit it was learned in.
+    await stores.assistant.saveLineMatch({ ...match, perUnitMilli: 12_000, readUnit: "koli" });
     await stores.assistant.saveLineMatch({ ...match, supplierId: "sup_x", itemId: "stk_krema" });
-    expect((await stores.assistant.listLineMatches(cafeId)).sort((a, b) => a.itemId.localeCompare(b.itemId))).toEqual([
+    // A line kept as an expense is remembered with no item.
+    await stores.assistant.saveLineMatch({ ...match, readKey: "kasa depozitosu", itemId: null, perUnitMilli: null });
+    expect((await stores.assistant.listLineMatches(cafeId)).sort((a, b) => (a.itemId ?? "").localeCompare(b.itemId ?? ""))).toEqual([
+      { ...match, readKey: "kasa depozitosu", itemId: null, perUnitMilli: null },
       { ...match, supplierId: "sup_x", itemId: "stk_krema" },
-      { ...match, perUnitMilli: 500 },
+      { ...match, perUnitMilli: 12_000, readUnit: "koli" },
     ]);
     await stores.assistant.deleteLineMatch(cafeId, null, "süt 1 lt");
+    await stores.assistant.deleteLineMatch(cafeId, null, "kasa depozitosu");
     expect((await stores.assistant.listLineMatches(cafeId)).map((m) => m.supplierId)).toEqual(["sup_x"]);
+    // Which supplier a read seller is: one per café and read name or tax number.
+    const seller = { cafeId, readKey: "name:moda süt ürn", supplierId: "sup_a", updatedAt: at };
+    await stores.assistant.saveSupplierMatch(seller);
+    await stores.assistant.saveSupplierMatch({ ...seller, supplierId: "sup_b" });
+    await stores.assistant.saveSupplierMatch({ ...seller, readKey: "tax:1234567890" });
+    expect((await stores.assistant.listSupplierMatches(cafeId)).sort((a, b) => a.readKey.localeCompare(b.readKey))).toEqual([
+      { ...seller, supplierId: "sup_b" },
+      { ...seller, readKey: "tax:1234567890" },
+    ]);
+    await stores.assistant.deleteSupplierMatch(cafeId, "tax:1234567890");
+    expect((await stores.assistant.listSupplierMatches(cafeId)).map((m) => m.readKey)).toEqual(["name:moda süt ürn"]);
     const done = { ...draft, status: "confirmed" as const, decidedById: "stf_a", decidedAt: at, resultId: "bil_1", changed: ["date"] };
     await stores.assistant.saveDraft(done);
     expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id, `drf3_${run}`, `drf4_${run}`, `drf5_${run}`]);

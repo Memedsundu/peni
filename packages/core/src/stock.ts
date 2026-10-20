@@ -22,6 +22,13 @@ export const STOCK_UNITS: readonly StockUnit[] = ["kg", "l", "adet"];
 /** Ingredients go into products; supplies are cups, lids, napkins. Both can be in recipes. */
 export type StockKind = "ingredient" | "supply";
 
+/** A stock item someone may start from a bill line or a drafted recipe: "Laktozsuz süt", kept in litres, an ingredient. */
+export interface NewStockItem {
+  name: string;
+  unit: StockUnit;
+  kind: StockKind;
+}
+
 /** Why a move happened. "bill" comes with Faturalar (piece 18). */
 export type StockReason = "start" | "count" | "waste" | "sale" | "refund" | "bill";
 

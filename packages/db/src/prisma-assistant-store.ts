@@ -14,6 +14,7 @@ import type {
   Job,
   JobStatus,
   LineMatch,
+  SupplierMatch,
   QuickEntry,
   StoredDocument,
 } from "@peni/core";
@@ -189,6 +190,22 @@ export class PrismaAssistantStore implements AssistantStore {
 
   async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void> {
     await this.db().aiLineMatch.deleteMany({ where: { cafeId, supplierKey: supplierId ?? "", readKey } });
+  }
+
+  async listSupplierMatches(cafeId: string): Promise<SupplierMatch[]> {
+    return this.db().aiSupplierMatch.findMany({ where: { cafeId } });
+  }
+
+  async saveSupplierMatch(match: SupplierMatch): Promise<void> {
+    await this.db().aiSupplierMatch.upsert({
+      where: { cafeId_readKey: { cafeId: match.cafeId, readKey: match.readKey } },
+      create: match,
+      update: match,
+    });
+  }
+
+  async deleteSupplierMatch(cafeId: string, readKey: string): Promise<void> {
+    await this.db().aiSupplierMatch.deleteMany({ where: { cafeId, readKey } });
   }
 
   async getInbox(cafeId: string): Promise<CafeInbox | null> {

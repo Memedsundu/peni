@@ -30,13 +30,16 @@ const milk: BillReading = {
   kind: "bill",
   supplierName: "MODA SÜT ÜRÜNLERİ GIDA TİC. LTD. ŞTİ.",
   supplierTaxNumber: null,
+  supplierPhone: null,
+  supplierIban: null,
+  supplierAddress: null,
   number: "MS-0412",
   date: "2026-10-15",
   dueDate: "2026-10-30",
   total: 1260,
   lines: [
-    { name: "Süt 1 L", quantity: 24, unit: "adet", total: 960, category: "ingredients", stockItem: null, stockQuantity: null },
-    { name: "Krema 1 L", quantity: 4, unit: "adet", total: 300, category: "ingredients", stockItem: null, stockQuantity: null },
+    { name: "Süt 1 L", quantity: 24, unit: "adet", total: 960, category: "ingredients", stockItem: null, stockQuantity: null, newItem: null },
+    { name: "Krema 1 L", quantity: 4, unit: "adet", total: 300, category: "ingredients", stockItem: null, stockQuantity: null, newItem: null },
   ],
   kdv: [],
   doubts: ["Fatura numarasının son hanesi silik."],
@@ -85,6 +88,7 @@ describe("The assistant's ground (plan piece 24)", () => {
     expect(draft!.proposal.lines).toEqual([
       {
         itemId: null,
+        newItem: null,
         name: "Süt 1 L",
         category: "ingredients",
         qtyMilli: null,
@@ -96,6 +100,7 @@ describe("The assistant's ground (plan piece 24)", () => {
       },
       {
         itemId: null,
+        newItem: null,
         name: "Krema 1 L",
         category: "ingredients",
         qtyMilli: null,
@@ -258,7 +263,14 @@ const asInput = (d: {
     supplierId: string | null;
     number: string | null;
     date: string | null;
-    lines: { itemId: string | null; name: string; category: string; qtyMilli: number | null; totalKurus: number }[];
+    lines: {
+      itemId: string | null;
+      newItem?: { name: string; unit: "kg" | "l" | "adet"; kind: "ingredient" | "supply" } | null;
+      name: string;
+      category: string;
+      qtyMilli: number | null;
+      totalKurus: number;
+    }[];
   };
 }) => ({
   supplierId: d.proposal.supplierId,
@@ -266,6 +278,7 @@ const asInput = (d: {
   date: d.proposal.date!,
   lines: d.proposal.lines.map((l, from) => ({
     itemId: l.itemId,
+    ...(l.newItem ? { newItem: l.newItem } : {}),
     name: l.name,
     category: l.category as "ingredients",
     qtyMilli: l.qtyMilli,
@@ -309,7 +322,7 @@ describe("Scanning bills (plan piece 25)", () => {
     expect(second!.proposal.lines[0]).toMatchObject({ itemId: "stk_sut", qtyMilli: 12_000, matchedBy: "learned" });
     expect(second!.doubts).toEqual(milk.doubts);
 
-    // Murat says it isn't stock after all: it's forgotten.
+    // Murat says it isn't stock after all: from now on it stays an expense.
     await app.assistant.confirm(murat, second!.id, { ...asInput(second!), lines: [{ ...asInput(second!).lines[0]!, itemId: null, qtyMilli: null }] });
     answer = () => ({ ...milk, number: "MS-0470", lines: [milk.lines[0]!] });
     await read(murat, bytes(3), "sut3.pdf");
@@ -419,6 +432,208 @@ describe("Scanning bills (plan piece 25)", () => {
 });
 
 /** The bill drafts waiting (piece 27 adds statements and Z reports). */
+/** Moda Süt's lactose-free milk: 2 koli of 12 one-litre cartons, which Moda doesn't keep in stock yet. */
+const lactoseFree: BillReading["lines"][number] = {
+  name: "Laktozsuz Süt 1 L",
+  quantity: 2,
+  unit: "koli",
+  total: 900,
+  category: "ingredients",
+  stockItem: null,
+  stockQuantity: 24,
+  newItem: { name: "Laktozsuz süt", unit: "l" },
+};
+
+describe("Bills fill stock: new items and pack sizes", () => {
+  it("offers a line that matches no stock item as a new one; confirming creates it, adds the amount and sets its price", async () => {
+    answer = () => ({ ...milk, number: "MS-0500", lines: [lactoseFree, milk.lines[1]!], total: 1200 });
+    await read(murat);
+    const drafts = await app.assistant.list(leyla);
+    expect(drafts.billForm.canAddStock).toBe(true);
+    const [draft] = billDrafts(drafts);
+    expect(draft!.proposal.lines.map((l) => [l.itemId, l.newItem, l.name, l.qtyMilli, l.matchedBy])).toEqual([
+      [null, { name: "Laktozsuz süt", unit: "l", kind: "ingredient" }, "Laktozsuz süt", 24_000, "model"],
+      // Krema came with no suggestion: an expense, as before.
+      [null, null, "Krema 1 L", null, null],
+    ]);
+    // Nothing reaches stock before someone confirms (D21).
+    expect((await app.stock.view(leyla)).items.map((i) => i.name)).not.toContain("Laktozsuz süt");
+
+    const done = await app.assistant.confirm(leyla, draft!.id, asInput(draft!));
+    const bill = await app.bills.get(leyla, done.resultId!);
+    const item = (await app.stock.view(leyla)).items.find((i) => i.name === "Laktozsuz süt")!;
+    expect(item).toMatchObject({ unit: "l", kind: "ingredient", qtyMilli: 24_000, costKurus: 3_750 });
+    expect(bill.lines[0]).toMatchObject({ itemId: item.id, name: "Laktozsuz süt", qtyMilli: 24_000, unitKurus: 3_750 });
+    expect(bill.lines[1]).toMatchObject({ itemId: null, name: "Krema 1 L" });
+    // It came in the way any delivery does: one move with the bill's reason.
+    expect((await app.stock.history(leyla, item.id)).moves.map((m) => [m.reason, m.changeMilli])).toEqual([["bill", 24_000]]);
+    // Confirming again adds nothing more.
+    await app.assistant.confirm(leyla, draft!.id, asInput(draft!));
+    expect((await app.stock.view(leyla)).items.filter((i) => i.name === "Laktozsuz süt").map((i) => i.qtyMilli)).toEqual([24_000]);
+  });
+
+  it("remembers the pack size: the next bill's 3 koli is 36 litres whatever the model reads, but 24 adet isn't converted as koli", async () => {
+    answer = () => ({ ...milk, number: "MS-0500", lines: [lactoseFree], total: 900 });
+    await read(murat);
+    const [first] = billDrafts(await app.assistant.list(leyla));
+    await app.assistant.confirm(leyla, first!.id, asInput(first!));
+    const item = (await app.stock.view(leyla)).items.find((i) => i.name === "Laktozsuz süt")!;
+
+    // The model now sees the item and picks it, but reads 3 koli as 3 litres.
+    answer = (r) => ({ ...milk, number: "MS-0510", lines: [{ ...lactoseFree, quantity: 3, total: 1350, stockItem: shown(r, "Laktozsuz süt"), stockQuantity: 3, newItem: null }], total: 1350 });
+    await read(murat, bytes(2), "sut2.pdf");
+    const [second] = billDrafts(await app.assistant.list(leyla));
+    expect(second!.proposal.lines[0]).toMatchObject({ itemId: item.id, qtyMilli: 36_000, readQtyMilli: 3_000, readUnit: "koli", matchedBy: "learned" });
+    await app.assistant.confirm(leyla, second!.id, asInput(second!));
+    expect((await app.stock.view(leyla)).items.find((i) => i.id === item.id)!.qtyMilli).toBe(60_000);
+
+    // The same line counted in cartons: the koli size doesn't apply; the model's amount does.
+    answer = (r) => ({ ...milk, number: "MS-0520", lines: [{ ...lactoseFree, quantity: 24, unit: "adet", stockItem: shown(r, "Laktozsuz süt"), stockQuantity: 24, newItem: null }], total: 900 });
+    await read(murat, bytes(3), "sut3.pdf");
+    const [third] = billDrafts(await app.assistant.list(leyla));
+    expect(third!.proposal.lines[0]).toMatchObject({ itemId: item.id, qtyMilli: 24_000, readUnit: "adet", matchedBy: "learned" });
+  });
+
+  it("lets the person rename it, pick an existing item instead, or keep it as an expense, and remembers each", async () => {
+    const lines: BillReading["lines"] = [
+      lactoseFree,
+      { ...lactoseFree, name: "Günlük Süt 1 L", quantity: 12, unit: "adet", stockQuantity: 12, total: 480, newItem: { name: "Günlük süt", unit: "l" } },
+      { ...lactoseFree, name: "Kasa depozitosu", quantity: 1, unit: "adet", stockQuantity: 1, total: 50, category: "supplies", newItem: { name: "Süt kasası", unit: "adet" } },
+      // Named like an item Moda has: it's that item.
+      { ...lactoseFree, name: "LİMON", quantity: 3, unit: "kg", stockQuantity: 3, total: 240, newItem: { name: "limon", unit: "kg" } },
+    ];
+    answer = () => ({ ...milk, number: "MS-0600", lines, total: 1670 });
+    await read(murat);
+    const [draft] = billDrafts(await app.assistant.list(leyla));
+    expect(draft!.proposal.lines.map((l) => [l.itemId, l.newItem?.name ?? null])).toEqual([
+      [null, "Laktozsuz süt"],
+      [null, "Günlük süt"],
+      [null, "Süt kasası"],
+      ["stk_limon", null],
+    ]);
+    const input = asInput(draft!);
+    const [renamed, picked, kept, same] = input.lines;
+    await app.assistant.confirm(leyla, draft!.id, {
+      ...input,
+      lines: [
+        { ...renamed!, newItem: { ...renamed!.newItem!, name: "Laktozsuz süt (1 L)" } },
+        { ...picked!, newItem: undefined, itemId: "stk_sut", qtyMilli: 12_000 },
+        { ...kept!, newItem: undefined, itemId: null, qtyMilli: null, name: "Kasa depozitosu", category: "supplies" },
+        same!,
+      ],
+    });
+    const names = (await app.stock.view(leyla)).items.map((i) => i.name);
+    expect(names).toContain("Laktozsuz süt (1 L)");
+    expect(names).not.toContain("Laktozsuz süt");
+    expect(names).not.toContain("Günlük süt");
+    expect(names).not.toContain("Süt kasası");
+
+    // The next bill: the renamed item and the picked one are learned, the deposit stays an expense.
+    answer = () => ({ ...milk, number: "MS-0610", lines, total: 1670 });
+    await read(murat, bytes(2), "sut2.pdf");
+    const [next] = billDrafts(await app.assistant.list(leyla));
+    const made = (await app.stock.view(leyla)).items.find((i) => i.name === "Laktozsuz süt (1 L)")!;
+    expect(next!.proposal.lines.map((l) => [l.itemId, l.newItem, l.matchedBy])).toEqual([
+      [made.id, null, "learned"],
+      ["stk_sut", null, "learned"],
+      [null, null, null],
+      ["stk_limon", null, "learned"],
+    ]);
+  });
+
+  it("needs the right to edit stock to start an item", async () => {
+    const bill = {
+      supplierId: "sup_seed_sut",
+      date: "2026-10-15",
+      lines: [{ itemId: null, newItem: { name: "Laktozsuz süt", unit: "l" as const, kind: "ingredient" as const }, qtyMilli: 24_000, totalKurus: 90_000 }],
+    };
+    // Ece (barista) adds bills but doesn't count or edit stock.
+    expect(await code(app.bills.add(ece, { ...bill, key: "n1" }))).toBe("FORBIDDEN");
+    const added = await app.bills.add(murat, { ...bill, key: "n2" });
+    // Adding the same bill again finds the same item.
+    expect((await app.bills.add(murat, { ...bill, key: "n2" })).lines[0]!.itemId).toBe(added.lines[0]!.itemId);
+    expect((await app.stock.view(leyla)).items.filter((i) => i.name === "Laktozsuz süt")).toHaveLength(1);
+    // A correction can't start one.
+    expect(await code(app.bills.correct(leyla, added.id, { ...bill, version: 1 }))).toBe("BILL_LINE_INVALID");
+  });
+});
+
+describe("Bills find their supplier: new ones, unsure ones, remembered ones", () => {
+  it("offers a seller that matches no supplier as a new one with what the bill shows; confirming adds it and puts the bill under it", async () => {
+    answer = () => ({
+      ...milk,
+      supplierName: "BOSTANCI FIRIN LTD. ŞTİ.",
+      supplierTaxNumber: "4410 223 344",
+      supplierPhone: "0216 555 44 33",
+      supplierIban: "TR33 0006 1005 1978 6457 8413 26",
+      supplierAddress: "Bağdat Cd. No: 12, Kadıköy",
+      number: "BF-77",
+      lines: [{ ...milk.lines[0]!, name: "Poğaça", quantity: 20, total: 400, category: "ingredients" }],
+      total: 400,
+    });
+    await read(murat);
+    const [draft] = billDrafts(await app.assistant.list(leyla));
+    expect(draft!.proposal).toMatchObject({
+      supplierId: null,
+      supplierName: "BOSTANCI FIRIN LTD. ŞTİ.",
+      supplierPhone: "0216 555 44 33",
+      supplierIban: "TR330006100519786457841326",
+      supplierAddress: "Bağdat Cd. No: 12, Kadıköy",
+      supplierMatchedBy: null,
+      supplierChoices: [],
+    });
+    // Nothing is added before someone confirms (D21).
+    expect((await app.bills.suppliers(leyla)).suppliers.map((s) => s.name)).not.toContain("Bostancı Fırın");
+
+    const newSupplier = { name: "Bostancı Fırın", taxNo: "4410223344", phone: "0216 555 44 33", iban: "TR330006100519786457841326", note: "Adres: Bağdat Cd. No: 12, Kadıköy" };
+    const done = await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), newSupplier });
+    const bill = await app.bills.get(leyla, done.resultId!);
+    expect(bill.supplierName).toBe("Bostancı Fırın");
+    expect((await app.bills.supplier(leyla, bill.supplierId!)).supplier).toMatchObject({ ...newSupplier, removed: false });
+    // Confirming again adds no second supplier; the bill counts towards what is owed to them.
+    await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), newSupplier });
+    const list = await app.bills.suppliers(leyla);
+    expect(list.suppliers.filter((s) => s.name === "Bostancı Fırın").map((s) => s.owedKurus)).toEqual([40_000]);
+  });
+
+  it("offers the suppliers an unsure name could be, and remembers the one picked for the seller's next bill, with its lines", async () => {
+    await app.bills.addSupplier(leyla, { key: "s1", name: "Kuzey Kahve Dükkanı" });
+    const beans = { ...milk.lines[0]!, name: "Espresso Çekirdek 1 kg", quantity: 4, unit: "kg" as const, total: 3600 };
+    answer = (r) => ({ ...milk, supplierName: "KUZEY KAHVE", number: "KK-1", lines: [{ ...beans, stockItem: shown(r, "Espresso çekirdeği"), stockQuantity: 4 }], total: 3600 });
+    await read(murat);
+    const [unsure] = billDrafts(await app.assistant.list(leyla));
+    expect(unsure!.proposal.supplierId).toBeNull();
+    expect(unsure!.proposal.supplierChoices.map((c) => c.name)).toEqual(["Kuzey Kahve Dükkanı", "Kuzey Kahve Kavurma"]);
+    await app.assistant.confirm(leyla, unsure!.id, { ...asInput(unsure!), supplierId: "sup_seed_kahve" });
+
+    // The next bill from "KUZEY KAHVE": Kuzey Kahve Kavurma straight away, and the beans as confirmed for them.
+    answer = () => ({ ...milk, supplierName: "KUZEY KAHVE", number: "KK-2", lines: [beans], total: 3600 });
+    await read(murat, bytes(2), "kahve2.pdf");
+    const [next] = billDrafts(await app.assistant.list(leyla));
+    expect(next!.proposal).toMatchObject({ supplierId: "sup_seed_kahve", supplierMatchedBy: "learned", supplierChoices: [] });
+    expect(next!.proposal.lines[0]).toMatchObject({ itemId: "stk_espresso", qtyMilli: 4_000, matchedBy: "learned" });
+  });
+
+  it("remembers a supplier picked by hand by the tax number too, and forgets it when the bill is confirmed with none", async () => {
+    answer = () => ({ ...milk, supplierName: "MS ÜRÜNLERİ", supplierTaxNumber: "1111111111", number: "X-1" });
+    await read(murat);
+    const [first] = billDrafts(await app.assistant.list(leyla));
+    expect(first!.proposal).toMatchObject({ supplierId: null, supplierChoices: [] });
+    await app.assistant.confirm(leyla, first!.id, { ...asInput(first!), supplierId: "sup_seed_sut" });
+
+    // Printed differently, same tax number: Moda Süt.
+    answer = () => ({ ...milk, supplierName: "M.S. Ürünleri A.Ş.", supplierTaxNumber: "111 111 1111", number: "X-2" });
+    await read(murat, bytes(2), "x2.pdf");
+    const [second] = billDrafts(await app.assistant.list(leyla));
+    expect(second!.proposal).toMatchObject({ supplierId: "sup_seed_sut", supplierMatchedBy: "learned" });
+    await app.assistant.confirm(leyla, second!.id, { ...asInput(second!), supplierId: null });
+
+    answer = () => ({ ...milk, supplierName: "M.S. Ürünleri A.Ş.", supplierTaxNumber: "1111111111", number: "X-3" });
+    await read(murat, bytes(3), "x3.pdf");
+    expect(billDrafts(await app.assistant.list(leyla))[0]!.proposal.supplierId).toBeNull();
+  });
+});
+
 function billDrafts(list: DraftsDTO): BillDraftDTO[] {
   return list.open.filter((d): d is BillDraftDTO => d.kind === "bill");
 }

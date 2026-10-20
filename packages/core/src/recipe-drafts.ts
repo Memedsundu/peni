@@ -1,5 +1,5 @@
 import type { DraftStatus } from "./assistant";
-import type { StockKind, StockMode, StockUnit } from "./stock";
+import type { NewStockItem, StockKind, StockMode, StockUnit } from "./stock";
 
 /**
  * Recipes the assistant drafts (D21): for a product with no recipe yet, a first go at what
@@ -9,12 +9,6 @@ import type { StockKind, StockMode, StockUnit } from "./stock";
  * even "Düşmesin", is never drafted for and never overwritten.
  */
 
-/** A stock item the draft needs that the café doesn't have; created when the draft is confirmed. */
-export interface NewStockItem {
-  name: string;
-  unit: StockUnit;
-  kind: StockKind;
-}
 
 export interface RecipeProposalLine {
   /** One of the café's items, or null for one of `newItems`. */

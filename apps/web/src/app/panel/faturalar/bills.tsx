@@ -452,12 +452,18 @@ function BillSheet({
 
 type LineForm = {
   key: number;
-  kind: "stock" | "other";
+  /** "new": a stock item this line starts (piece 25's "Yeni stok kalemi"). */
+  kind: "stock" | "other" | "new";
   itemId: string;
   qty: string;
+  /** What one printed pack holds, while it's being typed ("12" for 1 koli = 12 L); otherwise worked out from the amount. */
+  pack: string | null;
   total: string;
   name: string;
   category: BillCategoryDTO;
+  /** The new stock item's name and unit. */
+  newName: string;
+  newUnit: StockUnitDTO;
   /** The draft line it came from (piece 25), so the assistant learns what it was. */
   from: number | null;
   read: ProposalLineDTO | null;
@@ -465,7 +471,7 @@ type LineForm = {
 type KdvForm = { key: number; rate: number; amount: string };
 
 let lineKeys = 0;
-const blank = { itemId: "", qty: "", total: "", name: "", from: null, read: null };
+const blank = { itemId: "", qty: "", pack: null, total: "", name: "", newName: "", newUnit: "adet" as StockUnitDTO, from: null, read: null };
 const stockLine = (): LineForm => ({ key: ++lineKeys, kind: "stock", ...blank, category: "ingredients" });
 const otherLine = (): LineForm => ({ key: ++lineKeys, kind: "other", ...blank, category: "rent" });
 /** Today's rates first; 8 and 18 still show up on older bills. */
@@ -501,10 +507,21 @@ export function BillForm({
   const key = useRef(newIdempotencyKey());
   const supplierKey = useRef(newIdempotencyKey());
   const proposal = draft?.proposal;
+  // Two suppliers that fit equally are offered to pick from; a name that fits none is offered as a new supplier.
+  const choices = proposal && !proposal.supplierId ? proposal.supplierChoices : [];
   const [supplierId, setSupplierId] = useState(
-    bill?.supplierId ?? proposal?.supplierId ?? (proposal?.supplierName && data.canAddSupplier ? "__new" : ""),
+    bill?.supplierId ?? proposal?.supplierId ?? (proposal?.supplierName && !choices.length && data.canAddSupplier ? "__new" : ""),
   );
   const [newName, setNewName] = useState(proposal?.supplierId ? "" : (proposal?.supplierName ?? ""));
+  // What the bill showed about a new supplier, to check before it's saved with it.
+  const [newTaxNo, setNewTaxNo] = useState(proposal && !proposal.supplierId ? (proposal.supplierTaxNumber?.replace(/\s/g, "") ?? "") : "");
+  const [newPhone, setNewPhone] = useState(proposal && !proposal.supplierId ? (proposal.supplierPhone ?? "") : "");
+  const [newIban, setNewIban] = useState(proposal && !proposal.supplierId ? (proposal.supplierIban ?? "") : "");
+  const [newAddress, setNewAddress] = useState(proposal && !proposal.supplierId ? (proposal.supplierAddress ?? "") : "");
+  const newDetailsOk =
+    (!newTaxNo.trim() || /^\d{10,11}$/.test(newTaxNo.replace(/\s/g, ""))) &&
+    (!newPhone.trim() || /^\+?[\d ()-]{7,20}$/.test(newPhone.trim())) &&
+    (!newIban.trim() || /^TR\d{24}$/.test(newIban.replace(/\s/g, "").toUpperCase()));
   const [date, setDate] = useState(bill?.date ?? proposal?.date ?? data.today);
   const [number, setNumber] = useState(bill?.number ?? proposal?.number ?? "");
   const [dueDate, setDueDate] = useState(bill?.dueDate ?? proposal?.dueDate ?? "");
@@ -512,17 +529,25 @@ export function BillForm({
   const [paid, setPaid] = useState<"no" | DraftPaid>(() => (proposal?.paid && data.canManage ? proposal.paid.method : "no"));
   const [lines, setLines] = useState<LineForm[]>(() =>
     (bill ?? proposal)
-      ? (bill ?? proposal)!.lines.map((l, i) => ({
-          key: ++lineKeys,
-          kind: l.itemId ? "stock" : "other",
-          itemId: l.itemId ?? "",
-          qty: l.qtyMilli !== null ? bigInput(l.qtyMilli) : "",
-          total: tlInput(l.totalKurus),
-          name: l.itemId ? "" : l.name,
-          category: l.category,
-          from: proposal ? i : null,
-          read: proposal ? proposal.lines[i]! : null,
-        }))
+      ? (bill ?? proposal)!.lines.map((l, i): LineForm => {
+          const read = proposal ? proposal.lines[i]! : null;
+          // A new stock item is offered to those who can add one; anyone else sees the line as an expense.
+          const fresh = read?.newItem ?? null;
+          return {
+            key: ++lineKeys,
+            kind: l.itemId ? "stock" : fresh && data.canAddStock ? "new" : "other",
+            itemId: l.itemId ?? "",
+            qty: l.qtyMilli !== null ? bigInput(l.qtyMilli) : "",
+            pack: null,
+            total: tlInput(l.totalKurus),
+            name: l.itemId ? "" : fresh ? read!.readName : l.name,
+            category: l.category,
+            newName: fresh?.name ?? "",
+            newUnit: fresh?.unit ?? "adet",
+            from: proposal ? i : null,
+            read,
+          };
+        })
       : [data.items.length ? stockLine() : otherLine()],
   );
   const [kdv, setKdv] = useState<KdvForm[]>(() =>
@@ -544,18 +569,34 @@ export function BillForm({
 
   const parsed = lines.map((l) => {
     const totalKurus = parseTL(l.total);
+    if (l.kind === "new") {
+      const qtyMilli = parseBig(l.qty);
+      const name = l.newName.trim();
+      const ok = !!name && name.length <= 60 && qtyMilli !== null && qtyMilli > 0 && totalKurus !== null;
+      const from = l.from !== null ? { from: l.from } : {};
+      const newItem = { name, unit: l.newUnit, kind: l.category === "supplies" ? ("supply" as const) : ("ingredient" as const) };
+      return {
+        ok,
+        item: undefined,
+        unit: l.newUnit,
+        qtyMilli,
+        totalKurus,
+        line: ok ? { itemId: null, newItem, qtyMilli: qtyMilli!, totalKurus: totalKurus!, ...from } : null,
+      };
+    }
     if (l.kind === "stock") {
       const item = items.find((i) => i.id === l.itemId);
       const qtyMilli = parseBig(l.qty);
       const ok = !!item && qtyMilli !== null && qtyMilli > 0 && totalKurus !== null;
       const from = l.from !== null ? { from: l.from } : {};
-      return { ok, item, qtyMilli, totalKurus, line: ok ? { itemId: item!.id, qtyMilli: qtyMilli!, totalKurus: totalKurus!, ...from } : null };
+      return { ok, item, unit: item?.unit ?? null, qtyMilli, totalKurus, line: ok ? { itemId: item!.id, qtyMilli: qtyMilli!, totalKurus: totalKurus!, ...from } : null };
     }
     const from = l.from !== null ? { from: l.from } : {};
     const ok = !!l.name.trim() && totalKurus !== null;
     return {
       ok,
       item: undefined,
+      unit: null,
       qtyMilli: null,
       totalKurus,
       line: ok ? { itemId: null, name: l.name.trim(), category: l.category, totalKurus: totalKurus!, ...from } : null,
@@ -575,7 +616,7 @@ export function BillForm({
     !duplicate &&
     kdvOk &&
     (!askDuplicate || allowDuplicate) &&
-    (supplierId !== "__new" || newName.trim()) &&
+    (supplierId !== "__new" || (newName.trim() && (!draft || newDetailsOk))) &&
     date &&
     (!dueDate || dueDate >= date);
   const set = (k: number, patch: Partial<LineForm>) => setLines((ls) => ls.map((l) => (l.key === k ? { ...l, ...patch } : l)));
@@ -583,7 +624,19 @@ export function BillForm({
   const submit = () =>
     save.run(async () => {
       let sid: string | null = supplierId || null;
-      if (supplierId === "__new") {
+      // Confirming a draft adds the new supplier itself, so the choice is remembered for this seller's next bill.
+      const newSupplier =
+        draft && supplierId === "__new"
+          ? {
+              name: newName.trim(),
+              taxNo: newTaxNo.replace(/\s/g, "") || null,
+              phone: newPhone.trim() || null,
+              iban: newIban.replace(/\s/g, "").toUpperCase() || null,
+              note: newAddress.trim() ? `${t("addressNote")}: ${newAddress.trim()}`.slice(0, 300) : null,
+            }
+          : null;
+      if (newSupplier) sid = null;
+      else if (supplierId === "__new") {
         // A tax number read off the bill comes along when it looks like one.
         const taxNo = proposal?.supplierTaxNumber && /^\d{10,11}$/.test(proposal.supplierTaxNumber) ? proposal.supplierTaxNumber : undefined;
         sid = (await api.staff.suppliers.add(slug, { key: supplierKey.current, name: newName.trim(), ...(taxNo ? { taxNo } : {}) })).supplier.id;
@@ -599,7 +652,13 @@ export function BillForm({
       };
       const yes = allowDuplicate ? { allowDuplicate: true } : {};
       try {
-        if (draft) return await api.staff.drafts.confirm(slug, draft.id, { ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
+        if (draft)
+          return await api.staff.drafts.confirm(slug, draft.id, {
+            ...fields,
+            ...yes,
+            ...(newSupplier ? { newSupplier } : {}),
+            ...(paid !== "no" ? { paid: { method: paid } } : {}),
+          });
         return bill
           ? await api.staff.bills.correct(slug, bill.id, { version: bill.version, ...fields })
           : await api.staff.bills.add(slug, { key: key.current, ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
@@ -626,8 +685,45 @@ export function BillForm({
           {data.canAddSupplier && <option value="__new">{t("newSupplier")}</option>}
         </select>
       </label>
+      {proposal?.supplierId && proposal.supplierId === supplierId && proposal.supplierMatchedBy === "learned" && (
+        <p className="-mt-3 text-sm text-muted">{fill(t("supplierLearned"), { name: proposal.supplierName ?? "" })}</p>
+      )}
+      {choices.length > 0 && !supplierId && (
+        <div role="status" className="-mt-2 flex flex-col gap-2 rounded-2xl bg-panel px-4 py-3 text-sm">
+          <span>{fill(t("supplierWhich"), { name: proposal?.supplierName ?? "" })}</span>
+          <span className="flex flex-wrap gap-2">
+            {choices.map((c) => (
+              <Button key={c.id} kind="quiet" size="sm" onClick={() => setSupplierId(c.id)}>
+                {c.name}
+              </Button>
+            ))}
+            {data.canAddSupplier && (
+              <Button kind="bare" size="sm" onClick={() => setSupplierId("__new")}>
+                {t("supplierNoneOfThem")}
+              </Button>
+            )}
+          </span>
+        </div>
+      )}
+      {supplierId === "__new" && draft && (
+        <p className="-mt-2 text-sm font-semibold text-green">
+          {fill(t(newTaxNo.trim() ? "newSupplierWithTax" : "newSupplierLine"), { name: newName.trim() || "…", tax: newTaxNo.trim() })}
+        </p>
+      )}
       {supplierId === "__new" && (
-        <Field label={t("newSupplierName")} value={newName} onChange={setNewName} placeholder={t("supplierNamePlaceholder")} maxLength={80} autoFocus />
+        <Field label={t("newSupplierName")} value={newName} onChange={setNewName} placeholder={t("supplierNamePlaceholder")} maxLength={80} autoFocus={!draft} />
+      )}
+      {supplierId === "__new" && draft && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("supplierTaxNoOptional")} value={newTaxNo} onChange={setNewTaxNo} inputMode="text" maxLength={20} />
+            <Field label={t("supplierPhoneOptional")} value={newPhone} onChange={setNewPhone} inputMode="text" maxLength={30} />
+          </div>
+          <Field label={t("supplierIbanOptional")} value={newIban} onChange={setNewIban} maxLength={40} />
+          <Field label={t("supplierAddressOptional")} value={newAddress} onChange={setNewAddress} maxLength={200} />
+          {!newDetailsOk && <Notice tone="red">{t("newSupplierCheck")}</Notice>}
+          <p className="-mt-2 text-sm text-muted">{t("newSupplierHelp")}</p>
+        </>
       )}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-2 text-sm text-muted">
@@ -639,15 +735,55 @@ export function BillForm({
 
       <section className="flex flex-col gap-3">
         <h3 className="text-sm text-muted">{t("billLines")}</h3>
-        {data.items.length === 0 && !bill && <p className="text-sm text-muted">{t("noItemsYet")}</p>}
+        {data.items.length === 0 && !bill && !lines.some((l) => l.kind === "new") && <p className="text-sm text-muted">{t("noItemsYet")}</p>}
         <ul className="@container flex flex-col gap-3">
           {lines.map((l, i) => {
             const p = parsed[i]!;
             const item = p.item;
-            const unitKurus = item && p.qtyMilli && p.totalKurus !== null ? Math.round((p.totalKurus * 1000) / p.qtyMilli) : null;
+            const unitKurus = p.unit && p.qtyMilli && p.totalKurus !== null ? Math.round((p.totalKurus * 1000) / p.qtyMilli) : null;
             return (
               <li key={l.key} className="grid grid-cols-[1fr_1fr_auto] gap-2 rounded-2xl border border-line p-3 @lg:grid-cols-[1fr_8rem_8rem_auto]">
-                {l.kind === "stock" ? (
+                {l.kind === "new" && (
+                  <span className="order-first col-span-3 text-sm font-semibold text-green @lg:col-span-4">
+                    {fill(t("newStockItem"), { name: l.newName.trim() || "…", unit: bigUnit(l.newUnit, lang) })}
+                  </span>
+                )}
+                {l.kind === "new" ? (
+                  <>
+                    <span className="order-1 col-span-2 grid grid-cols-[1fr_6rem] gap-2 @lg:order-none @lg:col-span-1">
+                      <input
+                        className={`${field} min-h-12`}
+                        value={l.newName}
+                        maxLength={60}
+                        onChange={(e) => set(l.key, { newName: e.target.value })}
+                        aria-label={t("newStockName")}
+                      />
+                      <select
+                        className={`${field} min-h-12`}
+                        value={l.newUnit}
+                        onChange={(e) => set(l.key, { newUnit: e.target.value as StockUnitDTO })}
+                        aria-label={t("newStockUnit")}
+                      >
+                        {(["kg", "l", "adet"] as const).map((u) => (
+                          <option key={u} value={u}>
+                            {bigUnit(u, lang)}
+                          </option>
+                        ))}
+                      </select>
+                    </span>
+                    <span className="relative order-3 flex items-center @lg:order-none">
+                      <input
+                        className={`${field} min-h-12 pr-14 text-right tabular`}
+                        inputMode="decimal"
+                        value={l.qty}
+                        placeholder="0"
+                        onChange={(e) => set(l.key, { qty: e.target.value, pack: null })}
+                        aria-label={t("lineQty")}
+                      />
+                      <span className="pointer-events-none absolute right-4 text-muted">{bigUnit(l.newUnit, lang)}</span>
+                    </span>
+                  </>
+                ) : l.kind === "stock" ? (
                   <>
                     <select
                       className={`${field} order-1 col-span-2 min-h-12 @lg:order-none @lg:col-span-1`}
@@ -668,7 +804,7 @@ export function BillForm({
                         inputMode="decimal"
                         value={l.qty}
                         placeholder="0"
-                        onChange={(e) => set(l.key, { qty: e.target.value })}
+                        onChange={(e) => set(l.key, { qty: e.target.value, pack: null })}
                         aria-label={t("lineQty")}
                       />
                       <span className="pointer-events-none absolute right-4 text-muted">{item ? bigUnit(item.unit, lang) : ""}</span>
@@ -729,29 +865,60 @@ export function BillForm({
                           {t(l.read.matchedBy === "learned" ? "readLearned" : "readModel")}
                         </span>
                       )}
+                      {l.kind === "new" && <span className="text-ink"> · {t("newStockHelp")}</span>}
                     </span>
-                    {items.length > 0 && (
-                      <button
-                        type="button"
-                        className="min-h-9 cursor-pointer font-semibold text-ink underline underline-offset-4"
-                        onClick={() =>
-                          set(
-                            l.key,
-                            l.kind === "stock"
-                              ? { kind: "other", itemId: "", qty: "", name: l.read!.readName, category: l.category === "supplies" ? "supplies" : "ingredients" }
-                              : { kind: "stock", name: "" },
-                          )
-                        }
-                      >
-                        {t(l.kind === "stock" ? "makeExpense" : "makeStock")}
-                      </button>
-                    )}
+                    <span className="flex flex-wrap gap-x-4">
+                      {l.kind !== "new" && l.read.newItem && data.canAddStock && (
+                        <button
+                          type="button"
+                          className="min-h-9 cursor-pointer font-semibold text-ink underline underline-offset-4"
+                          onClick={() => set(l.key, { kind: "new", itemId: "", name: l.read!.readName, qty: l.read!.qtyMilli !== null ? bigInput(l.read!.qtyMilli) : l.qty, pack: null })}
+                        >
+                          {t("makeNewStock")}
+                        </button>
+                      )}
+                      {l.kind !== "stock" && items.length > 0 && (
+                        <button
+                          type="button"
+                          className="min-h-9 cursor-pointer font-semibold text-ink underline underline-offset-4"
+                          onClick={() => set(l.key, { kind: "stock", name: "", itemId: "", pack: null })}
+                        >
+                          {t(l.kind === "new" ? "pickExisting" : "makeStock")}
+                        </button>
+                      )}
+                      {l.kind !== "other" && (
+                        <button
+                          type="button"
+                          className="min-h-9 cursor-pointer font-semibold text-ink underline underline-offset-4"
+                          onClick={() =>
+                            set(l.key, { kind: "other", itemId: "", qty: "", pack: null, name: l.read!.readName, category: l.category === "supplies" ? "supplies" : "ingredients" })
+                          }
+                        >
+                          {t(l.kind === "new" ? "keepExpense" : "makeExpense")}
+                        </button>
+                      )}
+                    </span>
                   </span>
                 )}
-                {unitKurus !== null && item && (
+                {l.read && l.kind !== "other" && p.unit && l.read.readQtyMilli !== null && (
+                  <PackLine
+                    t={t}
+                    lang={lang}
+                    read={l.read}
+                    unit={p.unit}
+                    qtyMilli={p.qtyMilli}
+                    pack={l.pack}
+                    onPack={(raw) => {
+                      const size = parseBig(raw);
+                      set(l.key, { pack: raw, ...(size !== null && size > 0 ? { qty: bigInput(Math.round((l.read!.readQtyMilli! * size) / 1000)) } : {}) });
+                    }}
+                  />
+                )}
+                {unitKurus !== null && p.unit && (
                   <span className="order-5 col-span-3 text-sm text-muted @lg:order-none @lg:col-span-4">
-                    {fill(t("perUnit"), { price: formatTL(unitKurus), unit: unitLabel(item.unit, lang) })}
-                    {item.costKurus !== null &&
+                    {fill(t("perUnit"), { price: formatTL(unitKurus), unit: unitLabel(p.unit, lang) })}
+                    {item &&
+                      item.costKurus !== null &&
                       item.costKurus !== unitKurus &&
                       ` · ${fill(t("lastPriceWas"), { price: fill(t("perUnit"), { price: formatTL(item.costKurus), unit: unitLabel(item.unit, lang) }) })}`}
                   </span>
@@ -890,6 +1057,62 @@ function DuplicateOf({ t, slug, of }: { t: T; slug: string; of: NonNullable<Draf
         {t("dupOpen")}
       </a>
     </p>
+  );
+}
+
+/** A printed unit in words: "koli", or "case" in English. */
+function readUnitLabel(unit: string | null, lang: Lang): string {
+  const en: Record<string, string> = { koli: "case", paket: "pack", kasa: "crate", adet: "pcs", l: "L" };
+  if (!unit) return "";
+  return lang === "en" ? (en[unit] ?? unit) : unit === "l" ? "L" : unit;
+}
+
+/**
+ * How a line's printed amount became stock: "2 koli → 24 L", with what one pack holds to
+ * check or type ("1 koli = 12 L"). Confirming keeps that pack size for this supplier's next
+ * bill (piece 25), so the same line is always worked out the same way.
+ */
+function PackLine({
+  t,
+  lang,
+  read,
+  unit,
+  qtyMilli,
+  pack,
+  onPack,
+}: {
+  t: T;
+  lang: Lang;
+  read: ProposalLineDTO;
+  unit: StockUnitDTO;
+  qtyMilli: number | null;
+  pack: string | null;
+  onPack: (raw: string) => void;
+}) {
+  const num = (milli: number) => (milli / 1000).toLocaleString(lang === "tr" ? "tr-TR" : "en-GB", { maximumFractionDigits: 3 });
+  const printed = `${num(read.readQtyMilli!)} ${readUnitLabel(read.readUnit, lang)}`.trim();
+  const size = qtyMilli && read.readQtyMilli ? Math.round((qtyMilli * 1000) / read.readQtyMilli) : null;
+  // Only worth showing when something was converted: "24 L" from "24 l" needs no line.
+  const same = read.readUnit === unit && size === 1000;
+  if (same || !qtyMilli) return null;
+  return (
+    <span className="order-7 col-span-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted @lg:order-none @lg:col-span-4">
+      <span className="font-semibold text-ink tabular">{fill(t("packShows"), { from: printed, to: `${num(qtyMilli)} ${bigUnit(unit, lang)}` })}</span>
+      {read.readUnit && read.readUnit !== unit && (
+        <label className="flex items-center gap-2 whitespace-nowrap">
+          <span>{fill(t("packOne"), { unit: readUnitLabel(read.readUnit, lang) })}</span>
+          <input
+            className="min-h-9 w-24 rounded-xl border border-line bg-paper px-3 py-1 text-right text-base text-ink tabular outline-none focus:border-ink"
+            inputMode="decimal"
+            value={pack ?? (size !== null ? bigInput(size) : "")}
+            onChange={(e) => onPack(e.target.value)}
+            aria-label={fill(t("packOne"), { unit: readUnitLabel(read.readUnit, lang) })}
+          />
+          <span>{bigUnit(unit, lang)}</span>
+        </label>
+      )}
+      {read.matchedBy === "learned" && read.qtyMilli === qtyMilli ? <span>{t("packLearned")}</span> : <span>{t("packRemembered")}</span>}
+    </span>
   );
 }
 

@@ -132,4 +132,13 @@ export class PrismaBillStore implements BillStore {
     });
     return line ? { billId: line.billId, date: line.bill.date, qtyMilli: line.qtyMilli!, totalKurus: line.totalKurus } : null;
   }
+
+  async boughtItems(cafeId: string): Promise<string[]> {
+    const lines = await this.db().billLine.findMany({
+      where: { itemId: { not: null }, bill: { cafeId, voidedAt: null } },
+      distinct: ["itemId"],
+      select: { itemId: true },
+    });
+    return lines.map((l) => l.itemId!);
+  }
 }

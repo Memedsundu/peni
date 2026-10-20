@@ -1,6 +1,7 @@
 import type { BillCategory, BillKdv } from "./bills";
 import type { CheckOutcome, StatementProposal, ZReportProposal } from "./checks";
 import { sniffImageType, type ImageType } from "./images";
+import { MILLI, STOCK_MAX_MILLI, type NewStockItem, type StockKind, type StockUnit } from "./stock";
 
 /**
  * The assistant's ground (plan piece 24): the documents a café hands it, the drafts it
@@ -133,6 +134,14 @@ export interface BillProposal {
   /** The seller's name as printed; offered as a new supplier when nothing matched. */
   supplierName: string | null;
   supplierTaxNumber: string | null;
+  /** What else the bill shows about the seller, for a new supplier. Drafts written before this have none. */
+  supplierPhone?: string | null;
+  supplierIban?: string | null;
+  supplierAddress?: string | null;
+  /** How the supplier was found: as a person confirmed it before, or by the name, tax number or sender read. */
+  supplierMatchedBy?: "learned" | "read" | null;
+  /** With no supplier found: the café's suppliers the name could be (two that fit equally), to pick from. */
+  supplierChoices?: string[];
   number: string | null;
   date: string | null;
   dueDate: string | null;
@@ -148,10 +157,17 @@ export interface BillProposal {
 export interface ProposalLine {
   /** The stock item it was matched to (piece 25), or null for an expense line. */
   itemId: string | null;
-  /** The item's name for a stock line, else what was read. */
+  /**
+   * Or the stock item it could start: a line that looks like something the café keeps (an
+   * ingredient or supply with an amount) but matches none of its items. Confirming it as is
+   * creates the item and adds the amount; the person can rename it, pick an existing item
+   * or keep it an expense. Drafts written before this have none.
+   */
+  newItem?: NewStockItem | null;
+  /** The item's name for a stock line (or the new item's), else what was read. */
   name: string;
   category: BillCategory;
-  /** Stock lines: how much came, in thousandths of the item's unit; null when it couldn't be worked out. */
+  /** Stock lines (and new items): how much came, in thousandths of the item's unit; null when it couldn't be worked out. */
   qtyMilli: number | null;
   totalKurus: number;
   /** The line as printed, so the person can see what it was matched from. */
@@ -208,6 +224,10 @@ interface DraftBase {
  * What a person confirmed a read line to be (piece 25): "SÜT 1LT TAM YAĞLI" from Moda Süt
  * is the stock item Süt, one of them being a litre. The next bill from them is matched the
  * same way without asking the model to guess again.
+ *
+ * The pack size comes with it: "Laktozsuz Süt 1 L, 2 koli" confirmed as 24 l means one koli
+ * from them is 12 l, so their next "3 koli" is 36 l whatever the model makes of it. It holds
+ * only for the unit it was learned in: "24 adet" of the same line isn't 288 l.
  */
 export interface LineMatch {
   cafeId: string;
@@ -215,10 +235,33 @@ export interface LineMatch {
   supplierId: string | null;
   /** The read name, tidied (see `lineKey`). */
   readKey: string;
-  itemId: string;
-  /** Thousandths of the item's unit per one read unit; null when the quantity wasn't read. */
+  /** The stock item it is; null when a person kept the line as an expense, so it isn't offered as stock again. */
+  itemId: string | null;
+  /** The pack size: thousandths of the item's unit per one read unit; null when the quantity wasn't read. */
   perUnitMilli: number | null;
+  /** The printed unit the pack size is for ("koli", "adet"); null when none was printed. */
+  readUnit: string | null;
   updatedAt: Date;
+}
+
+/**
+ * The amount a learned pack size gives for a line: "3 koli" at 12 l a koli is 36 l. Null when
+ * the line wasn't printed in the unit the pack size was learned in, or the result is no amount.
+ */
+export function packAmount(
+  match: Pick<LineMatch, "perUnitMilli" | "readUnit">,
+  read: { qtyMilli: number | null; unit: string | null },
+): number | null {
+  // A match learned before units were kept has none, and holds as it did then: for any unit.
+  if (!match.perUnitMilli || !read.qtyMilli || (match.readUnit && match.readUnit !== read.unit)) return null;
+  const milli = Math.round((read.qtyMilli * match.perUnitMilli) / MILLI);
+  return milli > 0 && milli <= STOCK_MAX_MILLI ? milli : null;
+}
+
+/** The pack size a confirmed line shows: 24 l from "2 koli" is 12 l a koli (12 000 thousandths). */
+export function packSize(readQtyMilli: number | null, qtyMilli: number | null): number | null {
+  if (!readQtyMilli || !qtyMilli || readQtyMilli <= 0 || qtyMilli <= 0) return null;
+  return Math.round((qtyMilli * MILLI) / readQtyMilli);
 }
 
 /** "SÜT 1 LT. Tam-Yağlı" and "süt 1 lt tam yağlı" are the same line. */
@@ -228,6 +271,19 @@ export function lineKey(name: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .slice(0, 120);
+}
+
+/**
+ * Which supplier a person confirmed a bill's seller to be: "MODA SÜT ÜRN. LTD." or tax number
+ * 1234567890 is Moda Süt. Their next bill goes to Moda Süt before anything is guessed, and
+ * the lines learned for Moda Süt apply to it.
+ */
+export interface SupplierMatch {
+  cafeId: string;
+  /** The read seller, tidied: "tax:1234567890" or "name:moda süt ürn". */
+  readKey: string;
+  supplierId: string;
+  updatedAt: Date;
 }
 
 export const DISMISS_REASON_MAX = 200;
@@ -407,6 +463,11 @@ export interface AssistantStore {
   saveLineMatch(match: LineMatch): Promise<void>;
   deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void>;
 
+  listSupplierMatches(cafeId: string): Promise<SupplierMatch[]>;
+  /** One per café and read seller: a newer one replaces it. */
+  saveSupplierMatch(match: SupplierMatch): Promise<void>;
+  deleteSupplierMatch(cafeId: string, readKey: string): Promise<void>;
+
   getInbox(cafeId: string): Promise<CafeInbox | null>;
   findInbox(token: string): Promise<CafeInbox | null>;
   saveInbox(inbox: CafeInbox): Promise<void>;
@@ -425,6 +486,7 @@ export class InMemoryAssistantStore implements AssistantStore {
   private readonly jobs = new Map<string, Job>();
   private readonly events: AiEvent[] = [];
   private readonly matches = new Map<string, LineMatch>();
+  private readonly sellers = new Map<string, SupplierMatch>();
   private readonly inboxes = new Map<string, CafeInbox>();
   private readonly emails: InboundEmail[] = [];
 
@@ -523,6 +585,16 @@ export class InMemoryAssistantStore implements AssistantStore {
   }
   async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string) {
     this.matches.delete(`${cafeId}|${supplierId ?? ""}|${readKey}`);
+  }
+
+  async listSupplierMatches(cafeId: string) {
+    return [...this.sellers.values()].filter((m) => m.cafeId === cafeId).map((m) => ({ ...m }));
+  }
+  async saveSupplierMatch(match: SupplierMatch) {
+    this.sellers.set(`${match.cafeId}|${match.readKey}`, { ...match });
+  }
+  async deleteSupplierMatch(cafeId: string, readKey: string) {
+    this.sellers.delete(`${cafeId}|${readKey}`);
   }
 
   async getInbox(cafeId: string) {

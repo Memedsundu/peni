@@ -161,6 +161,8 @@ export interface BillStore {
   /** Oldest first; only this method when given (the credit card's charges). */
   listPayments(cafeId: string, opts?: { method?: BillPayMethod }): Promise<BillPayment[]>;
   lastPrice(cafeId: string, itemId: string): Promise<LastPrice | null>;
+  /** Every stock item a live bill has a line for: the ones the café has bought at least once. */
+  boughtItems(cafeId: string): Promise<string[]>;
 }
 
 /** What one kg, litre or piece cost on a line, in kuruş. */
@@ -313,6 +315,12 @@ export class InMemoryBillStore implements BillStore {
       if (line) return { billId: b.id, date: b.date, qtyMilli: line.qtyMilli!, totalKurus: line.totalKurus };
     }
     return null;
+  }
+
+  async boughtItems(cafeId: string) {
+    const out = new Set<string>();
+    for (const b of this.bills.values()) if (b.cafeId === cafeId && !b.voidedAt) for (const l of b.lines) if (l.itemId) out.add(l.itemId);
+    return [...out];
   }
 
   private read(b: Bill): Bill {

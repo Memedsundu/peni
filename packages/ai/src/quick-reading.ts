@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readBill, readLineSchema, stockList, STOCK_INSTRUCTIONS, type ReadBill, type ReadStockItem } from "./bill-reading";
+import { NEW_ITEM_INSTRUCTIONS, readBill, readLineSchema, stockList, STOCK_INSTRUCTIONS, type ReadBill, type ReadStockItem } from "./bill-reading";
 import type { AiRequest } from "./model";
 
 /**
@@ -66,7 +66,7 @@ export function quickReadingRequest(
   ].filter(Boolean);
   return {
     purpose: "note.read",
-    instructions: context.items.length ? `${QUICK_INSTRUCTIONS}\n\n${STOCK_INSTRUCTIONS}` : QUICK_INSTRUCTIONS,
+    instructions: [QUICK_INSTRUCTIONS, context.items.length ? STOCK_INSTRUCTIONS : null, NEW_ITEM_INSTRUCTIONS].filter(Boolean).join("\n\n"),
     parts: [
       { type: "text", text: lists.join("\n\n") },
       { type: "text", text: `${entry.voice ? "What they said" : "What they wrote"}:\n${entry.text.replace(/\s+/g, " ").trim()}` },
@@ -115,6 +115,9 @@ export function readQuick(r: QuickReading, opts: { today: string; suppliers: num
         kind: "bill",
         supplierName: e.supplierName,
         supplierTaxNumber: null,
+        supplierPhone: null,
+        supplierIban: null,
+        supplierAddress: null,
         number: null,
         date,
         dueDate: e.dueDate,

@@ -32,6 +32,9 @@ const day = (n: number) => localDateKey(addDays(now, n), "Europe/Istanbul");
 const nothingElse: Omit<BillReading, "kind"> = {
   supplierName: null,
   supplierTaxNumber: null,
+  supplierPhone: null,
+  supplierIban: null,
+  supplierAddress: null,
   number: null,
   date: null,
   dueDate: null,

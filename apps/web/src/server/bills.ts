@@ -9,7 +9,9 @@ import {
   lenderKey,
   localDateKey,
   sameMenuName,
+  STOCK_UNITS,
   stockDifference,
+  stockItemProblem,
   supplierProblem,
   unitCost,
   validDate,
@@ -26,7 +28,9 @@ import {
   type Permission,
   type StaffStore,
   type StockItem,
+  type StockKind,
   type StockStore,
+  type StockUnit,
   type Supplier,
 } from "@peni/core";
 import { createHash, randomUUID } from "node:crypto";
@@ -41,6 +45,12 @@ const PRICE_POINTS = 12;
 
 export interface BillLineInput {
   itemId: string | null;
+  /**
+   * Adding a bill: a stock item to create for this line and add its amount to, when the café
+   * doesn't keep it yet ("Yeni stok kalemi"). Needs "stock.edit". A live item with the same
+   * name is used instead of a second one.
+   */
+  newItem?: { name: string; unit: StockUnit; kind: StockKind } | null;
   name?: string;
   category?: BillCategory;
   qtyMilli?: number | null;
@@ -138,6 +148,7 @@ export class BillService {
       canAdd: ctx.permissions.has("bills.add"),
       canManage: ctx.permissions.has("bills.manage"),
       canAddSupplier: ctx.permissions.has("suppliers.edit"),
+      canAddStock: ctx.permissions.has("stock.edit"),
       canScan: ctx.permissions.has("bills.add") && this.scans.mode() !== "off",
       canSeeDrafts: ctx.permissions.has("assistant.use"),
     };
@@ -175,7 +186,8 @@ export class BillService {
     const existing = await this.store.findBillByKey(cafeId, input.key);
     if (existing) return this.dto(ctx, existing);
     const today = await this.today(cafeId);
-    const fields = await this.fields(ctx, input, today, null);
+    const { lines, created } = await this.newItems(ctx, input.key, input.lines);
+    const fields = await this.fields(ctx, { ...input, lines }, today, null, created);
     await this.money.assertOpen(cafeId, fields.date);
     const paidOn = input.paid?.paidOn ?? today;
     if (input.paid) {
@@ -214,6 +226,8 @@ export class BillService {
       if (payment) {
         await this.money.post(ctx, { source: `bill_payment:${payment.id}`, account, amountKurus: -payment.amountKurus, kind: "bill", day: paidOn, label: await this.label(bill) });
       }
+      // New stock items start at nothing; the bill's own move below adds what came.
+      for (const item of created) if (!(await this.stock.getItem(cafeId, item.id))) await this.stock.saveItem(item);
       await this.store.saveBill(bill);
       if (payment) await this.store.addPayment(payment);
       await this.moveStock(ctx, bill, `bill:${bill.id}:1`, billStock(bill.lines));
@@ -229,6 +243,7 @@ export class BillService {
    */
   async correct(ctx: StaffContext, billId: string, input: BillInput & { version: number }): Promise<BillDTO> {
     this.require(ctx, "bills.manage");
+    if (input.lines.some((l) => l.newItem)) throw new AppError("BILL_LINE_INVALID", "Add new stock items on Stok first", 400);
     const cafeId = ctx.cafe.id;
     const before = await this.bill(ctx, billId);
     this.editable(before, input.version);
@@ -443,8 +458,51 @@ export class BillService {
 
   // ─────────────────────────────────────────────── helpers
 
-  /** Checks and tidies what a bill says. `before` is the bill being corrected, whose removed items and supplier may stay. */
-  private async fields(ctx: StaffContext, input: BillInput, today: string, before: Bill | null) {
+  /**
+   * The stock items a new bill's lines start (piece 25's "Yeni stok kalemi"), checked, and the
+   * lines pointing at them. An item is named once: a live item of the same name is used, and
+   * its id comes from the bill's key, so adding the same bill again finds the same item.
+   */
+  private async newItems(ctx: StaffContext, key: string, input: BillLineInput[]): Promise<{ lines: BillLineInput[]; created: StockItem[] }> {
+    if (!input.some((l) => l.newItem && !l.itemId)) return { lines: input, created: [] };
+    this.require(ctx, "stock.edit");
+    const cafeId = ctx.cafe.id;
+    const live = await this.stock.listItems(cafeId);
+    const created: StockItem[] = [];
+    const lines = input.map((l, i) => {
+      if (!l.newItem || l.itemId) return l;
+      const { newItem, ...line } = l;
+      const name = newItem.name.replace(/\s+/g, " ").trim();
+      if (!STOCK_UNITS.includes(newItem.unit) || (newItem.kind !== "ingredient" && newItem.kind !== "supply")) {
+        throw new AppError("BILL_LINE_INVALID", "Check the new stock item", 400);
+      }
+      const same = [...live, ...created].find((x) => sameMenuName(x.name, name));
+      if (same) return { ...line, itemId: same.id };
+      const item: StockItem = {
+        id: `stk_${keyHash(cafeId, `${key}:new:${i}`)}`,
+        cafeId,
+        name,
+        kind: newItem.kind,
+        unit: newItem.unit,
+        qtyMilli: 0,
+        minMilli: 0,
+        costKurus: null,
+        archivedAt: null,
+        createdAt: this.now(),
+      };
+      const problem = stockItemProblem(item);
+      if (problem) throw new AppError(problem === "NAME_TOO_LONG" ? "NAME_TOO_LONG" : "NAME_REQUIRED", "Check the new stock item's name", 400);
+      created.push(item);
+      return { ...line, itemId: item.id };
+    });
+    return { lines, created };
+  }
+
+  /**
+   * Checks and tidies what a bill says. `before` is the bill being corrected, whose removed
+   * items and supplier may stay; `created` are stock items this bill is about to add.
+   */
+  private async fields(ctx: StaffContext, input: BillInput, today: string, before: Bill | null, created: StockItem[] = []) {
     const cafeId = ctx.cafe.id;
     if (!validDate(input.date) || input.date > today) throw new AppError("BILL_DATE_INVALID", "Check the date", 400);
     const dueDate = input.dueDate || null;
@@ -454,7 +512,7 @@ export class BillService {
       if (!s || (s.archivedAt && before?.supplierId !== s.id)) throw new AppError("SUPPLIER_NOT_FOUND", "No such supplier", 404);
     }
     if (input.lines.length === 0 || input.lines.length > 50) throw new AppError("BILL_LINE_INVALID", "Check the lines", 400);
-    const items = new Map((await this.stock.listItems(cafeId, { includeArchived: true })).map((i) => [i.id, i]));
+    const items = new Map([...(await this.stock.listItems(cafeId, { includeArchived: true })), ...created].map((i) => [i.id, i]));
     const kept = new Set(before?.lines.map((l) => l.itemId) ?? []);
     const lines: BillLine[] = input.lines.map((l) => {
       if (!Number.isInteger(l.totalKurus) || l.totalKurus < 0 || l.totalKurus > 100_000_000) throw new AppError("AMOUNT_INVALID", "Check the amount", 400);

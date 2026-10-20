@@ -167,6 +167,7 @@ model Cafe {
   alertMutes     AlertMute[]
   documents      CafeDocument[]
   lineMatches    AiLineMatch[]
+  supplierMatches AiSupplierMatch[]
   drafts         AiDraft[]
   jobs           Job[]
   aiEvents       AiEvent[]
@@ -1518,13 +1519,30 @@ model AiLineMatch {
   /// "" for a bill with no supplier.
   supplierKey  String
   readKey      String
-  itemId       String
+  /// Null when the person kept the line as an expense: it isn't offered as stock again.
+  itemId       String?
+  /// The pack size: thousandths of the item's unit per one printed unit ("1 koli = 12 l" is 12000).
   perUnitMilli Int?
+  /// The printed unit the pack size is for: "koli", "adet"; null when none was printed.
+  readUnit     String?
   updatedAt    DateTime
 
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@id([cafeId, supplierKey, readKey])
+}
+
+/// Which supplier a person confirmed a bill's seller to be, by read name or tax number, for their next bill.
+model AiSupplierMatch {
+  cafeId     String
+  /// "tax:1234567890" or "name:moda süt ürn".
+  readKey    String
+  supplierId String
+  updatedAt  DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, readKey])
 }
 
 /// Background work, run right after it's added and retried on later passes.
