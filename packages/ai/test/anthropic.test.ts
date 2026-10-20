@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { AiError, AnthropicModel, billReadingSchema, chatStepSchema, letterSchema, quickReadingSchema, statementReadingSchema, zReadingSchema } from "../src";
+import { AiError, AnthropicModel, billReadingSchema, chatStepSchema, letterSchema, quickReadingSchema, recipeDraftingSchema, statementReadingSchema, zReadingSchema } from "../src";
 
 const request = {
   purpose: "test",
@@ -84,7 +84,7 @@ describe("AnthropicModel (D23, Claude)", () => {
   });
 
   it("takes every shape Peni asks for, as a schema Claude's structured outputs accept", () => {
-    const shapes = { billReadingSchema, chatStepSchema, letterSchema, quickReadingSchema, statementReadingSchema, zReadingSchema };
+    const shapes = { billReadingSchema, chatStepSchema, letterSchema, quickReadingSchema, recipeDraftingSchema, statementReadingSchema, zReadingSchema };
     for (const shape of Object.values(shapes)) {
       const { type, schema } = zodOutputFormat(shape);
       expect(type).toBe("json_schema");

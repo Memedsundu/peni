@@ -30,6 +30,7 @@ import type {
   SupplierDTO,
   SuppliersDTO,
   StockItemHistoryDTO,
+  RecipeDraftsDTO,
   RecipesDTO,
   StaffFeedDTO,
   TeamDTO,
@@ -102,6 +103,8 @@ import type {
   CountStockInput,
   WasteStockInput,
   SaveRecipeInput,
+  ConfirmRecipeDraftInput,
+  DismissRecipeDraftInput,
   AddSupplierInput,
   UpdateSupplierInput,
   AddBillInput,
@@ -344,6 +347,15 @@ export function createPeniClient(options: PeniClientOptions) {
         recipes: (cafeSlug: string) => call<RecipesDTO>("GET", `/staff/${slug(cafeSlug)}/menu/recipes`, undefined, true),
         saveRecipe: (cafeSlug: string, productId: string, input: SaveRecipeInput) =>
           call<RecipesDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products/${slug(productId)}/recipe`, input, true),
+        /** The assistant's recipe drafts (D21): it writes, a person confirms or lets go. */
+        recipeDrafts: (cafeSlug: string) => call<RecipeDraftsDTO>("GET", `/staff/${slug(cafeSlug)}/menu/recipe-drafts`, undefined, true),
+        /** "Reçeteyi asistan yazsın": only for a product with no recipe; waits for the draft. */
+        draftRecipe: (cafeSlug: string, productId: string) =>
+          call<RecipeDraftsDTO>("POST", `/staff/${slug(cafeSlug)}/menu/products/${slug(productId)}/recipe-draft`, {}, true),
+        confirmRecipeDraft: (cafeSlug: string, draftId: string, input: ConfirmRecipeDraftInput) =>
+          call<RecipesDTO>("POST", `/staff/${slug(cafeSlug)}/menu/recipe-drafts/${slug(draftId)}/confirm`, input, true),
+        dismissRecipeDraft: (cafeSlug: string, draftId: string, input: DismissRecipeDraftInput = {}) =>
+          call<RecipeDraftsDTO>("POST", `/staff/${slug(cafeSlug)}/menu/recipe-drafts/${slug(draftId)}/dismiss`, input, true),
       },
       /** Stok (piece 17). Viewing needs "stock.view"; the rest "stock.edit". Every call answers with the whole page. */
       stock: {

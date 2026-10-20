@@ -234,6 +234,45 @@ const TEXT = {
   leavesProfit: { tr: "{profit} kâr (%{pct})", en: "{profit} profit ({pct}%)" },
   unpricedItems: { tr: "Maliyet için fiyatı eksik: {names}. Stok'tan gir.", en: "Needs a price for the cost: {names}. Enter it in Stock." },
   perSale: { tr: "Her satışta: {list}", en: "Each sale: {list}" },
+  // Recipes the assistant drafts (D21)
+  rdBar: {
+    tr: "{n} ürünün reçetesi yok: satılınca stoktan bir şey düşmüyor, maliyeti de bilinmiyor. Asistan ilk taslağı yazsın; sen kontrol edip onaylarsın.",
+    en: "{n} products have no recipe: selling them takes nothing from stock, and their cost is unknown. Let the assistant write a first draft; you check and confirm it.",
+  },
+  rdBarOff: {
+    tr: "{n} ürünün reçetesi yok. Asistan kapalı; reçeteyi ürüne dokunup elle yazabilirsin.",
+    en: "{n} products have no recipe. The assistant is off; tap a product to write its recipe yourself.",
+  },
+  rdWriteAll: { tr: "Eksik reçetelerin hepsini yaz", en: "Write all missing recipes" },
+  rdWriting: { tr: "Yazılıyor… {done} / {total}", en: "Writing… {done} / {total}" },
+  rdWaiting: { tr: "{n} taslak kontrolünü bekliyor; ürüne dokunup aç.", en: "{n} drafts are waiting for you; tap a product to open its draft." },
+  rdSomeFailed: { tr: "{n} ürünün reçetesi yazılamadı; tek tek yeniden dene.", en: "{n} recipes couldn't be written; try them one by one." },
+  rdWriteOne: { tr: "Reçeteyi asistan yazsın", en: "Let the assistant write the recipe" },
+  rdWritingOne: { tr: "Asistan yazıyor…", en: "The assistant is writing…" },
+  rdReady: { tr: "Asistanın taslağı hazır: kontrol et", en: "The assistant's draft is ready: check it" },
+  rdReadyCost: { tr: "Asistanın taslağı hazır: kontrol et · maliyet {cost}", en: "The assistant's draft is ready: check it · costs {cost}" },
+  rdBanner: {
+    tr: "Bu reçeteyi asistan yazdı. Kontrol et, gerekirse değiştir, sonra onayla. Onaylayana kadar stoktan bir şey düşmez.",
+    en: "The assistant wrote this recipe. Check it, change what's off, then confirm. Nothing is taken from stock until you do.",
+  },
+  rdNew: { tr: "Yeni: {name}", en: "New: {name}" },
+  rdNewTag: { tr: "{name} (yeni)", en: "{name} (new)" },
+  rdNewItems: { tr: "Stok'ta yok; onaylayınca eklenecek", en: "Not in Stock; added when you confirm" },
+  rdNewItemsHelp: {
+    tr: "Stok'a 0 ile eklenir. Ne kadar olduğu sayımla, fiyatı ilk faturayla gelir.",
+    en: "Added to Stock at 0. A count says how much there is; the first bill brings its price.",
+  },
+  rdNewName: { tr: "Malzeme adı", en: "Item name" },
+  rdNewUnit: { tr: "Nasıl tutuluyor?", en: "Kept in" },
+  rdUnitKg: { tr: "kg", en: "kg" },
+  rdUnitL: { tr: "litre", en: "litres" },
+  rdUnitAdet: { tr: "adet", en: "pieces" },
+  rdNoAddItems: {
+    tr: "Stok'a malzeme ekleme yetkin yok. Yeni malzemeleri tariften çıkar ya da bir yöneticiye onaylat.",
+    en: "You can't add items to Stock. Take the new items out of the recipe, or ask a manager to confirm it.",
+  },
+  rdConfirm: { tr: "Reçeteyi onayla", en: "Confirm the recipe" },
+  rdDismiss: { tr: "Taslağı bırak", en: "Let the draft go" },
   // Faturalar (plan piece 18)
   bills: { tr: "Faturalar", en: "Bills" },
   billsHelp: {

@@ -279,6 +279,32 @@ export const saveRecipeSchema = z.object({
   lines: z.array(z.object({ itemId: z.string().min(1).max(100), qtyMilli: milli.refine((v) => v > 0, "Miktar yaz") })).max(20),
 });
 
+/** "Reçeteyi onayla": the assistant's draft as the person left it. Lines name an item or one of `newItems`. */
+export const confirmRecipeDraftSchema = z.object({
+  mode: z.enum(["recipe", "counted", "none"]),
+  lines: z
+    .array(
+      z.object({
+        itemId: z.string().min(1).max(100).nullable(),
+        newItem: z.number().int().min(0).max(9).nullable(),
+        qtyMilli: milli.refine((v) => v > 0, "Miktar yaz"),
+      }),
+    )
+    .max(20),
+  newItems: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1, "Bir ad yaz").max(60, "Ad en fazla 60 harf olabilir"),
+        unit: z.enum(["kg", "l", "adet"]),
+        kind: z.enum(["ingredient", "supply"]),
+      }),
+    )
+    .max(10),
+});
+
+/** "Taslağı bırak": optionally why. */
+export const dismissRecipeDraftSchema = z.object({ reason: z.string().trim().max(200).nullable().optional() });
+
 // ─────────────────────────────────────────────── suppliers and bills (plan piece 18)
 
 const billDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Tarihi kontrol et");
@@ -668,6 +694,8 @@ export type ClosePayInput = z.input<typeof closePaySchema>;
 export type CountStockInput = z.input<typeof countStockSchema>;
 export type WasteStockInput = z.input<typeof wasteStockSchema>;
 export type SaveRecipeInput = z.input<typeof saveRecipeSchema>;
+export type ConfirmRecipeDraftInput = z.input<typeof confirmRecipeDraftSchema>;
+export type DismissRecipeDraftInput = z.input<typeof dismissRecipeDraftSchema>;
 export type UpdateProfileInput = z.input<typeof updateProfileSchema>;
 export type DeleteAccountInput = z.input<typeof deleteAccountSchema>;
 

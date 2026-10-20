@@ -175,6 +175,7 @@ model Cafe {
   weeklyLetters  WeeklyLetter[]
   watchSeen      WatchDismissal[]
   watchSuggested WatchSuggestion[]
+  recipeDrafts   RecipeDraft[]
   inbox          CafeInbox?
   inboundEmails  InboundEmail[]
   memberships    Membership[]
@@ -1648,4 +1649,28 @@ model WatchSuggestion {
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@id([cafeId, itemId, day])
+}
+
+/// A recipe the assistant drafted for a product with none (D21): open until someone who edits recipes confirms or lets it go.
+model RecipeDraft {
+  id            String    @id
+  cafeId        String
+  productId     String
+  productName   String
+  status        String
+  /// As the assistant wrote it: mode, lines, items to add, reason.
+  proposal      Json
+  notes         String[]
+  model         String
+  createdById   String
+  createdAt     DateTime
+  decidedById   String?
+  decidedAt     DateTime?
+  changed       String[]
+  dismissReason String?
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, status, createdAt])
+  @@index([cafeId, createdAt])
 }
