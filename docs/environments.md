@@ -10,6 +10,8 @@ Peni runs in three places. A change goes through them in order: your Mac, then s
 
 Every pull request also gets its own address from Vercel (it posts the link on the pull request). Those use the staging database too.
 
+Every pull request into `main`, and `main` after each merge, also runs the **Tests** check on GitHub (`.github/workflows/test.yml`, about 3 minutes): it checks the code types, runs all the unit tests, and runs the 28 database tests against a fresh, empty Postgres that sorts text the way Neon does. It never touches staging or production. A red check means don't merge yet.
+
 ## Where things live
 
 - **Vercel project `peni`** (team memedsundus-projects), built from `apps/web`, servers in Frankfurt (`fra1`). Vercel's "Production" environment is the `production` branch; every other branch, `main` included, is "Preview", which is staging.
