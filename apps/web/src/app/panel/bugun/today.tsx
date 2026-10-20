@@ -195,6 +195,17 @@ function SetupList({ setup, slug, t, lang }: { setup: SetupDTO; slug: string; t:
       help: t("setupNoRecipeHelp"),
       links: [{ href: "/panel/menu", label: t("setupOpenMenu") }],
     });
+  if (setup.noSupplier)
+    rows.push({
+      key: "suppliers",
+      title: fill(t("setupNoSupplier"), { count: setup.noSupplier.count }),
+      detail: "",
+      help: t("setupNoSupplierHelp"),
+      links: setup.noSupplier.bills.map((b) => ({
+        href: `/panel/faturalar?fatura=${encodeURIComponent(b.id)}`,
+        label: [b.lines[0] ?? t("noSupplier"), formatTL(b.totalKurus), formatDay(b.date, lang)].join(" · "),
+      })),
+    });
   if (setup.unstocked)
     rows.push({
       key: "bills",

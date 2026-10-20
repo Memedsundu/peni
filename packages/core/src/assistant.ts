@@ -134,6 +134,14 @@ export interface BillProposal {
   /** The seller's name as printed; offered as a new supplier when nothing matched. */
   supplierName: string | null;
   supplierTaxNumber: string | null;
+  /** What else the bill shows about the seller, for a new supplier. Drafts written before this have none. */
+  supplierPhone?: string | null;
+  supplierIban?: string | null;
+  supplierAddress?: string | null;
+  /** How the supplier was found: as a person confirmed it before, or by the name, tax number or sender read. */
+  supplierMatchedBy?: "learned" | "read" | null;
+  /** With no supplier found: the café's suppliers the name could be (two that fit equally), to pick from. */
+  supplierChoices?: string[];
   number: string | null;
   date: string | null;
   dueDate: string | null;
@@ -270,6 +278,19 @@ export function lineKey(name: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .slice(0, 120);
+}
+
+/**
+ * Which supplier a person confirmed a bill's seller to be: "MODA SÜT ÜRN. LTD." or tax number
+ * 1234567890 is Moda Süt. Their next bill goes to Moda Süt before anything is guessed, and
+ * the lines learned for Moda Süt apply to it.
+ */
+export interface SupplierMatch {
+  cafeId: string;
+  /** The read seller, tidied: "tax:1234567890" or "name:moda süt ürn". */
+  readKey: string;
+  supplierId: string;
+  updatedAt: Date;
 }
 
 export const DISMISS_REASON_MAX = 200;
@@ -449,6 +470,11 @@ export interface AssistantStore {
   saveLineMatch(match: LineMatch): Promise<void>;
   deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string): Promise<void>;
 
+  listSupplierMatches(cafeId: string): Promise<SupplierMatch[]>;
+  /** One per café and read seller: a newer one replaces it. */
+  saveSupplierMatch(match: SupplierMatch): Promise<void>;
+  deleteSupplierMatch(cafeId: string, readKey: string): Promise<void>;
+
   getInbox(cafeId: string): Promise<CafeInbox | null>;
   findInbox(token: string): Promise<CafeInbox | null>;
   saveInbox(inbox: CafeInbox): Promise<void>;
@@ -467,6 +493,7 @@ export class InMemoryAssistantStore implements AssistantStore {
   private readonly jobs = new Map<string, Job>();
   private readonly events: AiEvent[] = [];
   private readonly matches = new Map<string, LineMatch>();
+  private readonly sellers = new Map<string, SupplierMatch>();
   private readonly inboxes = new Map<string, CafeInbox>();
   private readonly emails: InboundEmail[] = [];
 
@@ -565,6 +592,16 @@ export class InMemoryAssistantStore implements AssistantStore {
   }
   async deleteLineMatch(cafeId: string, supplierId: string | null, readKey: string) {
     this.matches.delete(`${cafeId}|${supplierId ?? ""}|${readKey}`);
+  }
+
+  async listSupplierMatches(cafeId: string) {
+    return [...this.sellers.values()].filter((m) => m.cafeId === cafeId).map((m) => ({ ...m }));
+  }
+  async saveSupplierMatch(match: SupplierMatch) {
+    this.sellers.set(`${match.cafeId}|${match.readKey}`, { ...match });
+  }
+  async deleteSupplierMatch(cafeId: string, readKey: string) {
+    this.sellers.delete(`${cafeId}|${readKey}`);
   }
 
   async getInbox(cafeId: string) {

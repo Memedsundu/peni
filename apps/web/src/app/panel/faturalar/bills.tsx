@@ -507,10 +507,21 @@ export function BillForm({
   const key = useRef(newIdempotencyKey());
   const supplierKey = useRef(newIdempotencyKey());
   const proposal = draft?.proposal;
+  // Two suppliers that fit equally are offered to pick from; a name that fits none is offered as a new supplier.
+  const choices = proposal && !proposal.supplierId ? proposal.supplierChoices : [];
   const [supplierId, setSupplierId] = useState(
-    bill?.supplierId ?? proposal?.supplierId ?? (proposal?.supplierName && data.canAddSupplier ? "__new" : ""),
+    bill?.supplierId ?? proposal?.supplierId ?? (proposal?.supplierName && !choices.length && data.canAddSupplier ? "__new" : ""),
   );
   const [newName, setNewName] = useState(proposal?.supplierId ? "" : (proposal?.supplierName ?? ""));
+  // What the bill showed about a new supplier, to check before it's saved with it.
+  const [newTaxNo, setNewTaxNo] = useState(proposal && !proposal.supplierId ? (proposal.supplierTaxNumber?.replace(/\s/g, "") ?? "") : "");
+  const [newPhone, setNewPhone] = useState(proposal && !proposal.supplierId ? (proposal.supplierPhone ?? "") : "");
+  const [newIban, setNewIban] = useState(proposal && !proposal.supplierId ? (proposal.supplierIban ?? "") : "");
+  const [newAddress, setNewAddress] = useState(proposal && !proposal.supplierId ? (proposal.supplierAddress ?? "") : "");
+  const newDetailsOk =
+    (!newTaxNo.trim() || /^\d{10,11}$/.test(newTaxNo.replace(/\s/g, ""))) &&
+    (!newPhone.trim() || /^\+?[\d ()-]{7,20}$/.test(newPhone.trim())) &&
+    (!newIban.trim() || /^TR\d{24}$/.test(newIban.replace(/\s/g, "").toUpperCase()));
   const [date, setDate] = useState(bill?.date ?? proposal?.date ?? data.today);
   const [number, setNumber] = useState(bill?.number ?? proposal?.number ?? "");
   const [dueDate, setDueDate] = useState(bill?.dueDate ?? proposal?.dueDate ?? "");
@@ -605,7 +616,7 @@ export function BillForm({
     !duplicate &&
     kdvOk &&
     (!askDuplicate || allowDuplicate) &&
-    (supplierId !== "__new" || newName.trim()) &&
+    (supplierId !== "__new" || (newName.trim() && (!draft || newDetailsOk))) &&
     date &&
     (!dueDate || dueDate >= date);
   const set = (k: number, patch: Partial<LineForm>) => setLines((ls) => ls.map((l) => (l.key === k ? { ...l, ...patch } : l)));
@@ -613,7 +624,19 @@ export function BillForm({
   const submit = () =>
     save.run(async () => {
       let sid: string | null = supplierId || null;
-      if (supplierId === "__new") {
+      // Confirming a draft adds the new supplier itself, so the choice is remembered for this seller's next bill.
+      const newSupplier =
+        draft && supplierId === "__new"
+          ? {
+              name: newName.trim(),
+              taxNo: newTaxNo.replace(/\s/g, "") || null,
+              phone: newPhone.trim() || null,
+              iban: newIban.replace(/\s/g, "").toUpperCase() || null,
+              note: newAddress.trim() ? `${t("addressNote")}: ${newAddress.trim()}`.slice(0, 300) : null,
+            }
+          : null;
+      if (newSupplier) sid = null;
+      else if (supplierId === "__new") {
         // A tax number read off the bill comes along when it looks like one.
         const taxNo = proposal?.supplierTaxNumber && /^\d{10,11}$/.test(proposal.supplierTaxNumber) ? proposal.supplierTaxNumber : undefined;
         sid = (await api.staff.suppliers.add(slug, { key: supplierKey.current, name: newName.trim(), ...(taxNo ? { taxNo } : {}) })).supplier.id;
@@ -629,7 +652,13 @@ export function BillForm({
       };
       const yes = allowDuplicate ? { allowDuplicate: true } : {};
       try {
-        if (draft) return await api.staff.drafts.confirm(slug, draft.id, { ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
+        if (draft)
+          return await api.staff.drafts.confirm(slug, draft.id, {
+            ...fields,
+            ...yes,
+            ...(newSupplier ? { newSupplier } : {}),
+            ...(paid !== "no" ? { paid: { method: paid } } : {}),
+          });
         return bill
           ? await api.staff.bills.correct(slug, bill.id, { version: bill.version, ...fields })
           : await api.staff.bills.add(slug, { key: key.current, ...fields, ...yes, ...(paid !== "no" ? { paid: { method: paid } } : {}) });
@@ -656,8 +685,45 @@ export function BillForm({
           {data.canAddSupplier && <option value="__new">{t("newSupplier")}</option>}
         </select>
       </label>
+      {proposal?.supplierId && proposal.supplierId === supplierId && proposal.supplierMatchedBy === "learned" && (
+        <p className="-mt-3 text-sm text-muted">{fill(t("supplierLearned"), { name: proposal.supplierName ?? "" })}</p>
+      )}
+      {choices.length > 0 && !supplierId && (
+        <div role="status" className="-mt-2 flex flex-col gap-2 rounded-2xl bg-panel px-4 py-3 text-sm">
+          <span>{fill(t("supplierWhich"), { name: proposal?.supplierName ?? "" })}</span>
+          <span className="flex flex-wrap gap-2">
+            {choices.map((c) => (
+              <Button key={c.id} kind="quiet" size="sm" onClick={() => setSupplierId(c.id)}>
+                {c.name}
+              </Button>
+            ))}
+            {data.canAddSupplier && (
+              <Button kind="bare" size="sm" onClick={() => setSupplierId("__new")}>
+                {t("supplierNoneOfThem")}
+              </Button>
+            )}
+          </span>
+        </div>
+      )}
+      {supplierId === "__new" && draft && (
+        <p className="-mt-2 text-sm font-semibold text-green">
+          {fill(t(newTaxNo.trim() ? "newSupplierWithTax" : "newSupplierLine"), { name: newName.trim() || "…", tax: newTaxNo.trim() })}
+        </p>
+      )}
       {supplierId === "__new" && (
-        <Field label={t("newSupplierName")} value={newName} onChange={setNewName} placeholder={t("supplierNamePlaceholder")} maxLength={80} autoFocus />
+        <Field label={t("newSupplierName")} value={newName} onChange={setNewName} placeholder={t("supplierNamePlaceholder")} maxLength={80} autoFocus={!draft} />
+      )}
+      {supplierId === "__new" && draft && (
+        <>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("supplierTaxNoOptional")} value={newTaxNo} onChange={setNewTaxNo} inputMode="text" maxLength={20} />
+            <Field label={t("supplierPhoneOptional")} value={newPhone} onChange={setNewPhone} inputMode="text" maxLength={30} />
+          </div>
+          <Field label={t("supplierIbanOptional")} value={newIban} onChange={setNewIban} maxLength={40} />
+          <Field label={t("supplierAddressOptional")} value={newAddress} onChange={setNewAddress} maxLength={200} />
+          {!newDetailsOk && <Notice tone="red">{t("newSupplierCheck")}</Notice>}
+          <p className="-mt-2 text-sm text-muted">{t("newSupplierHelp")}</p>
+        </>
       )}
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-2 text-sm text-muted">

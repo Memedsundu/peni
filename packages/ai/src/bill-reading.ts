@@ -52,6 +52,9 @@ export const billReadingSchema = z.object({
     ),
   supplierName: z.string().nullable().describe("The seller as printed, e.g. 'Moda Süt Ürünleri Ltd. Şti.'"),
   supplierTaxNumber: z.string().nullable().describe("VKN (10 digits) or TCKN (11 digits) of the seller"),
+  supplierPhone: z.string().nullable().describe("The seller's phone number as printed, when shown"),
+  supplierIban: z.string().nullable().describe("The seller's IBAN (TR and 24 digits) as printed, when shown"),
+  supplierAddress: z.string().nullable().describe("The seller's address as printed, on one line, when shown"),
   number: z.string().nullable().describe("Fatura no, fiş no or belge no"),
   date: day.nullable().describe("The document's date, YYYY-MM-DD"),
   dueDate: day.nullable().describe("Son ödeme tarihi when printed, YYYY-MM-DD"),
@@ -71,6 +74,7 @@ Amounts are Turkish lira as numbers: "1.234,50" is 1234.5.
 Every line amount must include its KDV. When the document lists net amounts and KDV separately, add each line's KDV to it so the lines add up to the total.
 Fold discounts into the lines they belong to.
 Categories: ingredients (food, drink and anything that goes into what the café sells), supplies (cups, napkins, cleaning), rent, utilities (electricity, water, gas, internet, phone), services (repairs, accounting, delivery), other.
+The seller's name, tax number, phone, IBAN and address are those of whoever issued the document, never the café's own (the buyer, "Sayın …").
 If this isn't a bill (a bank or card statement, a Z report, a menu, a photo of a person), set kind to what it is and leave the rest empty.
 When the document shows its KDV ("KDV %20 ... 301,67", "Toplam KDV"), copy the amount for each rate into "kdv"; never work it out yourself.
 Write "doubts" in Turkish, short and plain, for the café owner.`;
@@ -132,6 +136,10 @@ export const KDV_RATES = [1, 8, 10, 18, 20] as const;
 export interface ReadBill {
   supplierName: string | null;
   supplierTaxNumber: string | null;
+  /** The seller's phone, IBAN ("TR" and 24 digits, no spaces) and address, when printed and they look right. */
+  supplierPhone: string | null;
+  supplierIban: string | null;
+  supplierAddress: string | null;
   number: string | null;
   date: string | null;
   dueDate: string | null;
@@ -208,6 +216,7 @@ export function readBill(r: BillReading, stockCount = 0): ReadBill {
   return {
     supplierName: clean(r.supplierName, 80),
     supplierTaxNumber: clean(r.supplierTaxNumber, 20),
+    ...sellerDetails(r),
     number: clean(r.number, 40),
     date,
     dueDate,
@@ -215,6 +224,21 @@ export function readBill(r: BillReading, stockCount = 0): ReadBill {
     lines,
     kdv,
     doubts,
+  };
+}
+
+/**
+ * The seller's phone, IBAN and address, kept only when they look like what they say, so a
+ * supplier made from them is never refused for a misread digit. Older readings have none.
+ */
+function sellerDetails(r: Partial<Pick<BillReading, "supplierPhone" | "supplierIban" | "supplierAddress">>) {
+  const phone = r.supplierPhone?.replace(/\s+/g, " ").trim() ?? "";
+  const iban = r.supplierIban?.replace(/\s/g, "").toUpperCase() ?? "";
+  const address = r.supplierAddress?.replace(/\s+/g, " ").trim().slice(0, 200) ?? "";
+  return {
+    supplierPhone: /^\+?[\d ()-]{7,20}$/.test(phone) ? phone : null,
+    supplierIban: /^TR\d{24}$/.test(iban) ? iban : null,
+    supplierAddress: address || null,
   };
 }
 

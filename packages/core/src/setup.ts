@@ -5,7 +5,7 @@ import type { Recipe, StockItem } from "./stock";
 /**
  * Kurulum listesi: what keeps a café's stock from being complete, for Bugün. Every product
  * should say what it uses, every delivery should reach stock, every item should come in on a
- * bill and be counted now and then. Each part clears itself once it's done; the list is gone
+ * bill from a known supplier, and be counted now and then. Each part clears itself once it's done; the list is gone
  * when all of it is.
  */
 
@@ -15,6 +15,8 @@ export const SETUP_DAYS = 30;
 export interface SetupChecklist {
   /** Products on the menu with no recipe yet, of how many there are; null when not asked. */
   noRecipe: { count: number; total: number; names: string[] } | null;
+  /** Live bills of the last 30 days with no supplier: they count towards nobody's debts, prices or checks. */
+  noSupplier: { count: number; bills: { id: string; date: string; totalKurus: number; lines: string[] }[] } | null;
   /** Live bills of the last 30 days with a line that looked like stock but reached none. */
   unstocked: { count: number; bills: { id: string; supplierId: string | null; date: string; lines: string[] }[] } | null;
   /** Stock items no live bill has ever brought. */
@@ -29,6 +31,7 @@ export interface SetupChecklist {
  *
  * - A product has a recipe once its recipe says something: what it uses, that it's one
  *   counted piece, or that it shouldn't use stock ("Düşmesin"). Hidden products don't count.
+ * - A bill with no supplier is any live one of the last 30 days, whatever it was for.
  * - A line "looked like stock" when it was for ingredients or supplies and has no item;
  *   lines the café said aren't stock (`notStock`) are left out.
  * - An item's last count is its latest count or starting amount; one with neither has had
@@ -41,6 +44,8 @@ export function setupChecklist(input: {
   items: Pick<StockItem, "id" | "name" | "createdAt">[] | null;
   /** Bills dated in the last 30 days, or null for a viewer who can't see bills. */
   bills: Pick<Bill, "id" | "supplierId" | "date" | "lines" | "voidedAt">[] | null;
+  /** The same bills, for a viewer who can correct them (and so give them a supplier); null otherwise. */
+  supplierBills?: Pick<Bill, "id" | "supplierId" | "date" | "lines" | "totalKurus" | "voidedAt">[] | null;
   /** Items some live bill has a line for. */
   bought: ReadonlySet<string>;
   /** When each item was last counted (a count or its starting amount). */
@@ -80,6 +85,15 @@ export function setupChecklist(input: {
     if (count) unstocked = { count, bills };
   }
 
+  let noSupplier: SetupChecklist["noSupplier"] = null;
+  if (input.supplierBills) {
+    const bills = input.supplierBills
+      .filter((b) => !b.voidedAt && !b.supplierId)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((b) => ({ id: b.id, date: b.date, totalKurus: b.totalKurus, lines: b.lines.map((l) => l.name) }));
+    if (bills.length) noSupplier = { count: bills.length, bills };
+  }
+
   let neverBought: SetupChecklist["neverBought"] = null;
   let notCounted: SetupChecklist["notCounted"] = null;
   if (input.items) {
@@ -90,10 +104,10 @@ export function setupChecklist(input: {
     if (stale.length) notCounted = { count: stale.length, names: stale.map((i) => i.name) };
   }
 
-  return { noRecipe, unstocked, neverBought, notCounted };
+  return { noRecipe, noSupplier, unstocked, neverBought, notCounted };
 }
 
 /** Whether the checklist has anything left on it. */
 export function setupOpen(c: SetupChecklist): boolean {
-  return !!(c.noRecipe || c.unstocked || c.neverBought || c.notCounted);
+  return !!(c.noRecipe || c.noSupplier || c.unstocked || c.neverBought || c.notCounted);
 }

@@ -189,16 +189,19 @@ export class AlertService {
   }
 
   /**
-   * Bugün's setup checklist, for those who manage stock or the menu: products with no recipe,
-   * bill lines that looked like stock but reached none, items never bought on a bill, recipe
-   * items not counted in 30 days. Null when there's nothing on it the viewer can act on.
+   * Bugün's setup checklist, for those who manage stock, the menu or bills: products with no
+   * recipe, bills with no supplier, bill lines that looked like stock but reached none, items
+   * never bought on a bill, recipe items not counted in 30 days. Null when there's nothing on
+   * it the viewer can act on.
    */
   async setup(cafeId: string, permissions: ReadonlySet<Permission>): Promise<SetupDTO | null> {
     const s = this.d.setup;
     const recipesToo = permissions.has("menu.recipes");
     const stock = permissions.has("stock.edit");
     const bills = stock && permissions.has("bills.view");
-    if (!s || (!recipesToo && !stock)) return null;
+    // Giving a bill its supplier is a correction, which is the manager's.
+    const suppliersToo = permissions.has("bills.manage");
+    if (!s || (!recipesToo && !stock && !suppliersToo)) return null;
     const now = this.d.now();
     const since = new Date(now.getTime() - SETUP_DAYS * 86_400_000);
     const today = await this.dayOf(cafeId);
@@ -206,7 +209,7 @@ export class AlertService {
       recipesToo ? s.menu.listMenu(cafeId) : null,
       s.stock.listRecipes(cafeId),
       stock ? s.stock.listItems(cafeId) : null,
-      bills ? s.bills.listBills(cafeId, { from: plusDays(today, -SETUP_DAYS) }) : null,
+      bills || suppliersToo ? s.bills.listBills(cafeId, { from: plusDays(today, -SETUP_DAYS) }) : null,
       stock ? s.bills.boughtItems(cafeId) : [],
       stock ? s.stock.listMoves(cafeId, { reasons: ["count", "start"], from: since, limit: 10_000 }) : [],
       bills ? s.matches.listLineMatches(cafeId) : [],
@@ -220,7 +223,8 @@ export class AlertService {
       products,
       recipes,
       items,
-      bills: recent,
+      bills: bills ? recent : null,
+      supplierBills: suppliersToo ? recent : null,
       bought: new Set(bought),
       lastCounted,
       notStock: (supplierId, name) => kept.has(`${supplierId ?? ""}|${lineKey(name)}`),
@@ -231,6 +235,7 @@ export class AlertService {
     const short = <T extends { names: string[] }>(x: T | null) => x && { ...x, names: x.names.slice(0, NAMES) };
     return {
       noRecipe: short(c.noRecipe),
+      noSupplier: c.noSupplier && { count: c.noSupplier.count, bills: c.noSupplier.bills.slice(0, NAMES) },
       unstocked: c.unstocked && {
         count: c.unstocked.count,
         bills: c.unstocked.bills.slice(0, NAMES).map((b) => ({ id: b.id, supplierName: b.supplierId ? (names.get(b.supplierId) ?? null) : null, date: b.date, lines: b.lines })),

@@ -765,6 +765,17 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.assistant.deleteLineMatch(cafeId, null, "süt 1 lt");
     await stores.assistant.deleteLineMatch(cafeId, null, "kasa depozitosu");
     expect((await stores.assistant.listLineMatches(cafeId)).map((m) => m.supplierId)).toEqual(["sup_x"]);
+    // Which supplier a read seller is: one per café and read name or tax number.
+    const seller = { cafeId, readKey: "name:moda süt ürn", supplierId: "sup_a", updatedAt: at };
+    await stores.assistant.saveSupplierMatch(seller);
+    await stores.assistant.saveSupplierMatch({ ...seller, supplierId: "sup_b" });
+    await stores.assistant.saveSupplierMatch({ ...seller, readKey: "tax:1234567890" });
+    expect((await stores.assistant.listSupplierMatches(cafeId)).sort((a, b) => a.readKey.localeCompare(b.readKey))).toEqual([
+      { ...seller, supplierId: "sup_b" },
+      { ...seller, readKey: "tax:1234567890" },
+    ]);
+    await stores.assistant.deleteSupplierMatch(cafeId, "tax:1234567890");
+    expect((await stores.assistant.listSupplierMatches(cafeId)).map((m) => m.readKey)).toEqual(["name:moda süt ürn"]);
     const done = { ...draft, status: "confirmed" as const, decidedById: "stf_a", decidedAt: at, resultId: "bil_1", changed: ["date"] };
     await stores.assistant.saveDraft(done);
     expect((await stores.assistant.listDrafts(cafeId, { limit: 10 })).map((d) => d.id)).toEqual([`drf2_${run}`, draft.id, `drf3_${run}`, `drf4_${run}`, `drf5_${run}`]);

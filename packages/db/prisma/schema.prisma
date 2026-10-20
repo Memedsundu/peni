@@ -167,6 +167,7 @@ model Cafe {
   alertMutes     AlertMute[]
   documents      CafeDocument[]
   lineMatches    AiLineMatch[]
+  supplierMatches AiSupplierMatch[]
   drafts         AiDraft[]
   jobs           Job[]
   aiEvents       AiEvent[]
@@ -1527,6 +1528,19 @@ model AiLineMatch {
   cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 
   @@id([cafeId, supplierKey, readKey])
+}
+
+/// Which supplier a person confirmed a bill's seller to be, by read name or tax number, for their next bill.
+model AiSupplierMatch {
+  cafeId     String
+  /// "tax:1234567890" or "name:moda süt ürn".
+  readKey    String
+  supplierId String
+  updatedAt  DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, readKey])
 }
 
 /// Background work, run right after it's added and retried on later passes.

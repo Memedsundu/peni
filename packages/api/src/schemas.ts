@@ -363,7 +363,13 @@ export const addBillSchema = z.object({
 });
 
 /** "Onayla": a draft bill as the person checked it; it's added in their name. */
-export const confirmDraftSchema = z.object({ ...billFields, allowDuplicate: z.boolean().optional(), paid: paidNow.optional() });
+/** With no supplier picked, `newSupplier` adds one as the draft is confirmed ("Yeni tedarikçi", needs "suppliers.edit"). */
+export const confirmDraftSchema = z.object({
+  ...billFields,
+  allowDuplicate: z.boolean().optional(),
+  paid: paidNow.optional(),
+  newSupplier: z.object({ name: supplierFields.name, taxNo: supplierFields.taxNo, phone: supplierFields.phone, iban: supplierFields.iban, note: supplierFields.note }).optional(),
+});
 
 /** Quick entry (piece 28): a line typed, or said and read back, for the assistant to draft expenses from. */
 export const quickEntrySchema = z.object({

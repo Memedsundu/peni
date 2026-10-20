@@ -85,6 +85,9 @@ describe("Reading a bill", () => {
     kind: "bill",
     supplierName: "  Moda Süt Ürünleri ",
     supplierTaxNumber: "1234567890",
+    supplierPhone: "0216 345 67 89",
+    supplierIban: "tr12 0006 2000 0000 0012 3456 78",
+    supplierAddress: "  Moda Cd.\n No: 3, Kadıköy ",
     number: "A-1024",
     date: "2026-10-14",
     dueDate: "2026-02-30",
@@ -116,6 +119,9 @@ describe("Reading a bill", () => {
   it("turns lira into kuruş, drops empty lines, and says what doesn't add up", () => {
     const r = readBill(reading, 2);
     expect(r).toMatchObject({ supplierName: "Moda Süt Ürünleri", number: "A-1024", date: "2026-10-14", dueDate: null, totalKurus: 123_450 });
+    // The seller's details, tidied: an IBAN without spaces, the address on one line.
+    expect(r).toMatchObject({ supplierPhone: "0216 345 67 89", supplierIban: "TR120006200000000012345678", supplierAddress: "Moda Cd. No: 3, Kadıköy" });
+    expect(readBill({ ...reading, supplierPhone: "yok", supplierIban: "TR12 0006" })).toMatchObject({ supplierPhone: null, supplierIban: null });
     expect(r.lines).toEqual([
       { name: "Süt 1 L", quantityMilli: 24_000, unit: "adet", totalKurus: 98_450, category: "ingredients", stockIndex: 0, newItem: null, stockQtyMilli: 24_000 },
       // Item 7 isn't one of the two given.

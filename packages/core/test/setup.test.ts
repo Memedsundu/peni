@@ -78,6 +78,7 @@ describe("The setup checklist on Bugün", () => {
     const c = setupChecklist(base);
     expect(c).toEqual({
       noRecipe: null,
+      noSupplier: null,
       unstocked: null,
       neverBought: { count: 5, names: ["Dökme çay", "Limon", "Taze nane", "San Sebastian dilimi", "Lokum"] },
       notCounted: null,
@@ -113,6 +114,19 @@ describe("The setup checklist on Bugün", () => {
     });
   });
 
+  it("lists bills of the last 30 days with no supplier, for someone who can correct them", () => {
+    const bills = [
+      { ...bill("bil_a", "2026-10-10", [line({ name: "Musluk tamiri", category: "services" })]), supplierId: null, totalKurus: 45_000 },
+      { ...bill("bil_b", "2026-10-14", [line({})]), totalKurus: 1_000 },
+      { ...bill("bil_void", "2026-10-12", [line({})], now), supplierId: null, totalKurus: 1_000 },
+    ];
+    expect(setupChecklist({ ...base, supplierBills: bills }).noSupplier).toEqual({
+      count: 1,
+      bills: [{ id: "bil_a", date: "2026-10-10", totalKurus: 45_000, lines: ["Musluk tamiri"] }],
+    });
+    expect(setupChecklist({ ...base, supplierBills: null }).noSupplier).toBeNull();
+  });
+
   it("asks for a count of recipe items last counted (or added) more than 30 days ago", () => {
     const c = setupChecklist({
       ...base,
@@ -127,6 +141,6 @@ describe("The setup checklist on Bugün", () => {
   it("is gone when everything is in order, and leaves out what the viewer can't see", () => {
     const c = setupChecklist({ ...base, bought: new Set(items.map((i) => i.id)) });
     expect(setupOpen(c)).toBe(false);
-    expect(setupChecklist({ ...base, items: null, bills: null, products: null })).toEqual({ noRecipe: null, unstocked: null, neverBought: null, notCounted: null });
+    expect(setupChecklist({ ...base, items: null, bills: null, products: null })).toEqual({ noRecipe: null, noSupplier: null, unstocked: null, neverBought: null, notCounted: null });
   });
 });

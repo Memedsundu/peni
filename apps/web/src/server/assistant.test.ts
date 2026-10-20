@@ -30,6 +30,9 @@ const milk: BillReading = {
   kind: "bill",
   supplierName: "MODA SÜT ÜRÜNLERİ GIDA TİC. LTD. ŞTİ.",
   supplierTaxNumber: null,
+  supplierPhone: null,
+  supplierIban: null,
+  supplierAddress: null,
   number: "MS-0412",
   date: "2026-10-15",
   dueDate: "2026-10-30",
@@ -552,6 +555,82 @@ describe("Bills fill stock: new items and pack sizes", () => {
     expect((await app.stock.view(leyla)).items.filter((i) => i.name === "Laktozsuz süt")).toHaveLength(1);
     // A correction can't start one.
     expect(await code(app.bills.correct(leyla, added.id, { ...bill, version: 1 }))).toBe("BILL_LINE_INVALID");
+  });
+});
+
+describe("Bills find their supplier: new ones, unsure ones, remembered ones", () => {
+  it("offers a seller that matches no supplier as a new one with what the bill shows; confirming adds it and puts the bill under it", async () => {
+    answer = () => ({
+      ...milk,
+      supplierName: "BOSTANCI FIRIN LTD. ŞTİ.",
+      supplierTaxNumber: "4410 223 344",
+      supplierPhone: "0216 555 44 33",
+      supplierIban: "TR33 0006 1005 1978 6457 8413 26",
+      supplierAddress: "Bağdat Cd. No: 12, Kadıköy",
+      number: "BF-77",
+      lines: [{ ...milk.lines[0]!, name: "Poğaça", quantity: 20, total: 400, category: "ingredients" }],
+      total: 400,
+    });
+    await read(murat);
+    const [draft] = billDrafts(await app.assistant.list(leyla));
+    expect(draft!.proposal).toMatchObject({
+      supplierId: null,
+      supplierName: "BOSTANCI FIRIN LTD. ŞTİ.",
+      supplierPhone: "0216 555 44 33",
+      supplierIban: "TR330006100519786457841326",
+      supplierAddress: "Bağdat Cd. No: 12, Kadıköy",
+      supplierMatchedBy: null,
+      supplierChoices: [],
+    });
+    // Nothing is added before someone confirms (D21).
+    expect((await app.bills.suppliers(leyla)).suppliers.map((s) => s.name)).not.toContain("Bostancı Fırın");
+
+    const newSupplier = { name: "Bostancı Fırın", taxNo: "4410223344", phone: "0216 555 44 33", iban: "TR330006100519786457841326", note: "Adres: Bağdat Cd. No: 12, Kadıköy" };
+    const done = await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), newSupplier });
+    const bill = await app.bills.get(leyla, done.resultId!);
+    expect(bill.supplierName).toBe("Bostancı Fırın");
+    expect((await app.bills.supplier(leyla, bill.supplierId!)).supplier).toMatchObject({ ...newSupplier, removed: false });
+    // Confirming again adds no second supplier; the bill counts towards what is owed to them.
+    await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), newSupplier });
+    const list = await app.bills.suppliers(leyla);
+    expect(list.suppliers.filter((s) => s.name === "Bostancı Fırın").map((s) => s.owedKurus)).toEqual([40_000]);
+  });
+
+  it("offers the suppliers an unsure name could be, and remembers the one picked for the seller's next bill, with its lines", async () => {
+    await app.bills.addSupplier(leyla, { key: "s1", name: "Kuzey Kahve Dükkanı" });
+    const beans = { ...milk.lines[0]!, name: "Espresso Çekirdek 1 kg", quantity: 4, unit: "kg" as const, total: 3600 };
+    answer = (r) => ({ ...milk, supplierName: "KUZEY KAHVE", number: "KK-1", lines: [{ ...beans, stockItem: shown(r, "Espresso çekirdeği"), stockQuantity: 4 }], total: 3600 });
+    await read(murat);
+    const [unsure] = billDrafts(await app.assistant.list(leyla));
+    expect(unsure!.proposal.supplierId).toBeNull();
+    expect(unsure!.proposal.supplierChoices.map((c) => c.name)).toEqual(["Kuzey Kahve Dükkanı", "Kuzey Kahve Kavurma"]);
+    await app.assistant.confirm(leyla, unsure!.id, { ...asInput(unsure!), supplierId: "sup_seed_kahve" });
+
+    // The next bill from "KUZEY KAHVE": Kuzey Kahve Kavurma straight away, and the beans as confirmed for them.
+    answer = () => ({ ...milk, supplierName: "KUZEY KAHVE", number: "KK-2", lines: [beans], total: 3600 });
+    await read(murat, bytes(2), "kahve2.pdf");
+    const [next] = billDrafts(await app.assistant.list(leyla));
+    expect(next!.proposal).toMatchObject({ supplierId: "sup_seed_kahve", supplierMatchedBy: "learned", supplierChoices: [] });
+    expect(next!.proposal.lines[0]).toMatchObject({ itemId: "stk_espresso", qtyMilli: 4_000, matchedBy: "learned" });
+  });
+
+  it("remembers a supplier picked by hand by the tax number too, and forgets it when the bill is confirmed with none", async () => {
+    answer = () => ({ ...milk, supplierName: "MS ÜRÜNLERİ", supplierTaxNumber: "1111111111", number: "X-1" });
+    await read(murat);
+    const [first] = billDrafts(await app.assistant.list(leyla));
+    expect(first!.proposal).toMatchObject({ supplierId: null, supplierChoices: [] });
+    await app.assistant.confirm(leyla, first!.id, { ...asInput(first!), supplierId: "sup_seed_sut" });
+
+    // Printed differently, same tax number: Moda Süt.
+    answer = () => ({ ...milk, supplierName: "M.S. Ürünleri A.Ş.", supplierTaxNumber: "111 111 1111", number: "X-2" });
+    await read(murat, bytes(2), "x2.pdf");
+    const [second] = billDrafts(await app.assistant.list(leyla));
+    expect(second!.proposal).toMatchObject({ supplierId: "sup_seed_sut", supplierMatchedBy: "learned" });
+    await app.assistant.confirm(leyla, second!.id, { ...asInput(second!), supplierId: null });
+
+    answer = () => ({ ...milk, supplierName: "M.S. Ürünleri A.Ş.", supplierTaxNumber: "1111111111", number: "X-3" });
+    await read(murat, bytes(3), "x3.pdf");
+    expect(billDrafts(await app.assistant.list(leyla))[0]!.proposal.supplierId).toBeNull();
   });
 });
 

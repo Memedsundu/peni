@@ -1521,6 +1521,8 @@ export interface TodayDTO {
 export interface SetupDTO {
   /** Products on the menu with no recipe, of how many ("menu.recipes"). */
   noRecipe: { count: number; total: number; names: string[] } | null;
+  /** Bills of the last 30 days with no supplier, newest first ("bills.manage", which can give them one). */
+  noSupplier: { count: number; bills: { id: string; date: string; totalKurus: number; lines: string[] }[] } | null;
   /** Bill lines of the last 30 days that looked like stock and reached none, by bill ("stock.edit" and "bills.view"). */
   unstocked: { count: number; bills: { id: string; supplierName: string | null; date: string; lines: string[] }[] } | null;
   /** Stock items no bill has brought ("stock.edit"). */
@@ -1606,6 +1608,14 @@ export interface BillProposalDTO {
   /** The seller as printed; offered as a new supplier when nothing matched. */
   supplierName: string | null;
   supplierTaxNumber: string | null;
+  /** What else the bill shows about the seller, for a new supplier: phone, IBAN, address. */
+  supplierPhone: string | null;
+  supplierIban: string | null;
+  supplierAddress: string | null;
+  /** "learned": a person confirmed this seller as this supplier before; "read": the name, tax number or sender matched. */
+  supplierMatchedBy: "learned" | "read" | null;
+  /** With no supplier found: those the name fits equally well, to pick from. */
+  supplierChoices: { id: string; name: string }[];
   number: string | null;
   date: string | null;
   dueDate: string | null;

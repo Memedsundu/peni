@@ -24,6 +24,7 @@ describe("Bugün's setup checklist", () => {
   it("on Moda asks about the five stock items no bill has brought; every product there has a recipe", async () => {
     expect((await app.alerts.today(leyla)).setup).toEqual({
       noRecipe: null,
+      noSupplier: null,
       unstocked: null,
       neverBought: { count: 5, names: ["Dökme çay", "Limon", "Lokum", "San Sebastian dilimi", "Taze nane"] },
       notCounted: null,
@@ -65,6 +66,28 @@ describe("Bugün's setup checklist", () => {
     expect((await app.alerts.today(leyla)).setup?.unstocked).toBeNull();
   });
 
+  it("lists bills of the last 30 days with no supplier for the manager, until each gets one", async () => {
+    const bill = await app.bills.add(leyla, {
+      key: "t1",
+      supplierId: null,
+      date: "2026-10-14",
+      lines: [{ itemId: null, name: "Musluk tamiri", category: "services", totalKurus: 45_000 }],
+    });
+    expect((await app.alerts.today(leyla)).setup?.noSupplier).toEqual({
+      count: 1,
+      bills: [{ id: bill.id, date: "2026-10-14", totalKurus: 45_000, lines: ["Musluk tamiri"] }],
+    });
+    // The chef can't correct bills, so isn't asked.
+    expect((await app.alerts.today(hakan)).setup?.noSupplier).toBeNull();
+    await app.bills.correct(leyla, bill.id, {
+      version: 1,
+      supplierId: "sup_seed_elektrik",
+      date: "2026-10-14",
+      lines: [{ itemId: null, name: "Musluk tamiri", category: "services", totalKurus: 45_000 }],
+    });
+    expect((await app.alerts.today(leyla)).setup?.noSupplier).toBeNull();
+  });
+
   it("asks for a count once recipe items go 30 days without one, and is gone when everything is in order", async () => {
     // 17 days on: the starting amounts are 31 days old; espresso, milk, simit and cheesecake were counted 24 days ago.
     now = new Date("2026-11-02T09:00:00Z");
@@ -78,7 +101,7 @@ describe("Bugün's setup checklist", () => {
       counts: ["stk_cay", "stk_filtre", "stk_limon", "stk_lokum", "stk_nane", "stk_turk"].map((itemId) => ({ itemId, countedMilli: 1_000 })),
     });
     for (const [i, itemId] of ["stk_cay", "stk_limon", "stk_lokum", "stk_sansebastian", "stk_nane"].entries())
-      await app.bills.add(leyla, { key: `buy${i}`, supplierId: null, date: "2026-11-01", lines: [{ itemId, qtyMilli: 1_000, totalKurus: 10_000 }] });
+      await app.bills.add(leyla, { key: `buy${i}`, supplierId: "sup_seed_firin", date: "2026-11-01", lines: [{ itemId, qtyMilli: 1_000, totalKurus: 10_000 }] });
     expect((await app.alerts.today(leyla)).setup).toBeNull();
   });
 });

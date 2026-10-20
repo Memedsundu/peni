@@ -60,10 +60,14 @@ import {
   type StoredDocument,
   type StockStore,
   type Supplier,
+  type SupplierMatch,
 } from "@peni/core";
 import { formatTL, trLower } from "@peni/brand/format";
 import { createHash, randomUUID } from "node:crypto";
-import type { BillInput, BillService } from "./bills";
+import type { BillInput, BillService, SupplierInput } from "./bills";
+
+/** A supplier to add as a draft is confirmed: what the bill showed, as the person left it. */
+export type NewSupplierInput = Pick<SupplierInput, "taxNo" | "phone" | "iban" | "note"> & { name: string };
 import { demoChat } from "./chat-demo";
 import { demoLetter } from "./letter-demo";
 import { outcomeDto, type ChecksService } from "./checks";
@@ -351,27 +355,41 @@ export class AssistantService {
   async confirm(
     ctx: StaffContext,
     draftId: string,
-    input: BillInput & { allowDuplicate?: boolean; paid?: { method: "cash" | "card" | "bank" | "credit"; from?: "drawer" | "reserve"; paidOn?: string } },
+    input: BillInput & {
+      allowDuplicate?: boolean;
+      paid?: { method: "cash" | "card" | "bank" | "credit"; from?: "drawer" | "reserve"; paidOn?: string };
+      /** With no `supplierId`: the supplier to add for it ("Yeni tedarikçi"), as the bill showed it or the person corrected it. */
+      newSupplier?: NewSupplierInput;
+    },
   ): Promise<BillDraftDTO> {
     this.require(ctx, "assistant.use");
     this.require(ctx, "bills.add");
     const draft = await this.draft(ctx, draftId);
     if (draft.kind !== "bill") throw new AppError("DRAFT_KIND", "This draft isn't a bill", 409);
     if (draft.status === "dismissed") throw new AppError("DRAFT_DECIDED", "This draft was dismissed", 409);
+    // A new supplier named like one the café has is that one.
+    const named = !input.supplierId && input.newSupplier ? await this.supplierNamed(ctx.cafe.id, input.newSupplier.name) : null;
     if (draft.status === "open" && !input.allowDuplicate) {
       const total = input.lines.reduce((s, l) => s + l.totalKurus, 0);
       const earlier = await this.duplicateBill(
         ctx.cafe.id,
-        { supplierId: input.supplierId, number: input.number ?? null, date: input.date, totalKurus: total },
+        { supplierId: input.supplierId ?? named?.id ?? null, number: input.number ?? null, date: input.date, totalKurus: total },
         draft.id,
       );
       if (earlier) throw new AppError("BILL_DUPLICATE", "This bill looks already entered", 409);
     }
+    // The supplier comes first, through Tedarikçiler's own rules; the draft's id makes it once however often this is tapped.
+    let supplierId = input.supplierId ?? named?.id ?? null;
+    if (!supplierId && input.newSupplier) {
+      const { name, taxNo, phone, iban, note } = input.newSupplier;
+      supplierId = (await this.bills.addSupplier(ctx, { key: `draft:${draft.id}`, name, taxNo, phone, iban, note })).supplier.id;
+    }
     // The draft's id is the bill's key: a second confirm finds the same bill.
     // Paid as the draft is confirmed: on the bill's own day unless said (a quick entry's "dün nakit ödedim").
-    const { allowDuplicate, paid, ...fields } = input;
+    const { allowDuplicate, paid, newSupplier: _newSupplier, ...fields } = input;
     const bill = await this.bills.add(ctx, {
       ...fields,
+      supplierId,
       lines: fields.lines.map(({ from: _from, ...l }) => l),
       key: draft.id,
       documentId: draft.documentId,
@@ -379,8 +397,9 @@ export class AssistantService {
       allowDuplicate: allowDuplicate || draft.status !== "open",
     });
     if (draft.status === "open") {
+      await this.learnSupplier(ctx.cafe.id, draft.proposal, supplierId);
       // A line that started a stock item is learned as that item, by the id the bill gave it.
-      await this.learn(ctx.cafe.id, draft.proposal, { ...input, lines: input.lines.map((l, i) => ({ ...l, itemId: bill.lines[i]?.itemId ?? l.itemId })) });
+      await this.learn(ctx.cafe.id, draft.proposal, { supplierId, lines: input.lines.map((l, i) => ({ ...l, itemId: bill.lines[i]?.itemId ?? l.itemId })) });
       const changed = changedFields(draft.proposal, input, input.paid?.method ?? null);
       Object.assign(draft, { status: "confirmed", decidedById: ctx.member.id, decidedAt: this.now(), resultId: bill.id, changed });
       await this.store.saveDraft(draft);
@@ -755,9 +774,12 @@ export class AssistantService {
    * Anything that needs a second look becomes a doubt.
    */
   private async propose(cafeId: string, read: ReadBill, items: StockItem[], sender: string | null): Promise<{ proposal: BillProposal; doubts: string[] }> {
-    const suppliers = await this.billStore.listSuppliers(cafeId);
-    // A bill emailed from a supplier's own address is theirs when the name doesn't say (piece 26).
-    const supplier = matchSupplier(suppliers, read.supplierName, read.supplierTaxNumber) ?? supplierByEmail(suppliers, sender);
+    const [suppliers, sellers] = await Promise.all([this.billStore.listSuppliers(cafeId), this.store.listSupplierMatches(cafeId)]);
+    // Who a person confirmed this seller to be wins; then the name or tax number, and a bill
+    // emailed from a supplier's own address is theirs when the name doesn't say (piece 26).
+    const remembered = learnedSupplier(suppliers, sellers, read.supplierName, read.supplierTaxNumber);
+    const supplier = remembered ?? matchSupplier(suppliers, read.supplierName, read.supplierTaxNumber) ?? supplierByEmail(suppliers, sender);
+    const choices = supplier ? [] : supplierCandidates(suppliers, read.supplierName);
     const learned = learnedMatches(await this.store.listLineMatches(cafeId), supplier?.id ?? null);
     const live = new Map(items.map((i) => [i.id, i]));
     const doubts: string[] = [];
@@ -828,6 +850,11 @@ export class AssistantService {
         supplierId: supplier?.id ?? null,
         supplierName: read.supplierName,
         supplierTaxNumber: read.supplierTaxNumber,
+        supplierPhone: read.supplierPhone,
+        supplierIban: read.supplierIban,
+        supplierAddress: read.supplierAddress,
+        supplierMatchedBy: remembered ? "learned" : supplier ? "read" : null,
+        supplierChoices: choices.map((c) => c.id),
         number: read.number,
         date: read.date,
         dueDate: read.dueDate,
@@ -837,6 +864,22 @@ export class AssistantService {
       },
       doubts,
     };
+  }
+
+  /**
+   * Which supplier the person confirmed the bill's seller to be, by the name and tax number
+   * read, so the seller's next bill goes there first. Confirmed with none, it's forgotten.
+   */
+  private async learnSupplier(cafeId: string, proposal: BillProposal, supplierId: string | null) {
+    for (const readKey of sellerKeys(proposal.supplierName, proposal.supplierTaxNumber)) {
+      if (supplierId) await this.store.saveSupplierMatch({ cafeId, readKey, supplierId, updatedAt: this.now() });
+      else await this.store.deleteSupplierMatch(cafeId, readKey);
+    }
+  }
+
+  /** A live supplier with this name, as Tedarikçiler's unique-name rule sees it. */
+  private async supplierNamed(cafeId: string, name: string): Promise<Supplier | null> {
+    return (await this.billStore.listSuppliers(cafeId)).find((s) => sameMenuName(s.name, name)) ?? null;
   }
 
   /**
@@ -950,8 +993,24 @@ export class AssistantService {
     return {
       ...base,
       kind: "bill",
-      proposal: { ...d.proposal, lines: d.proposal.lines.map((l) => ({ ...l, newItem: l.newItem ?? null })), paid: d.proposal.paid ?? null } as BillProposalDTO,
+      proposal: {
+        ...d.proposal,
+        supplierPhone: d.proposal.supplierPhone ?? null,
+        supplierIban: d.proposal.supplierIban ?? null,
+        supplierAddress: d.proposal.supplierAddress ?? null,
+        supplierMatchedBy: d.proposal.supplierMatchedBy ?? null,
+        supplierChoices: d.status === "open" ? await this.choices(d.cafeId, d.proposal.supplierChoices ?? []) : [],
+        lines: d.proposal.lines.map((l) => ({ ...l, newItem: l.newItem ?? null })),
+        paid: d.proposal.paid ?? null,
+      } as BillProposalDTO,
     };
+  }
+
+  /** The suppliers a draft offers to pick from, by name, leaving out any removed since. */
+  private async choices(cafeId: string, ids: string[]): Promise<{ id: string; name: string }[]> {
+    if (!ids.length) return [];
+    const live = new Map((await this.billStore.listSuppliers(cafeId)).map((s) => [s.id, s.name]));
+    return ids.flatMap((id) => (live.has(id) ? [{ id, name: live.get(id)! }] : []));
   }
 
   private async names(ids: string[]): Promise<Map<string, string>> {
@@ -1015,15 +1074,49 @@ export function matchSupplier(suppliers: Supplier[], name: string | null, taxNo:
     const byTax = live.find((s) => s.taxNo === digits);
     if (byTax) return byTax;
   }
-  const read = plain(name ?? "");
-  if (read.length < 3) return null;
-  const hits = live.filter((s) => {
-    const known = plain(s.name);
-    return known.length >= 3 && (read.includes(known) || known.includes(read));
-  });
+  const hits = nameHits(live, name);
   // The longest name that fits is the closest; two equally good ones is a guess, so none.
-  hits.sort((a, b) => plain(b.name).length - plain(a.name).length);
   return hits.length === 1 || (hits.length > 1 && plain(hits[0]!.name).length > plain(hits[1]!.name).length) ? hits[0]! : null;
+}
+
+/** Live suppliers whose name fits the one read, the closest (longest) first. */
+function nameHits(live: Supplier[], name: string | null): Supplier[] {
+  const read = plain(name ?? "");
+  if (read.length < 3) return [];
+  return live
+    .filter((s) => {
+      const known = plain(s.name);
+      return known.length >= 3 && (read.includes(known) || known.includes(read));
+    })
+    .sort((a, b) => plain(b.name).length - plain(a.name).length);
+}
+
+/** When the name fits several suppliers equally well: the ones to pick from, at most three. */
+export function supplierCandidates(suppliers: Supplier[], name: string | null): Supplier[] {
+  const hits = nameHits(
+    suppliers.filter((s) => !s.archivedAt),
+    name,
+  );
+  if (hits.length < 2) return [];
+  return hits.filter((s) => plain(s.name).length === plain(hits[0]!.name).length).slice(0, 3);
+}
+
+/** How a read seller is remembered: by tax number and by name, tidied. */
+export function sellerKeys(name: string | null, taxNo: string | null): string[] {
+  const digits = taxNo?.replace(/\D/g, "") ?? "";
+  const n = plain(name ?? "");
+  return [...(digits.length >= 10 ? [`tax:${digits}`] : []), ...(n.length >= 3 ? [`name:${n.slice(0, 120)}`] : [])];
+}
+
+/** The live supplier a person confirmed this seller to be before, by tax number first. */
+function learnedSupplier(suppliers: Supplier[], matches: SupplierMatch[], name: string | null, taxNo: string | null): Supplier | null {
+  const live = new Map(suppliers.filter((s) => !s.archivedAt).map((s) => [s.id, s]));
+  for (const key of sellerKeys(name, taxNo)) {
+    const m = matches.find((x) => x.readKey === key);
+    const s = m && live.get(m.supplierId);
+    if (s) return s;
+  }
+  return null;
 }
 
 const COMPANY_WORDS = /\b(ltd|şti|sti|a\.?ş|aş|as|tic|san|ve|gıda|gida|limited|şirketi|sirketi)\b\.?/g;
@@ -1130,6 +1223,9 @@ export function demoModel(today: () => string): AiModel {
         kind,
         supplierName: null,
         supplierTaxNumber: null,
+        supplierPhone: null,
+        supplierIban: null,
+        supplierAddress: null,
         number: null,
         date: null,
         dueDate: null,
@@ -1144,6 +1240,9 @@ export function demoModel(today: () => string): AiModel {
       kind: "bill",
       supplierName: "Ambalaj Dünyası Tic. Ltd. Şti.",
       supplierTaxNumber: null,
+      supplierPhone: null,
+      supplierIban: null,
+      supplierAddress: null,
       number: "A-20511",
       date: today(),
       dueDate: null,
