@@ -1,7 +1,7 @@
 import type { AlertDTO, TodayDTO } from "@peni/api";
 import { alertWords } from "@peni/api/alert-text";
 import { formatTL } from "@peni/brand/format";
-import { localDateKey, permissionsFor, plusDays, type Cafe, type PeniDirectory, type Permission, type StaffStore, type TaskStore } from "@peni/core";
+import { localDateKey, localHour, permissionsFor, plusDays, type Cafe, type PeniDirectory, type Permission, type StaffStore, type TaskStore } from "@peni/core";
 import type { EmailMessage, EmailSender } from "./customer-auth";
 import type { DebtService } from "./debts";
 import type { PayService } from "./pay";
@@ -259,10 +259,6 @@ export class AlertService {
   private async dayOf(cafeId: string): Promise<string> {
     return localDateKey(this.d.now(), (await this.d.directory.getSettings(cafeId)).timeZone);
   }
-}
-
-function localHour(at: Date, timeZone: string): number {
-  return Number(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone }).format(at));
 }
 
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);

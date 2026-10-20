@@ -7,6 +7,7 @@ import {
   dayPay,
   lineTotal,
   localDateKey,
+  localHour,
   monthsBetween,
   plusDays,
   previousRange,
@@ -124,7 +125,7 @@ export class SalesReportService {
     const step = reportStep(from, through);
     const hourly = (day: string) => {
       const m = new Map<string, number>();
-      for (const p of money) if (dayOf(p) === day) add(m, localHour(p.settledAt!, tz), signed(p));
+      for (const p of money) if (dayOf(p) === day) add(m, hourKey(p.settledAt!, tz), signed(p));
       return m;
     };
     const bucketed = (f: string, t: string) => {
@@ -147,7 +148,7 @@ export class SalesReportService {
     // When it sells.
     const inPeriod = orders.filter((o) => o.businessDay >= from && o.businessDay <= through);
     const byHour = new Map<string, number>();
-    for (const o of inPeriod) add(byHour, localHour(o.paidAt ?? o.createdAt, tz), 1);
+    for (const o of inPeriod) add(byHour, hourKey(o.paidAt ?? o.createdAt, tz), 1);
     const hours = [...byHour].sort(([a], [b]) => a.localeCompare(b)).map(([hour, n]) => ({ hour, orders: n }));
     const weekdays: SalesReportDTO["weekdays"] = [];
     // Whole days only: today isn't over.
@@ -253,10 +254,10 @@ export class SalesReportService {
     for (const p of money) {
       const day = localDateKey(p.settledAt!, tz);
       if (day === today) {
-        add(now_, localHour(p.settledAt!, tz), signed(p));
+        add(now_, hourKey(p.settledAt!, tz), signed(p));
         salesKurus += signed(p);
       } else if (day === lastWeekDay) {
-        add(then, localHour(p.settledAt!, tz), signed(p));
+        add(then, hourKey(p.settledAt!, tz), signed(p));
         if (p.settledAt! <= weekAgo) lastWeekKurus += signed(p);
       }
     }
@@ -293,8 +294,8 @@ function localTime(at: Date, timeZone: string): string {
   return new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(at);
 }
 
-function localHour(at: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone }).format(at);
+function hourKey(at: Date, timeZone: string): string {
+  return String(localHour(at, timeZone)).padStart(2, "0");
 }
 
 /** Only the hours the café was selling on either day. */

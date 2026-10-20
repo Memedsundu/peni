@@ -6,6 +6,7 @@ import {
   FORECAST_DAYS,
   FORECAST_HISTORY_DAYS,
   localDateKey,
+  localHour,
   marginPct,
   MILLI,
   orderAmount,
@@ -454,7 +455,7 @@ export class WatchService {
     for (const o of orders) {
       if (o.status !== "paid" && o.status !== "refunded") continue;
       const day = o.businessDay;
-      const hour = localHourOf(o.createdAt, tz);
+      const hour = localHour(o.createdAt, tz);
       counts.set(`${day}:${hour}`, (counts.get(`${day}:${hour}`) ?? 0) + 1);
     }
     let orderSum = 0;
@@ -513,10 +514,6 @@ export class WatchService {
     }
     return out;
   }
-}
-
-function localHourOf(at: Date, timeZone: string): number {
-  return Number(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone }).format(at));
 }
 
 /** The same day of the next month, or its last day when it has fewer: 31 Jan → 28 Feb. */

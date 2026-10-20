@@ -146,10 +146,14 @@ export interface PaymentStore {
 
 export class InMemoryPaymentStore implements PaymentStore {
   private readonly payments = new Map<string, Payment>();
+  /** Café and client key → payment id, so a save doesn't look through every payment. */
+  private readonly byKey = new Map<string, string>();
 
   async savePayment(payment: Payment) {
-    const clash = [...this.payments.values()].some((p) => p.id !== payment.id && p.cafeId === payment.cafeId && p.key === payment.key);
-    if (clash) return false;
+    const k = `${payment.cafeId} ${payment.key}`;
+    const holder = this.byKey.get(k);
+    if (holder !== undefined && holder !== payment.id) return false;
+    this.byKey.set(k, payment.id);
     this.payments.set(payment.id, { ...payment });
     return true;
   }
@@ -160,7 +164,8 @@ export class InMemoryPaymentStore implements PaymentStore {
   }
 
   async findPaymentByKey(cafeId: string, key: string) {
-    const p = [...this.payments.values()].find((x) => x.cafeId === cafeId && x.key === key);
+    const id = this.byKey.get(`${cafeId} ${key}`);
+    const p = id === undefined ? undefined : this.payments.get(id);
     return p ? { ...p } : null;
   }
 

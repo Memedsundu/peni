@@ -6,6 +6,7 @@ import {
   letterWeek,
   LETTERS_SHOWN,
   localDateKey,
+  localHour,
   permissionsFor,
   plusDays,
   priceChanges,
@@ -418,10 +419,6 @@ export class LetterService {
 }
 
 const WEEKDAY_TR = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"] as const;
-
-function localHour(at: Date, timeZone: string): number {
-  return Number(new Intl.DateTimeFormat("en-GB", { hour: "2-digit", hourCycle: "h23", timeZone }).format(at));
-}
 
 /** "12–18 Ekim", "29 Eylül – 5 Ekim". */
 export function weekWords(weekStart: string): string {
