@@ -62,7 +62,9 @@ export function AssistantProvider({
     setPending(ask ?? {});
   };
   // A new café (or none) starts closed.
-  useEffect(() => setShown(false), [cafe?.slug]);
+  useEffect(() => {
+    setShown(false);
+  }, [cafe?.slug]);
   return (
     <AssistantContext.Provider value={cafe ? value.current : null}>
       {children}
@@ -174,7 +176,11 @@ function Panel({
     input.current?.focus();
   }, [ask, chat !== null]);
 
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [chat?.messages.length, waiting]);
+  // Braces, so nothing is returned: newer browsers' scrollIntoView returns a promise, and React
+  // would keep it as the cleanup and call it, which takes the page down.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [chat?.messages.length, waiting]);
 
   const fresh = () => {
     setError(null);
