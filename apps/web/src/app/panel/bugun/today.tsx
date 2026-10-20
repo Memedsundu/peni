@@ -271,7 +271,7 @@ export function Progress({ done, total }: { done: number; total: number }) {
   return (
     <span className="flex items-center gap-3">
       <span className="h-1.5 w-20 overflow-hidden rounded-full bg-tile" aria-hidden="true">
-        <span className={`block h-full rounded-full ${all ? "bg-green" : "bg-ink"}`} style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }} />
+        <span className={`block h-full rounded-full ${all ? "bg-chart-accent" : "bg-ink"}`} style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }} />
       </span>
       <span className={`min-w-10 text-right text-sm font-semibold tabular ${all ? "text-green" : ""}`}>
         {done}/{total}

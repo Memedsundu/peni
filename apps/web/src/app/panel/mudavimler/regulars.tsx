@@ -185,7 +185,7 @@ function Weeks({ d, t, lang }: { d: InsightsDTO; t: T; lang: Lang }) {
           type: "bar",
           stack: "p",
           data: d.weeks.map((w) => w.newcomers),
-          itemStyle: { color: k.green, borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: k.accent, borderRadius: [4, 4, 0, 0] },
           barMaxWidth: 28,
         },
       ],

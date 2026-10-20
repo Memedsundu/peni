@@ -6,7 +6,7 @@ import { Legend, ResponsiveContainer, Tooltip } from "recharts";
 /**
  * shadcn/ui's chart pieces (https://ui.shadcn.com/charts, MIT), in Peni's look: a frame that
  * names each series and gives it a colour as `--color-<key>`, a tooltip like a card, and a
- * legend. The colours are Peni's own tokens (--ink, --mark, --green), so dark mode follows.
+ * legend. The colours are Peni's own tokens (--ink, --mark, --chart-accent), so dark mode follows.
  * Recharts draws the chart itself.
  */
 

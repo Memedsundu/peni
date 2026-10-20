@@ -164,7 +164,7 @@ function AccountCard({ label, value, sub, dot = false }: { label: string; value:
     <div className="flex flex-col gap-1 rounded-3xl bg-panel p-5">
       <p className="flex items-center gap-2 text-sm text-muted">
         {label}
-        {dot && <span className="size-2 rounded-full bg-green" aria-hidden />}
+        {dot && <span className="size-2 rounded-full bg-chart-accent" aria-hidden />}
       </p>
       <p className={`text-3xl font-semibold tabular ${value !== null && value < 0 ? "text-red" : ""}`}>{value === null ? "—" : formatTL(value)}</p>
       {sub && <p className="text-xs text-muted">{sub}</p>}

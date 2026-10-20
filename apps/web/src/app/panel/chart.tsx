@@ -9,6 +9,8 @@ export interface ChartColors {
   muted: string;
   line: string;
   green: string;
+  /** What a chart points out; amber, far from black (--chart-accent). */
+  accent: string;
   mark: string;
   paper: string;
   red: string;
@@ -36,6 +38,7 @@ function colorsOf(el: HTMLElement): ChartColors {
     muted: v("--muted"),
     line: v("--line"),
     green: v("--green"),
+    accent: v("--chart-accent"),
     mark: v("--mark"),
     paper: v("--paper"),
     red: v("--red"),

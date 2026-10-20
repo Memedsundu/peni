@@ -205,7 +205,7 @@ export function MyUploads({ t, lang, data }: { t: T; lang: Lang; data: UploadsDT
             role={u.state === "reading" ? "status" : undefined}
             className={`flex items-center gap-2 text-sm ${u.state === "failed" || u.state === "notBill" ? "text-red" : u.state === "saved" ? "text-green" : "text-muted"}`}
           >
-            {u.state === "reading" && <span className="size-3 animate-pulse rounded-full bg-green" aria-hidden="true" />}
+            {u.state === "reading" && <span className="size-3 animate-pulse rounded-full bg-chart-accent" aria-hidden="true" />}
             {u.state === "notBill" && u.source === "note" ? t("qeNoExpense") : t(`up_${u.state}` as TextKey)}
             {(u.state === "failed" || (u.state === "notBill" && u.source === "note")) && u.error ? `: ${u.error}` : ""}
           </span>
