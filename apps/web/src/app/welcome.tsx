@@ -27,7 +27,8 @@ export function Welcome() {
 
   return (
     <Shell lang={lang} onLang={toggleLang} hue={null}>
-      <section className="flex flex-col gap-5 pt-10">
+      <section className="flex flex-col gap-5 pt-6">
+        <img src="/coin-large.png" alt={t("welcomeCoinAlt")} width={160} height={160} className="size-40 drop-shadow-[0_10px_18px_rgba(0,0,0,0.22)]" />
         <h1 className="font-serif text-6xl leading-[1.05]">{t("welcomeHeadline")}</h1>
         <p className="text-lg text-muted">{t("welcomeBody")}</p>
       </section>

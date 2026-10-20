@@ -276,6 +276,7 @@ const TEXT = {
     tr: "Kahveni aldığın kafede penny biriktir, harca, bir arkadaşına ısmarla, askıya bırak. Kafenin masasına otur, etkinliklerine katıl.",
     en: "Collect pennies at the café you buy your coffee from, spend them, treat a friend, leave some on the askı. Pull up a chair at the café's table and join its events.",
   },
+  welcomeCoinAlt: { tr: "Penny: üzerinde keçi olan eski bir gümüş sikke", en: "Penny: an old silver coin with a goat on it" },
   welcomeStart: { tr: "Başla", en: "Get started" },
   haveCafe: { tr: "Kafen mi var?", en: "Run a café?" },
   haveCafeBody: {
