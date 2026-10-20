@@ -902,4 +902,43 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     ]);
     expect(await stores.watch.listSuggestions("other", "2026-10-01")).toEqual([]);
   });
+
+  it("keeps the assistant's recipe drafts as written, open ones newest first, and counts the day's", async () => {
+    const draft = {
+      id: `rcd_${run}`,
+      cafeId,
+      productId: "buzlu-latte",
+      productName: "Buzlu Latte",
+      status: "open" as const,
+      proposal: {
+        mode: "recipe" as const,
+        lines: [
+          { itemId: "stk_espresso", newItem: null, qtyMilli: 18 },
+          { itemId: null, newItem: 0, qtyMilli: 20 },
+        ],
+        newItems: [{ name: "Karamel şurubu", unit: "l" as const, kind: "ingredient" as const }],
+        reason: null,
+      },
+      notes: ["Süt miktarı standart 180 ml varsayıldı."],
+      model: "claude-haiku-5-5",
+      createdById: "stf_leyla",
+      createdAt: at,
+      decidedById: null,
+      decidedAt: null,
+      changed: [],
+      dismissReason: null,
+    };
+    await stores.recipeDrafts.saveRecipeDraft(draft);
+    await stores.recipeDrafts.saveRecipeDraft({ ...draft, id: `rcd2_${run}`, productId: "su", productName: "Şişe Su", createdAt: new Date(at.getTime() + 1000) });
+    expect(await stores.recipeDrafts.getRecipeDraft(cafeId, draft.id)).toEqual(draft);
+    expect(await stores.recipeDrafts.getRecipeDraft("other", draft.id)).toBeNull();
+    expect((await stores.recipeDrafts.listOpenRecipeDrafts(cafeId)).map((d) => d.productId)).toEqual(["su", "buzlu-latte"]);
+
+    const decided = { ...draft, status: "confirmed" as const, decidedById: "stf_leyla", decidedAt: new Date(at.getTime() + 2000), changed: ["lines"] };
+    await stores.recipeDrafts.saveRecipeDraft(decided);
+    expect(await stores.recipeDrafts.getRecipeDraft(cafeId, draft.id)).toEqual(decided);
+    expect((await stores.recipeDrafts.listOpenRecipeDrafts(cafeId)).map((d) => d.id)).toEqual([`rcd2_${run}`]);
+    expect(await stores.recipeDrafts.countRecipeDraftsSince(cafeId, at)).toBe(2);
+    expect(await stores.recipeDrafts.countRecipeDraftsSince(cafeId, new Date(at.getTime() + 1))).toBe(1);
+  });
 });

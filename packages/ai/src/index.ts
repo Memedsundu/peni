@@ -7,3 +7,4 @@ export * from "./quick-reading";
 export * from "./transcribe";
 export * from "./chat";
 export * from "./letter";
+export * from "./recipe-drafting";

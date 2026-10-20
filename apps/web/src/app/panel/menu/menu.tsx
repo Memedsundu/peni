@@ -1,6 +1,15 @@
 "use client";
 
-import { PeniApiError, type RecipeDTO, type RecipesDTO, type StaffMenuDTO, type StockModeDTO } from "@peni/api";
+import {
+  PeniApiError,
+  type RecipeDTO,
+  type RecipeDraftDTO,
+  type RecipeDraftsDTO,
+  type RecipesDTO,
+  type StaffMenuDTO,
+  type StockModeDTO,
+  type StockUnitDTO,
+} from "@peni/api";
 import { formatTL } from "@peni/brand/format";
 import { useEffect, useState } from "react";
 import { api } from "../../kasa/api";
@@ -16,7 +25,8 @@ type Line = { itemId: string; qty: string };
 /**
  * Menü (plan pieces 5 and 17): every product with its price and, from its recipe and the
  * items' prices, what one costs and what it leaves (D30). A manager edits products and
- * recipes; a chef edits recipes only.
+ * recipes; a chef edits recipes only. For a product with no recipe, the assistant can write
+ * a draft that the person checks and confirms (D21).
  */
 export function Menu({ cafeSlug }: { cafeSlug: string | null }) {
   return (
@@ -33,15 +43,58 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
   const [recipes, setRecipes] = useState<RecipesDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | "new" | null>(null);
+  const [drafts, setDrafts] = useState<RecipeDraftsDTO | null>(null);
+  // Products the assistant is writing for right now, and the "write all" run's progress.
+  const [writing, setWriting] = useState<Set<string>>(new Set());
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const [failed, setFailed] = useState(0);
 
   const fail = (e: unknown) => {
     if (e instanceof PeniApiError && e.status === 401) signedOut();
     else setError(errorText(e, lang));
   };
   const reload = () =>
-    Promise.all([canEdit ? api.staff.menu.get(cafe.slug).then(setMenu) : null, canRecipes ? api.staff.menu.recipes(cafe.slug).then(setRecipes) : null]).catch(
-      fail,
-    );
+    Promise.all([
+      canEdit ? api.staff.menu.get(cafe.slug).then(setMenu) : null,
+      canRecipes ? api.staff.menu.recipes(cafe.slug).then(setRecipes) : null,
+      canRecipes ? api.staff.menu.recipeDrafts(cafe.slug).then(setDrafts) : null,
+    ]).catch(fail);
+
+  /** One draft; true when written. Stops the run when the assistant is off or the day's drafts are used up. */
+  const writeOne = async (productId: string): Promise<"ok" | "failed" | "stop"> => {
+    setWriting((w) => new Set(w).add(productId));
+    try {
+      setDrafts(await api.staff.menu.draftRecipe(cafe.slug, productId));
+      return "ok";
+    } catch (e) {
+      fail(e);
+      return e instanceof PeniApiError && ["RECIPE_AI_OFF", "RECIPE_DRAFT_LIMIT", "NEEDS_PASSWORD", "FORBIDDEN"].includes(e.code) ? "stop" : "failed";
+    } finally {
+      setWriting((w) => {
+        const next = new Set(w);
+        next.delete(productId);
+        return next;
+      });
+    }
+  };
+  // "Eksik reçetelerin hepsini yaz": two at a time, in menu order, each kept as it arrives.
+  const writeAll = async () => {
+    const queue = [...(drafts?.missing ?? [])];
+    setError(null);
+    setFailed(0);
+    setBulk({ done: 0, total: queue.length });
+    let stop = false;
+    const worker = async () => {
+      while (!stop && queue.length) {
+        const r = await writeOne(queue.shift()!);
+        if (r === "stop") stop = true;
+        setBulk((b) => b && { ...b, done: b.done + 1 });
+        if (r !== "ok") setFailed((f) => f + 1);
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setBulk(null);
+  };
   useEffect(() => {
     void reload();
     // Once per café.
@@ -63,6 +116,10 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
       }));
   const categories = [...new Set(products.map((p) => p.category))];
   const tracked = recipes?.recipes.filter((r) => r.mode !== "none").length ?? 0;
+  const draftOf = new Map((drafts?.drafts ?? []).map((d) => [d.productId, d]));
+  const missing = new Set(drafts?.missing ?? []);
+  const opened = open && open !== "new" ? products.find((p) => p.productId === open) : undefined;
+  const openDraft = opened ? draftOf.get(opened.productId) : undefined;
   const ready = (canEdit ? menu : true) && (canRecipes ? recipes : true);
 
   return (
@@ -90,6 +147,9 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
               </Button>
             )}
           </div>
+          {drafts && (drafts.missing.length > 0 || drafts.drafts.length > 0) && (
+            <AssistantBar t={t} drafts={drafts} bulk={bulk} failed={failed} busy={bulk !== null || writing.size > 0} onWriteAll={() => void writeAll()} />
+          )}
           {categories.map((c) => (
             <section key={c} className="flex flex-col gap-1">
               <h2 className="font-serif text-3xl">{c}</h2>
@@ -98,7 +158,14 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
                   .filter((p) => p.category === c)
                   .map((p) => (
                     <li key={p.productId}>
-                      <ProductRow t={t} product={p} onOpen={() => setOpen(p.productId)} />
+                      <ProductRow t={t} product={p} draft={draftOf.get(p.productId)} onOpen={() => setOpen(p.productId)} />
+                      {missing.has(p.productId) && drafts?.ai !== "off" && (
+                        <div className="-mt-2 pb-3 pl-18">
+                          <Button kind="quiet" size="sm" disabled={writing.has(p.productId) || bulk !== null} onClick={() => void writeOne(p.productId)}>
+                            {t(writing.has(p.productId) ? "rdWritingOne" : "rdWriteOne")}
+                          </Button>
+                        </div>
+                      )}
                     </li>
                   ))}
               </ul>
@@ -120,13 +187,30 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
           }}
         />
       )}
-      {open && open !== "new" && (
+      {opened && openDraft && recipes && drafts && (
+        <DraftSheet
+          key={openDraft.id}
+          t={t}
+          lang={lang}
+          slug={cafe.slug}
+          draft={openDraft}
+          priceKurus={opened.priceKurus}
+          items={recipes.items}
+          canAddItems={drafts.canAddItems}
+          onClose={() => setOpen(null)}
+          onDone={async () => {
+            await reload();
+            setOpen(null);
+          }}
+        />
+      )}
+      {opened && !openDraft && (
         <ProductSheet
           key={open}
           t={t}
           lang={lang}
           slug={cafe.slug}
-          product={products.find((p) => p.productId === open)!}
+          product={opened}
           menu={menu}
           items={recipes?.items ?? null}
           onClose={() => setOpen(null)}
@@ -148,9 +232,10 @@ function margin(price: number, cost: number): number {
   return price > 0 ? Math.round(((price - cost) / price) * 100) : 0;
 }
 
-function ProductRow({ t, product: p, onOpen }: { t: T; product: Product; onOpen: () => void }) {
+function ProductRow({ t, product: p, draft, onOpen }: { t: T; product: Product; draft?: RecipeDraftDTO; onOpen: () => void }) {
   let costLine: string | null = null;
-  if (p.mode === "none") costLine = t("modeNoneShort");
+  if (draft) costLine = draft.costKurus !== null ? fill(t("rdReadyCost"), { cost: formatTL(draft.costKurus) }) : t("rdReady");
+  else if (p.mode === "none") costLine = t("modeNoneShort");
   else if (p.mode && p.costKurus === null) costLine = t("costUnknown");
   else if (p.mode && p.costKurus !== null && p.costKurus !== undefined)
     costLine = fill(t("costAndMargin"), {
@@ -165,7 +250,11 @@ function ProductRow({ t, product: p, onOpen }: { t: T; product: Product; onOpen:
           {p.name}
           {!p.available && <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">{t("offTill")}</span>}
         </span>
-        {costLine && <span className={`text-sm ${p.mode && p.costKurus === null && p.mode !== "none" ? "text-red" : "text-muted"}`}>{costLine}</span>}
+        {costLine && (
+          <span className={`text-sm ${draft ? "font-semibold text-green" : p.mode && p.costKurus === null && p.mode !== "none" ? "text-red" : "text-muted"}`}>
+            {costLine}
+          </span>
+        )}
       </span>
       <span className="shrink-0 text-lg font-semibold tabular">{formatTL(p.priceKurus)}</span>
     </button>
@@ -507,6 +596,292 @@ function ProductSheet({
           onClick={() => void save()}
         >
           {t("save")}
+        </Button>
+      </div>
+    </Sheet>
+  );
+}
+
+/** Above the menu: how many products have no recipe, "write all", and drafts waiting to be checked. */
+function AssistantBar({
+  t,
+  drafts,
+  bulk,
+  failed,
+  busy,
+  onWriteAll,
+}: {
+  t: T;
+  drafts: RecipeDraftsDTO;
+  bulk: { done: number; total: number } | null;
+  failed: number;
+  busy: boolean;
+  onWriteAll: () => void;
+}) {
+  const n = drafts.missing.length;
+  return (
+    <section className="flex flex-col gap-3 rounded-3xl bg-green-soft p-5">
+      {n > 0 && <p className="max-w-2xl leading-normal">{fill(t(drafts.ai === "off" ? "rdBarOff" : "rdBar"), { n })}</p>}
+      {drafts.drafts.length > 0 && <p className="text-sm font-semibold text-green">{fill(t("rdWaiting"), { n: drafts.drafts.length })}</p>}
+      {!bulk && failed > 0 && <p className="text-sm text-red">{fill(t("rdSomeFailed"), { n: failed })}</p>}
+      {n > 0 && drafts.ai !== "off" && (
+        <div>
+          <Button kind="primary" disabled={busy || drafts.left === 0} onClick={onWriteAll}>
+            {bulk ? fill(t("rdWriting"), { done: bulk.done, total: bulk.total }) : t("rdWriteAll")}
+          </Button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** A line as edited: one of the café's items by id, or one of the draft's new items as "new:0". */
+type DraftLine = { ref: string; qty: string };
+type NewItem = RecipeDraftDTO["newItems"][number];
+
+/**
+ * The assistant's draft, to check (D21): the same choices as a recipe in Menü, plus the
+ * items it needs that Stok doesn't have yet, which are added when it's confirmed. Letting
+ * it go leaves the product as it was.
+ */
+function DraftSheet({
+  t,
+  lang,
+  slug,
+  draft,
+  priceKurus,
+  items,
+  canAddItems,
+  onClose,
+  onDone,
+}: {
+  t: T;
+  lang: Lang;
+  slug: string;
+  draft: RecipeDraftDTO;
+  priceKurus: number;
+  items: Items;
+  canAddItems: boolean;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const [mode, setMode] = useState<StockModeDTO>(draft.mode);
+  const [newItems, setNewItems] = useState<NewItem[]>(draft.newItems);
+  const refOf = (l: RecipeDraftDTO["lines"][number]) => (l.itemId !== null ? l.itemId : `new:${l.newItem}`);
+  const newOf = (ref: string) => (ref.startsWith("new:") ? Number(ref.slice(4)) : null);
+  const unitOf = (ref: string): StockUnitDTO => {
+    const n = newOf(ref);
+    return n !== null ? (newItems[n]?.unit ?? "adet") : (items.find((i) => i.id === ref)?.unit ?? "adet");
+  };
+  const nameOf = (ref: string) => {
+    const n = newOf(ref);
+    return n !== null ? fill(t("rdNewTag"), { name: newItems[n]?.name ?? "" }) : (items.find((i) => i.id === ref)?.name ?? "");
+  };
+  const [lines, setLines] = useState<DraftLine[]>(() => draft.lines.map((l) => ({ ref: refOf(l), qty: smallInput(l.qtyMilli, l.itemId !== null ? unitOf(l.itemId) : (draft.newItems[l.newItem!]?.unit ?? "adet")) })));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const parsed = lines.map((l) => ({ ref: l.ref, qtyMilli: l.ref ? parseSmall(l.qty, unitOf(l.ref)) : null }));
+  const used = new Set(mode === "none" ? [] : parsed.map((l) => newOf(l.ref)).filter((n): n is number => n !== null));
+  const recipeOk =
+    mode === "none" ||
+    (parsed.length > 0 && parsed.every((l) => l.ref && l.qtyMilli && l.qtyMilli > 0) && [...used].every((n) => newItems[n]?.name.trim()));
+  const blocked = used.size > 0 && !canAddItems;
+  // The cost as it stands on screen; a new item has no price until its first bill.
+  const unpriced = parsed
+    .filter((l) => l.ref && (newOf(l.ref) !== null || items.find((i) => i.id === l.ref)?.costKurus === null))
+    .map((l) => nameOf(l.ref));
+  const cost =
+    mode !== "none" && recipeOk && unpriced.length === 0
+      ? Math.round(parsed.reduce((s, l) => s + (l.qtyMilli! * (items.find((i) => i.id === l.ref)?.costKurus ?? 0)) / 1000, 0))
+      : null;
+  const choices = [
+    ...items.map((i) => ({ ref: i.id, label: i.name, unit: i.unit })),
+    ...newItems.map((x, n) => ({ ref: `new:${n}`, label: fill(t("rdNew"), { name: x.name }), unit: x.unit })),
+  ];
+
+  const pickMode = (m: StockModeDTO) => {
+    setMode(m);
+    if (m === "counted") setLines([{ ref: lines.find((l) => l.ref && unitOf(l.ref) === "adet")?.ref ?? "", qty: "1" }]);
+    if (m === "recipe" && lines.length === 0) setLines([{ ref: "", qty: "" }]);
+  };
+
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      await onDone();
+    } catch (e) {
+      setError(errorText(e, lang));
+      setBusy(false);
+    }
+  };
+  const confirm = () =>
+    run(() =>
+      api.staff.menu.confirmRecipeDraft(slug, draft.id, {
+        mode,
+        lines:
+          mode === "none"
+            ? []
+            : parsed.map((l) => ({ itemId: newOf(l.ref) === null ? l.ref : null, newItem: newOf(l.ref), qtyMilli: l.qtyMilli! })),
+        newItems: newItems.map((x) => ({ ...x, name: x.name.trim() })),
+      }),
+    );
+
+  return (
+    <Sheet title={draft.productName} onClose={onClose} labelClose={t("close")} wide>
+      <section className="flex flex-col gap-2 rounded-3xl bg-green-soft p-5">
+        <p className="font-semibold text-green">{t("rdBanner")}</p>
+        {draft.reason && <p className="text-sm">{draft.reason}</p>}
+        {draft.notes.length > 0 && (
+          <ul className="list-disc pl-5 text-sm leading-normal">
+            {draft.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="flex flex-col gap-4 rounded-3xl bg-panel p-5">
+        <Segmented
+          label={t("stockModeQuestion")}
+          value={mode}
+          onChange={pickMode}
+          options={[
+            { value: "recipe", label: t("modeRecipe") },
+            { value: "counted", label: t("modeCounted") },
+            { value: "none", label: t("modeNone") },
+          ]}
+        />
+        <p className="-mt-2 text-sm leading-normal text-muted">
+          {t(mode === "recipe" ? "modeRecipeHelp" : mode === "counted" ? "modeCountedHelp" : "modeNoneHelp")}
+        </p>
+
+        {mode === "recipe" && (
+          <>
+            <ul className="flex flex-col gap-3">
+              {lines.map((l, n) => {
+                const unit = l.ref ? unitOf(l.ref) : "adet";
+                const price = items.find((i) => i.id === l.ref)?.costKurus;
+                const milli = l.ref ? parseSmall(l.qty, unit) : null;
+                const lineCost = price !== null && price !== undefined && milli ? Math.round((milli * price) / 1000) : null;
+                return (
+                  <li key={n} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_8rem_5rem_auto]">
+                    <select
+                      className={`${field} col-span-3 min-h-12 min-w-0 sm:col-span-1`}
+                      value={l.ref}
+                      onChange={(e) => setLines(lines.map((x, i) => (i === n ? { ...x, ref: e.target.value } : x)))}
+                      aria-label={t("recipeItem")}
+                    >
+                      <option value="">{t("pickItem")}</option>
+                      {choices.map((c) => (
+                        <option key={c.ref} value={c.ref} disabled={c.ref !== l.ref && lines.some((x) => x.ref === c.ref)}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="relative flex items-center">
+                      <input
+                        className={`${field} min-h-12 pr-14 text-right tabular`}
+                        inputMode="decimal"
+                        value={l.qty}
+                        onChange={(e) => setLines(lines.map((x, i) => (i === n ? { ...x, qty: e.target.value } : x)))}
+                        aria-label={t("recipeQty")}
+                      />
+                      <span className="pointer-events-none absolute right-4 text-muted">{smallUnit(unit, lang)}</span>
+                    </span>
+                    <span className="w-20 text-right text-sm text-muted tabular sm:w-auto">{lineCost !== null ? formatTL(lineCost) : ""}</span>
+                    <Button kind="bare" size="sm" onClick={() => setLines(lines.filter((_, i) => i !== n))} aria-label={t("removeLine")}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+            <div>
+              <Button kind="quiet" size="sm" onClick={() => setLines([...lines, { ref: "", qty: "" }])} disabled={lines.length >= 20 || choices.length === 0}>
+                {t("addLine")}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {mode === "counted" && (
+          <label className="flex flex-col gap-2 text-sm text-muted">
+            {t("countedItem")}
+            <select className={`${field} min-h-12`} value={lines[0]?.ref ?? ""} onChange={(e) => setLines([{ ref: e.target.value, qty: "1" }])}>
+              <option value="">{t("pickItem")}</option>
+              {choices
+                .filter((c) => c.unit === "adet")
+                .map((c) => (
+                  <option key={c.ref} value={c.ref}>
+                    {c.label}
+                  </option>
+                ))}
+            </select>
+          </label>
+        )}
+
+        {used.size > 0 && (
+          <div className="flex flex-col gap-3 border-t border-line pt-4">
+            <p className="font-semibold">{t("rdNewItems")}</p>
+            <p className="-mt-2 text-sm text-muted">{t("rdNewItemsHelp")}</p>
+            {[...used].map((n) => (
+              <div key={n} className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+                <Field
+                  label={t("rdNewName")}
+                  value={newItems[n]!.name}
+                  onChange={(v) => setNewItems(newItems.map((x, i) => (i === n ? { ...x, name: v } : x)))}
+                  maxLength={60}
+                />
+                <Segmented
+                  label={t("rdNewUnit")}
+                  value={newItems[n]!.unit}
+                  onChange={(u) => setNewItems(newItems.map((x, i) => (i === n ? { ...x, unit: u } : x)))}
+                  options={[
+                    { value: "kg", label: t("rdUnitKg") },
+                    { value: "l", label: t("rdUnitL") },
+                    { value: "adet", label: t("rdUnitAdet") },
+                  ]}
+                />
+              </div>
+            ))}
+            {blocked && <Notice>{t("rdNoAddItems")}</Notice>}
+          </div>
+        )}
+
+        {mode !== "none" && (
+          <div className="flex flex-col gap-1 border-t border-line pt-4">
+            {cost !== null ? (
+              <p className="text-lg">
+                {fill(t("costOfOne"), { cost: formatTL(cost) })}
+                <span className="text-muted">
+                  {" · "}
+                  {fill(t("leavesProfit"), { profit: formatTL(priceKurus - cost), pct: margin(priceKurus, cost) })}
+                </span>
+              </p>
+            ) : unpriced.length > 0 ? (
+              <p className="text-sm text-muted">{fill(t("unpricedItems"), { names: unpriced.join(", ") })}</p>
+            ) : null}
+            {mode === "recipe" && recipeOk && (
+              <p className="text-xs text-muted">
+                {fill(t("perSale"), { list: parsed.map((l) => `${formatQty(l.qtyMilli!, unitOf(l.ref), lang)} ${nameOf(l.ref)}`).join(", ") })}
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+
+      <div className="sticky -bottom-6 -mx-6 -mb-6 flex flex-col gap-3 bg-paper px-6 pt-3 pb-6">
+        {error && <Notice tone="red">{error}</Notice>}
+        <Button kind="primary" size="lg" disabled={busy || !recipeOk || blocked} onClick={() => void confirm()}>
+          {t("rdConfirm")}
+        </Button>
+        <Button kind="quiet" disabled={busy} onClick={() => void run(() => api.staff.menu.dismissRecipeDraft(slug, draft.id))}>
+          {t("rdDismiss")}
         </Button>
       </div>
     </Sheet>

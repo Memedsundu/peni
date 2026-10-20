@@ -23,6 +23,7 @@ import { PrismaAssistantStore } from "./prisma-assistant-store";
 import { PrismaChatStore } from "./prisma-chat-store";
 import { PrismaLetterStore } from "./prisma-letter-store";
 import { PrismaWatchStore } from "./prisma-watch-store";
+import { PrismaRecipeDraftStore } from "./prisma-recipe-draft-store";
 
 export * from "./generated/client";
 export type { Db } from "./db";
@@ -49,6 +50,7 @@ export { PrismaAssistantStore } from "./prisma-assistant-store";
 export { PrismaChatStore } from "./prisma-chat-store";
 export { PrismaLetterStore } from "./prisma-letter-store";
 export { PrismaWatchStore } from "./prisma-watch-store";
+export { PrismaRecipeDraftStore } from "./prisma-recipe-draft-store";
 
 export function createPrismaClient(connectionString = process.env.DATABASE_URL): PrismaClient {
   if (!connectionString) throw new Error("DATABASE_URL is not set");
@@ -87,5 +89,6 @@ export function createPrismaStores(prisma: PrismaClient) {
     chat: new PrismaChatStore(db),
     letters: new PrismaLetterStore(db),
     watch: new PrismaWatchStore(db),
+    recipeDrafts: new PrismaRecipeDraftStore(db),
   };
 }

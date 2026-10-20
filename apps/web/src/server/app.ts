@@ -41,6 +41,8 @@ import {
   InMemoryLetterStore,
   InMemoryWatchStore,
   type WatchStore,
+  InMemoryRecipeDraftStore,
+  type RecipeDraftStore,
   type LetterStore,
   type AssistantStore,
   type ChatStore,
@@ -130,6 +132,7 @@ import { DebtService } from "./debts";
 import { MoneyService } from "./money";
 import { bare, eventCapacity, eventTime, FeedService } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
+import { RecipeDraftService } from "./recipe-drafts";
 
 /**
  * The Peni application layer: everything the HTTP routes call.
@@ -168,6 +171,7 @@ export interface PeniStores {
   chat: ChatStore;
   letters: LetterStore;
   watch: WatchStore;
+  recipeDrafts: RecipeDraftStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -195,6 +199,7 @@ export function inMemoryStores(): PeniStores {
     chat: new InMemoryChatStore(),
     letters: new InMemoryLetterStore(),
     watch: new InMemoryWatchStore(),
+    recipeDrafts: new InMemoryRecipeDraftStore(),
   };
 }
 
@@ -283,6 +288,8 @@ export class PeniApp {
   /** The weekly letter (piece 30). */
   readonly letters: LetterService;
   readonly watch: WatchService;
+  /** Recipes the assistant drafts in Menü; a person confirms (D21). */
+  readonly recipeDrafts: RecipeDraftService;
   /** Müdavimler: community insights (piece 32). */
   readonly insights: InsightsService;
   /** Ay kapanışı's package for the mali müşavir (piece 30). */
@@ -447,6 +454,7 @@ export class PeniApp {
       directory: this.directory,
       now: () => this.now(),
     });
+    this.recipeDrafts = new RecipeDraftService(stores.recipeDrafts, stores.stock, this.stock, this.menu, stores.assistant, this.directory, ai, () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
   }
 
