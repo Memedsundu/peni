@@ -485,7 +485,7 @@ export function letterEmail(input: { to: string; name: string; cafeName: string;
     html: `<p style="${font};font-size:16px;color:#555">Günaydın ${escape(first)}, ${escape(cafeName)} için geçen hafta (${escape(week)}):</p>
 <p style="font-family:Georgia,serif;font-size:26px;line-height:1.25;margin:16px 0">${escape(b.headline)}</p>
 ${b.points.map((p) => `<p style="${font};font-size:16px;line-height:1.55"><strong>${escape(p.title)}</strong><br>${escape(p.text)}</p>`).join("\n")}
-<p style="${font};font-size:16px;line-height:1.55;padding:14px 16px;border-radius:14px;background:#e8efeb;color:#1e4d3b"><strong>Bu hafta:</strong> ${escape(b.todo.text)}</p>${
+<p style="${font};font-size:16px;line-height:1.55;padding:14px 16px;border-radius:14px;background:#dcfce7;color:#15803d"><strong>Bu hafta:</strong> ${escape(b.todo.text)}</p>${
       link
         ? `\n<p><a href="${escape(link)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#111;color:#fff;${font};text-decoration:none">Mektubu aç</a></p>`
         : ""
