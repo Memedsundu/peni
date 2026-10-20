@@ -377,7 +377,7 @@ function HoursChart({ data, t }: { data: SalesReportDTO; t: T }) {
           <ChartTooltip config={config} format={(v) => String(v)} line={false} />
           <Bar dataKey="orders" radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
             {data.hours.map((h) => (
-              <Cell key={h.hour} fill={h.hour === busiest.hour ? "var(--green)" : "var(--color-orders)"} />
+              <Cell key={h.hour} fill={h.hour === busiest.hour ? "var(--chart-accent)" : "var(--color-orders)"} />
             ))}
           </Bar>
         </BarChart>
@@ -393,11 +393,11 @@ function weekdayName(weekday: number, lang: Lang): string {
   return new Date(Date.UTC(2026, 9, 18 + weekday, 12)).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { weekday: "long", timeZone: "UTC" });
 }
 
-/** What the green bar means, under the chart, with a swatch of it. */
+/** What the highlighted bar means, under the chart, with a swatch of its colour. */
 function Note({ children }: { children: string }) {
   return (
     <p className="flex items-center gap-2 text-sm text-muted">
-      <span aria-hidden="true" className="size-2.5 shrink-0 rounded-[3px] bg-green" />
+      <span aria-hidden="true" className="size-2.5 shrink-0 rounded-[3px] bg-chart-accent" />
       {children}
     </p>
   );
@@ -417,7 +417,7 @@ function WeekdayChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lan
           <ChartTooltip config={config} format={(v) => lira(v * 100)} line={false} />
           <Bar dataKey="sales" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false}>
             {data.weekdays.map((w) => (
-              <Cell key={w.weekday} fill={w.weekday === best.weekday ? "var(--green)" : "var(--color-sales)"} />
+              <Cell key={w.weekday} fill={w.weekday === best.weekday ? "var(--chart-accent)" : "var(--color-sales)"} />
             ))}
           </Bar>
         </BarChart>
@@ -436,7 +436,7 @@ function MonthsChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang
   const config = {
     sales: { label: t("rpSales"), color: "var(--ink)" },
     expenses: { label: t("rpExpenses"), color: "var(--mark)" },
-    left: { label: t("rpLeftOver"), color: "var(--green)" },
+    left: { label: t("rpLeftOver"), color: "var(--chart-accent)" },
   } satisfies ChartConfig;
   const rows = data.months.map((m) => ({ x: label(m.month), sales: m.salesKurus / 100, expenses: m.expensesKurus / 100, left: m.profitKurus / 100 }));
   return (
