@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { inMemoryStores, PeniApp } from "./app";
+import { inMemoryStores, PeniApp, type PeniStores } from "./app";
 import { DEMO_STAFF, DEMO_STAFF_PASSWORD, seed } from "./seed";
 import type { StaffContext } from "./staff";
 import { sameDayNextMonth } from "./watch";
 
 let app: PeniApp;
+let stores: PeniStores;
 let now: Date;
 let leyla: StaffContext;
 let murat: StaffContext;
@@ -22,7 +23,8 @@ const key = () => `k${++keys}`;
 beforeEach(async () => {
   // Friday 16 October, 12:00 in Istanbul.
   now = new Date("2026-10-16T09:00:00Z");
-  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now }, inMemoryStores());
+  stores = inMemoryStores();
+  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now }, stores);
   await seed(app, { drafts: false });
   [leyla, murat] = await Promise.all([at("leyla"), at("murat")]);
 });
@@ -49,7 +51,10 @@ describe("Gözcü (plan piece 31)", { timeout: 30_000 }, () => {
     expect([latte.marginBeforePct, latte.marginNowPct]).toEqual([80, 62]);
     // The latte cost ₺24,44 and now ₺46,20 (coffee went up too). An 80% margin again wants ₺231 on the menu, so ₺235.
     expect([latte.costBeforeKurus, latte.costNowKurus, latte.suggestedKurus]).toEqual([2_444, 4_620, 23_500]);
-    expect((await app.alerts.today(leyla)).alerts.find((a) => a.type === "watch")).toMatchObject({ count: 2, names: ["Ece Tan", "Süt"], href: "/panel/gozcu" });
+    // A ₺1.500 bill from Moda Süt, whose bills are ₺774 nearly every time: out of the ordinary
+    // past ₺1.161 for this supplier (the old twice-the-usual rule needed ₺1.548).
+    expect(w.unusual.find((u) => u.kind === "billSpike")).toMatchObject({ name: "Moda Süt", amountKurus: 150_000, usual: 77_400, limit: 116_100, letGo: 0 });
+    expect((await app.alerts.today(leyla)).alerts.find((a) => a.type === "watch")).toMatchObject({ count: 3, names: ["Ece Tan", "Moda Süt", "Süt"], href: "/panel/gozcu" });
   });
 
   it("finds what's out of the ordinary, and lets it go once someone has seen it", async () => {
@@ -77,6 +82,36 @@ describe("Gözcü (plan piece 31)", { timeout: 30_000 }, () => {
     expect((await app.watch.get(murat)).unusual.map((u) => u.kind)).toEqual(["voids"]);
     await app.watch.dismiss(murat, { key: twice.key });
     expect(await code(app.watch.dismiss(murat, { key: "twice:nope:nope" }))).toBe("WATCH_KEY");
+  });
+
+  it("shows a kind less once it keeps being let go, and says why", async () => {
+    const milk = (date: string, totalKurus: number) =>
+      app.bills.add(murat, { key: key(), supplierId: "sup_seed_sut", date, lines: [{ itemId: null, name: "Süt", category: "ingredients", totalKurus }] });
+    const spike = async () => (await app.watch.get(leyla)).unusual.find((u) => u.kind === "billSpike" && u.name === "Moda Süt");
+    // Three big milk bills for a week of events, each let go.
+    for (const [date, k] of [["2026-10-12", 150_000], ["2026-10-13", 140_000], ["2026-10-14", 130_000]] as const) {
+      await milk(date, k);
+      const s = (await spike())!;
+      expect(s).toMatchObject({ amountKurus: k, letGo: 0 });
+      await app.watch.dismiss(leyla, { key: s.key });
+    }
+    expect((await stores.watch.listDismissed("cafe_moda")).filter((d) => d.kind === "billSpike").map((d) => d.subject)).toEqual(["sup_seed_sut", "sup_seed_sut", "sup_seed_sut"]);
+
+    // A fourth at ₺1.600: over Moda Süt's ₺1.161, but now only twice that, ₺2.322, is shown.
+    await milk("2026-10-15", 160_000);
+    let w = await app.watch.get(leyla);
+    expect(await spike()).toBeUndefined();
+    expect(w.quiet).toBe(1);
+    expect(w.seen).toBe(3);
+    // Bugün doesn't count it either.
+    expect((await app.alerts.today(leyla)).alerts.find((a) => a.type === "watch")?.names).not.toContain("Moda Süt");
+
+    // ₺2.500 is shown, saying the bar was raised and why.
+    await milk("2026-10-16", 250_000);
+    w = await app.watch.get(leyla);
+    expect(await spike()).toMatchObject({ amountKurus: 250_000, usual: 77_400, limit: 232_200, letGo: 3 });
+    // Ece's voids are about someone else, and stay as they were.
+    expect(w.unusual.find((u) => u.kind === "voids")).toMatchObject({ name: "Ece Tan", letGo: 0, limit: 3 });
   });
 
   it("flags a drawer count that was off", async () => {
@@ -124,6 +159,26 @@ describe("Gözcü (plan piece 31)", { timeout: 30_000 }, () => {
     expect(orders.find((o) => o.supplierId === null)!.lines.map((l) => l.name)).toContain("Limon");
     // Most urgent first.
     expect(orders[0]!.lines[0]!.daysLeft).toBe(0);
+    // Nothing learned yet: the order is what the rule says.
+    expect(milk.lines[0]).toMatchObject({ habit: null, orderMilli: milk.lines[0]!.ruleMilli });
+    // …and what was suggested today is kept, to compare with the bills that follow.
+    expect(await stores.watch.listSuggestions("cafe_moda", "2026-10-16")).toEqual(
+      expect.arrayContaining([{ cafeId: "cafe_moda", itemId: "stk_sut", day: "2026-10-16", orderMilli: milk.lines[0]!.ruleMilli }]),
+    );
+  });
+
+  it("orders as the café does once it keeps ordering more than suggested", async () => {
+    // In September Penny said 11 L of milk three times, and each time an 18 L bill followed
+    // (Moda Süt brings 18 L on the 2nd, 9th and 16th).
+    for (const day of ["2026-09-01", "2026-09-08", "2026-09-15"]) await stores.watch.noteSuggestions("cafe_moda", day, [{ itemId: "stk_sut", orderMilli: 11_000 }]);
+    const line = (await app.watch.get(murat)).orders!.find((o) => o.supplierId === "sup_seed_sut")!.lines[0]!;
+    expect(line.habit).toEqual({ times: 3, pct: 164 });
+    expect(line.orderMilli).toBe(Math.round((line.ruleMilli * 1.64) / 1000) * 1000);
+    // The message says what the café would order.
+    const milk = (await app.watch.get(murat)).orders!.find((o) => o.supplierId === "sup_seed_sut")!;
+    expect(milk.message).toContain(`Süt ${line.orderMilli / 1000} L`);
+    // What's remembered is still the rule's amount, so the habit doesn't feed on itself.
+    expect((await stores.watch.listSuggestions("cafe_moda", "2026-10-16")).find((x) => x.itemId === "stk_sut")!.orderMilli).toBe(line.ruleMilli);
   });
 
   it("reads next week's plan against the orders hour by hour", async () => {
@@ -138,6 +193,11 @@ describe("Gözcü (plan piece 31)", { timeout: 30_000 }, () => {
       ]),
     );
     expect(s.hints.every((h) => h.kind !== "busy" || h.orders / h.people >= 8)).toBe(true);
+    // Busy and quiet are Moda's own: busier than 9 in 10 of its past hours, quieter than 9 in 10.
+    expect(s.barsFromHistory).toBe(true);
+    expect(s.busyAt).toBeGreaterThanOrEqual(Math.max(8, 1.3 * s.usualLoad));
+    expect(s.quietAt).toBeLessThanOrEqual(0.6 * s.usualLoad);
+    expect(s.hints.every((h) => h.kind !== "busy" || h.orders / h.people >= s.busyAt)).toBe(true);
   });
 
   it("is for those who see reports; each part follows its own permission", async () => {
