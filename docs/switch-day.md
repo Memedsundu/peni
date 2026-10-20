@@ -6,7 +6,7 @@ The commands are in `apps/web` (`pnpm --filter @peni/web …`). `shelby-move` is
 
 ## In the week before
 
-1. **Production Peni.** A fresh Neon database for Peni, migrated (`pnpm --filter @peni/db migrate:deploy`). In Vercel's production settings: `DATABASE_URL`, `PENI_DEMO=0` (otherwise an empty database fills with the demo cafés), `PENI_PUBLIC_URL`, `CRON_SECRET`, `RESEND_API_KEY` with `EMAIL_FROM`, and whichever of `OPENAI_API_KEY`, `GOOGLE_CLIENT_IDS`, `APPLE_CLIENT_IDS` and the inbox settings are ready. Deploy, and check `/api/v1/health`.
+1. **Production Peni.** Its database, Vercel project and `DATABASE_URL`, `DIRECT_URL`, `PENI_DEMO=0` and `CRON_SECRET` are set up already ([environments.md](environments.md)). Still to add in Vercel's production settings: `PENI_PUBLIC_URL`, `RESEND_API_KEY` with `EMAIL_FROM`, and whichever of `OPENAI_API_KEY`, `GOOGLE_CLIENT_IDS`, `APPLE_CLIENT_IDS` and the inbox settings are ready. Deploy, and check `/api/v1/health`.
 2. **Rehearse on real data.** Make a Neon branch of Shelby's production database, and a throwaway Peni database. Run:
 
    ```sh

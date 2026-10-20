@@ -1,3 +1,5 @@
 {
+  "regions": ["fra1"],
+  "buildCommand": "pnpm --filter @peni/db migrate:deploy && next build",
   "crons": [{ "path": "/api/v1/cron/daily", "schedule": "0 5 * * *" }]
 }
