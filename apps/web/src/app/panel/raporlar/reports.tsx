@@ -8,7 +8,9 @@ import { Button, Notice } from "../../kasa/ui";
 import { addDaysTo, formatDay, formatMonth, rangeLabel, shiftMonth } from "../amounts";
 import { AskedReportView } from "../asked-report";
 import { SAVED_REPORTS_EVENT, useAssistant } from "../assistant";
-import { axisLabel, change, Chart, compactTL, signedPercent, type ChartColors } from "../chart";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Line, XAxis, YAxis } from "recharts";
+import { change, compactTL, signedPercent } from "../chart";
+import { ChartContainer, ChartLegend, ChartTooltip, useFillId, type ChartConfig } from "../ui-chart";
 import { Segmented } from "../controls";
 import { CATEGORY } from "../faturalar/bills";
 import { PanelShell, type PanelProps } from "../shell";
@@ -314,41 +316,16 @@ function pointLabel(key: string, step: SalesReportDTO["series"]["step"], lang: L
   return new Date(`${key}-15T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { month: "short", timeZone: "UTC" });
 }
 
+const AXIS = { tickLine: false, axisLine: false, tickMargin: 8 } as const;
+
 function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang }) {
   const { step, points } = data.series;
-  const option = useCallback(
-    (c: ChartColors) => ({
-      grid: { left: 56, right: 8, top: 36, bottom: 28 },
-      tooltip: { valueFormatter: (v: unknown) => (typeof v === "number" ? lira(v * 100) : "—") },
-      legend: { right: 0, top: 0, textStyle: axisLabel(c), itemWidth: 12, itemHeight: 8, data: [t("rpThisPeriod"), t("rpPrevPeriod")] },
-      xAxis: {
-        type: "category",
-        data: points.map((p) => pointLabel(p.key, step, lang)),
-        axisLine: { lineStyle: { color: c.line } },
-        axisTick: { show: false },
-        axisLabel: { ...axisLabel(c), hideOverlap: true },
-      },
-      yAxis: { type: "value", splitLine: { lineStyle: { color: c.line } }, axisLabel: { ...axisLabel(c), formatter: (v: number) => compactTL(v * 100, lang) } },
-      series: [
-        {
-          name: t("rpThisPeriod"),
-          type: "bar",
-          data: points.map((p) => p.salesKurus / 100),
-          barMaxWidth: 28,
-          itemStyle: { color: c.ink, borderRadius: [3, 3, 0, 0] },
-        },
-        {
-          name: t("rpPrevPeriod"),
-          type: "line",
-          data: points.map((p) => (p.previousKurus === null ? null : p.previousKurus / 100)),
-          symbol: "none",
-          itemStyle: { color: c.mark },
-          lineStyle: { color: c.mark, width: 2, type: [4, 4] },
-        },
-      ],
-    }),
-    [data, lang],
-  );
+  const fillId = useFillId("sales");
+  const config = {
+    sales: { label: t("rpThisPeriod"), color: "var(--ink)" },
+    previous: { label: t("rpPrevPeriod"), color: "var(--mark)" },
+  } satisfies ChartConfig;
+  const rows = points.map((p) => ({ x: pointLabel(p.key, step, lang), sales: p.salesKurus / 100, previous: p.previousKurus === null ? null : p.previousKurus / 100 }));
   const total = points.reduce((s, p) => s + p.salesKurus, 0);
   return (
     <section className="flex flex-col gap-3">
@@ -356,7 +333,23 @@ function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang 
       {total === 0 && points.every((p) => !p.previousKurus) ? (
         <p className="rounded-3xl bg-panel px-5 py-6">{t("rpNoSales")}</p>
       ) : (
-        <Chart option={option} height={280} label={`${t("rpSalesChart")}: ${lira(total)}`} />
+        <ChartContainer config={config} height={280} label={`${t("rpSalesChart")}: ${lira(total)}`}>
+          <AreaChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="var(--color-sales)" stopOpacity={0.28} />
+                <stop offset="95%" stopColor="var(--color-sales)" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} />
+            <XAxis dataKey="x" {...AXIS} minTickGap={24} />
+            <YAxis {...AXIS} width={52} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
+            <ChartTooltip config={config} format={(v) => lira(v * 100)} />
+            <ChartLegend config={config} dashed={["previous"]} />
+            <Area dataKey="previous" type="monotone" stroke="var(--color-previous)" strokeWidth={2} strokeDasharray="4 4" fill="none" dot={false} activeDot={false} connectNulls isAnimationActive={false} />
+            <Area dataKey="sales" type="monotone" stroke="var(--color-sales)" strokeWidth={2} fill={`url(#${fillId})`} dot={false} activeDot={{ r: 4 }} isAnimationActive={false} />
+          </AreaChart>
+        </ChartContainer>
       )}
     </section>
   );
@@ -364,67 +357,46 @@ function SalesChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang 
 
 function HoursChart({ data, t }: { data: SalesReportDTO; t: T }) {
   const busiest = data.hours.reduce((a, b) => (b.orders > a.orders ? b : a), data.hours[0]!);
-  const option = useCallback(
-    (c: ChartColors) => ({
-      grid: { left: 40, right: 8, top: 12, bottom: 28 },
-      xAxis: {
-        type: "category",
-        data: data.hours.map((h) => h.hour),
-        axisLine: { lineStyle: { color: c.line } },
-        axisTick: { show: false },
-        axisLabel: axisLabel(c),
-      },
-      yAxis: { type: "value", splitLine: { lineStyle: { color: c.line } }, axisLabel: axisLabel(c), minInterval: 1 },
-      series: [
-        {
-          name: t("rpOrders"),
-          type: "bar",
-          data: data.hours.map((h) => ({ value: h.orders, itemStyle: { color: h.hour === busiest.hour ? c.green : c.ink } })),
-          barMaxWidth: 22,
-          itemStyle: { borderRadius: [3, 3, 0, 0] },
-        },
-      ],
-    }),
-    [data],
-  );
+  const config = { orders: { label: t("rpOrders"), color: "var(--ink)" } } satisfies ChartConfig;
   return (
     <section className="flex flex-col gap-3">
       <Heading title={t("rpByHour")} help={t("rpByHourHelp")} section="hours" />
-      <Chart option={option} height={220} label={`${t("rpByHour")}: ${busiest.hour}:00`} />
+      <ChartContainer config={config} height={220} label={`${t("rpByHour")}: ${busiest.hour}:00`}>
+        <BarChart data={data.hours.map((h) => ({ x: h.hour, orders: h.orders }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="x" {...AXIS} />
+          <YAxis {...AXIS} width={36} allowDecimals={false} />
+          <ChartTooltip config={config} format={(v) => String(v)} />
+          <Bar dataKey="orders" radius={[4, 4, 0, 0]} maxBarSize={22} isAnimationActive={false}>
+            {data.hours.map((h) => (
+              <Cell key={h.hour} fill={h.hour === busiest.hour ? "var(--green)" : "var(--color-orders)"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ChartContainer>
     </section>
   );
 }
 
 function WeekdayChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang }) {
   const best = data.weekdays.reduce((a, b) => (b.avgKurus > a.avgKurus ? b : a), data.weekdays[0]!);
-  const option = useCallback(
-    (c: ChartColors) => ({
-      grid: { left: 56, right: 8, top: 12, bottom: 28 },
-      tooltip: { valueFormatter: (v: unknown) => (typeof v === "number" ? lira(v * 100) : "—") },
-      xAxis: {
-        type: "category",
-        data: data.weekdays.map((w) => t(`wd_${w.weekday}` as TextKey)),
-        axisLine: { lineStyle: { color: c.line } },
-        axisTick: { show: false },
-        axisLabel: axisLabel(c),
-      },
-      yAxis: { type: "value", splitLine: { lineStyle: { color: c.line } }, axisLabel: { ...axisLabel(c), formatter: (v: number) => compactTL(v * 100, lang) } },
-      series: [
-        {
-          name: t("rpSales"),
-          type: "bar",
-          data: data.weekdays.map((w) => ({ value: w.avgKurus / 100, itemStyle: { color: w.weekday === best.weekday ? c.green : c.ink } })),
-          barMaxWidth: 28,
-          itemStyle: { borderRadius: [3, 3, 0, 0] },
-        },
-      ],
-    }),
-    [data, lang],
-  );
+  const config = { sales: { label: t("rpSales"), color: "var(--ink)" } } satisfies ChartConfig;
   return (
     <section className="flex flex-col gap-3">
       <Heading title={t("rpByWeekday")} help={t("rpByWeekdayHelp")} section="weekdays" />
-      <Chart option={option} height={220} label={`${t("rpByWeekday")}: ${t(`wd_${best.weekday}` as TextKey)}`} />
+      <ChartContainer config={config} height={220} label={`${t("rpByWeekday")}: ${t(`wd_${best.weekday}` as TextKey)}`}>
+        <BarChart data={data.weekdays.map((w) => ({ x: t(`wd_${w.weekday}` as TextKey), sales: w.avgKurus / 100 }))} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="x" {...AXIS} />
+          <YAxis {...AXIS} width={52} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
+          <ChartTooltip config={config} format={(v) => lira(v * 100)} />
+          <Bar dataKey="sales" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false}>
+            {data.weekdays.map((w) => (
+              <Cell key={w.weekday} fill={w.weekday === best.weekday ? "var(--green)" : "var(--color-sales)"} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ChartContainer>
     </section>
   );
 }
@@ -435,51 +407,27 @@ function MonthsChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lang
     const name = new Date(`${m}-15T12:00:00Z`).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { month: "short", timeZone: "UTC" });
     return m === thisMonth ? fill(t("rpThisMonthSoFar"), { m: name }) : name;
   };
-  const option = useCallback(
-    (c: ChartColors) => ({
-      grid: { left: 56, right: 8, top: 36, bottom: 28 },
-      tooltip: { valueFormatter: (v: unknown) => (typeof v === "number" ? lira(v * 100) : "—") },
-      legend: { right: 0, top: 0, textStyle: axisLabel(c), itemWidth: 12, itemHeight: 8 },
-      xAxis: {
-        type: "category",
-        data: data.months.map((m) => label(m.month)),
-        axisLine: { lineStyle: { color: c.line } },
-        axisTick: { show: false },
-        axisLabel: axisLabel(c),
-      },
-      yAxis: { type: "value", splitLine: { lineStyle: { color: c.line } }, axisLabel: { ...axisLabel(c), formatter: (v: number) => compactTL(v * 100, lang) } },
-      series: [
-        {
-          name: t("rpSales"),
-          type: "bar",
-          data: data.months.map((m) => m.salesKurus / 100),
-          barMaxWidth: 28,
-          itemStyle: { color: c.ink, borderRadius: [3, 3, 0, 0] },
-        },
-        {
-          name: t("rpExpenses"),
-          type: "bar",
-          data: data.months.map((m) => m.expensesKurus / 100),
-          barMaxWidth: 28,
-          itemStyle: { color: c.mark, borderRadius: [3, 3, 0, 0] },
-        },
-        {
-          name: t("rpLeftOver"),
-          type: "line",
-          data: data.months.map((m) => m.profitKurus / 100),
-          symbol: "circle",
-          symbolSize: 7,
-          itemStyle: { color: c.green },
-          lineStyle: { color: c.green, width: 2 },
-        },
-      ],
-    }),
-    [data, lang],
-  );
+  const config = {
+    sales: { label: t("rpSales"), color: "var(--ink)" },
+    expenses: { label: t("rpExpenses"), color: "var(--mark)" },
+    left: { label: t("rpLeftOver"), color: "var(--green)" },
+  } satisfies ChartConfig;
+  const rows = data.months.map((m) => ({ x: label(m.month), sales: m.salesKurus / 100, expenses: m.expensesKurus / 100, left: m.profitKurus / 100 }));
   return (
     <section className="flex flex-col gap-3">
       <Heading title={t("rpMonths")} help={t("rpMonthsHelp")} section="months" />
-      <Chart option={option} height={260} label={data.months.map((m) => `${formatMonth(m.month, lang)}: ${lira(m.profitKurus)}`).join(", ")} />
+      <ChartContainer config={config} height={260} label={data.months.map((m) => `${formatMonth(m.month, lang)}: ${lira(m.profitKurus)}`).join(", ")}>
+        <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} />
+          <XAxis dataKey="x" {...AXIS} />
+          <YAxis {...AXIS} width={52} tickFormatter={(v: number) => compactTL(v * 100, lang)} />
+          <ChartTooltip config={config} format={(v) => lira(v * 100)} />
+          <ChartLegend config={config} />
+          <Bar dataKey="sales" fill="var(--color-sales)" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+          <Bar dataKey="expenses" fill="var(--color-expenses)" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+          <Line dataKey="left" type="monotone" stroke="var(--color-left)" strokeWidth={2} dot={{ r: 3.5, fill: "var(--color-left)", strokeWidth: 0 }} isAnimationActive={false} />
+        </ComposedChart>
+      </ChartContainer>
     </section>
   );
 }
