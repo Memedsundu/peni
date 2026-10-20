@@ -1,28 +1,37 @@
 import type { ForecastDTO, ForecastEventDTO, OrderSuggestionDTO, StaffingDTO, WatchDTO, WatchPriceDTO, WatchUnusualDTO } from "@peni/api";
 import {
   billSpikes,
+  cashGapLimit,
   costOn,
   forecast,
   FORECAST_DAYS,
   FORECAST_HISTORY_DAYS,
+  judge,
+  learnedOrder,
+  letGoCounts,
   localDateKey,
   localHour,
   marginPct,
   MILLI,
   orderAmount,
+  orderHabits,
+  ORDER_LEARN_DAYS,
+  ORDER_LEARN_WITHIN,
   owedByMonth,
   plusDays,
+  PRICE_CHANGE_MIN_PCT,
   priceChanges,
   priceForMargin,
   rateOn,
   recipeCost,
   STAFFING_DEFAULT_LOAD,
+  STAFFING_SPREAD_AFTER,
+  staffingBars,
   staffingHints,
   startOfLocalDay,
   twiceBills,
   unusualVoids,
   WATCH_BASELINE_WEEKS,
-  WATCH_CASH_GAP,
   WATCH_DAYS,
   WATCH_MARGIN_DROP,
   WATCH_PRICE_DAYS,
@@ -41,6 +50,8 @@ import {
   type StaffStore,
   type StaffingSlot,
   type StockStore,
+  type WatchDismissal,
+  type WatchKind,
   type WatchStore,
 } from "@peni/core";
 import type { DebtService } from "./debts";
@@ -56,6 +67,16 @@ const EVERYDAY: BillCategory[] = ["ingredients", "supplies", "services", "other"
 /** Pay for a month's hours goes out on this day of the next month. */
 export const PAY_DAY = 5;
 const UNIT_WORD = { kg: "kg", l: "L", adet: "adet" } as const;
+
+/** A finding with what kind it is and whom it is about, and whether the owner's earlier "Gördüm"s keep it out. */
+interface Found<T> {
+  dto: T;
+  kind: WatchKind;
+  subject: string | null;
+  quiet: boolean;
+}
+
+type LetGo = ReturnType<typeof letGoCounts>;
 
 export interface WatchDeps {
   store: WatchStore;
@@ -77,8 +98,10 @@ export interface WatchDeps {
  * Gözcü (plan piece 31). Five ways of keeping an eye out, each from the café's own records:
  * prices bills brought and what they did to margins (C12), activity out of the ordinary
  * (C13), the next 30 days of money (C14), what to order (C15), and hours in the week's plan
- * that look short or over-staffed (C16). No assistant is needed. Prices and unusual findings
- * can be let go ("Gördüm") and stay hidden for everyone.
+ * that look short or over-staffed (C16). No assistant is needed. What counts as unusual comes
+ * from this café's own numbers. Prices and unusual findings can be let go ("Gördüm") and stay
+ * hidden for everyone; a kind let go again and again for one supplier, person or item is shown
+ * less, and says so.
  */
 export class WatchService {
   constructor(private readonly d: WatchDeps) {}
@@ -88,34 +111,36 @@ export class WatchService {
     const p = ctx.permissions;
     const cafeId = ctx.cafe.id;
     const [today, seen] = await Promise.all([this.today(cafeId), this.d.store.listDismissed(cafeId)]);
-    const hidden = new Set(seen.map((s) => s.key));
-    const [prices, unusual, forecastDto, orders, staffing] = await Promise.all([
-      this.prices(cafeId, today),
-      this.unusual(cafeId, today),
+    const [found, forecastDto, orders, staffing] = await Promise.all([
+      this.findings(cafeId, today, seen),
       p.has("cash.manage") && p.has("debts.view") ? this.forecast(ctx, today) : null,
       p.has("stock.view") ? this.orderSuggestions(ctx, today) : null,
       p.has("shifts.view") ? this.staffing(cafeId, today) : null,
     ]);
     return {
       today,
-      prices: prices.filter((x) => !hidden.has(x.key)),
-      unusual: unusual.filter((x) => !hidden.has(x.key)),
-      seen: [...prices, ...unusual].filter((x) => hidden.has(x.key)).length,
+      prices: found.prices.filter((x) => x.open).map((x) => x.dto),
+      unusual: found.unusual.filter((x) => x.open).map((x) => x.dto),
+      seen: [...found.prices, ...found.unusual].filter((x) => x.hidden).length,
+      quiet: [...found.prices, ...found.unusual].filter((x) => x.quiet && !x.hidden).length,
       forecast: forecastDto,
       orders,
       staffing,
     };
   }
 
-  /** "Gördüm": a price or an unusual finding is let go for everyone. */
+  /** "Gördüm": a price or an unusual finding is let go for everyone, and remembered by kind and by whom it was about. */
   async dismiss(ctx: StaffContext, input: { key: string; note?: string | null }): Promise<WatchDTO> {
     if (!ctx.permissions.has("reports.view")) throw new AppError("FORBIDDEN", "Your role can't see Gözcü", 403);
     const today = await this.today(ctx.cafe.id);
-    const [prices, unusual] = await Promise.all([this.prices(ctx.cafe.id, today), this.unusual(ctx.cafe.id, today)]);
-    if (![...prices, ...unusual].some((x) => x.key === input.key)) throw new AppError("WATCH_KEY", "No such finding now", 404);
+    const found = await this.findings(ctx.cafe.id, today, await this.d.store.listDismissed(ctx.cafe.id));
+    const it = [...found.prices, ...found.unusual].find((x) => x.dto.key === input.key);
+    if (!it) throw new AppError("WATCH_KEY", "No such finding now", 404);
     await this.d.store.dismiss({
       cafeId: ctx.cafe.id,
       key: input.key,
+      kind: it.kind,
+      subject: it.subject,
       memberId: ctx.member.id,
       note: input.note?.trim().slice(0, 200) || null,
       at: this.d.now(),
@@ -130,11 +155,10 @@ export class WatchService {
   ): Promise<{ count: number; names: string[]; short: { day: string; balanceKurus: number } | null }> {
     if (!permissions.has("reports.view")) return { count: 0, names: [], short: null };
     const today = await this.today(cafeId);
-    const [seen, prices, unusual] = await Promise.all([this.d.store.listDismissed(cafeId), this.prices(cafeId, today), this.unusual(cafeId, today)]);
-    const hidden = new Set(seen.map((s) => s.key));
+    const { prices, unusual } = await this.findings(cafeId, today, await this.d.store.listDismissed(cafeId));
     const open = [
-      ...unusual.filter((x) => !hidden.has(x.key)).map((x) => x.name ?? x.kind),
-      ...prices.filter((x) => !hidden.has(x.key) && x.products.some((p) => p.suggestedKurus !== null)).map((x) => x.item),
+      ...unusual.filter((x) => x.open).map((x) => x.dto.name ?? x.dto.kind),
+      ...prices.filter((x) => x.open && x.dto.products.some((p) => p.suggestedKurus !== null)).map((x) => x.dto.item),
     ];
     let short: { day: string; balanceKurus: number } | null = null;
     if (permissions.has("cash.manage") && permissions.has("debts.view")) {
@@ -145,9 +169,21 @@ export class WatchService {
     return { count: open.length, names: open, short };
   }
 
+  /**
+   * Prices and unusual findings, each marked: hidden (someone said "Gördüm"), quiet (left out
+   * because such ones keep being let go) or open.
+   */
+  private async findings(cafeId: string, today: string, seen: WatchDismissal[]) {
+    const hidden = new Set(seen.map((s) => s.key));
+    const letGo = letGoCounts(seen, this.d.now());
+    const [prices, unusual] = await Promise.all([this.prices(cafeId, today, letGo), this.unusual(cafeId, today, letGo)]);
+    const mark = <T extends { key: string }>(x: Found<T>) => ({ ...x, hidden: hidden.has(x.dto.key), open: !hidden.has(x.dto.key) && !x.quiet });
+    return { prices: prices.map(mark), unusual: unusual.map(mark) };
+  }
+
   // ─────────────────────────────────────────── C12: prices
 
-  private async prices(cafeId: string, today: string): Promise<WatchPriceDTO[]> {
+  private async prices(cafeId: string, today: string, letGo: LetGo): Promise<Found<WatchPriceDTO>[]> {
     const from = plusDays(today, -WATCH_PRICE_DAYS + 1);
     const [bills, items, recipes, menu, suppliers] = await Promise.all([
       this.d.bills.listBills(cafeId, { from: plusDays(today, -365), to: today }),
@@ -188,7 +224,9 @@ export class WatchService {
           ];
         })
         .sort((a, b) => b.marginBeforePct - b.marginNowPct - (a.marginBeforePct - a.marginNowPct));
-      return {
+      // An item whose price findings keep being let go: only moves of twice the usual size.
+      const v = judge(Math.abs(c.changePct), PRICE_CHANGE_MIN_PCT, letGo("price", c.itemId));
+      const dto: WatchPriceDTO = {
         key: `price:${c.itemId}:${c.billId}`,
         itemId: c.itemId,
         item: item.name,
@@ -199,14 +237,16 @@ export class WatchService {
         billId: c.billId,
         date: c.date,
         supplier: c.supplierId ? (supplierName.get(c.supplierId) ?? null) : null,
+        letGo: v.letGo,
         products,
       };
+      return { dto, kind: "price" as const, subject: c.itemId, quiet: v.quiet };
     });
   }
 
   // ─────────────────────────────────────────── C13: unusual activity
 
-  private async unusual(cafeId: string, today: string): Promise<WatchUnusualDTO[]> {
+  private async unusual(cafeId: string, today: string, letGo: LetGo): Promise<Found<WatchUnusualDTO>[]> {
     const tz = (await this.d.directory.getSettings(cafeId)).timeZone;
     const from = plusDays(today, -WATCH_DAYS + 1);
     const back = plusDays(today, -WATCH_DAYS - WATCH_BASELINE_WEEKS * 7);
@@ -218,71 +258,110 @@ export class WatchService {
     ]);
     const supplierName = new Map(suppliers.map((s) => [s.id, s.name]));
     const billById = new Map(bills.map((b) => [b.id, b]));
-    const out: WatchUnusualDTO[] = [];
+    const out: Found<WatchUnusualDTO>[] = [];
 
-    for (const s of sessions)
-      for (const count of [s.opening, s.closing]) {
-        if (!count || count.expectedKurus === null || Math.abs(count.differenceKurus) < WATCH_CASH_GAP) continue;
-        const day = localDateKey(count.at, tz);
-        if (day < from) continue;
-        out.push({
-          key: `cash:${s.id}:${count === s.opening ? "open" : "close"}`,
+    // Drawer counts: an opening against the café's earlier openings, a closing against its closings.
+    const counts = sessions.flatMap((s) =>
+      (["open", "close"] as const).flatMap((when) => {
+        const count = when === "open" ? s.opening : s.closing;
+        return count && count.expectedKurus !== null ? [{ session: s.id, when, count, day: localDateKey(count.at, tz) }] : [];
+      }),
+    );
+    const limit = {
+      open: cashGapLimit(counts.filter((c) => c.when === "open" && c.day < from).map((c) => c.count.differenceKurus)),
+      close: cashGapLimit(counts.filter((c) => c.when === "close" && c.day < from).map((c) => c.count.differenceKurus)),
+    };
+    for (const { session, when, count, day } of counts) {
+      if (day < from) continue;
+      const v = judge(Math.abs(count.differenceKurus), limit[when], letGo("cashGap", count.byMemberId));
+      if (!v.show && !v.quiet) continue;
+      out.push({
+        dto: {
+          key: `cash:${session}:${when}`,
           kind: "cashGap",
           day,
           amountKurus: count.differenceKurus,
           usual: null,
           count: null,
+          limit: v.limit,
+          letGo: v.letGo,
           name: (await this.names([count.byMemberId])).get(count.byMemberId) ?? null,
           note: count.note,
           href: "/panel/nakit",
-        });
-      }
+        },
+        kind: "cashGap",
+        subject: count.byMemberId,
+        quiet: v.quiet,
+      });
+    }
 
-    const voids = unusualVoids(orders, this.d.now());
+    const voids = unusualVoids(orders, this.d.now(), (m) => letGo("voids", m));
     const voidNames = await this.names(voids.map((v) => v.memberId));
     for (const v of voids)
       out.push({
-        key: `voids:${v.memberId}:${weekStartOf(today)}`,
+        dto: {
+          key: `voids:${v.memberId}:${weekStartOf(today)}`,
+          kind: "voids",
+          day: today,
+          amountKurus: null,
+          usual: v.usual,
+          count: v.count,
+          limit: v.limit,
+          letGo: v.letGo,
+          name: voidNames.get(v.memberId) ?? null,
+          note: null,
+          href: "/kasa",
+        },
         kind: "voids",
-        day: today,
-        amountKurus: null,
-        usual: v.usual,
-        count: v.count,
-        name: voidNames.get(v.memberId) ?? null,
-        note: null,
-        href: "/kasa",
+        subject: v.memberId,
+        quiet: v.quiet,
       });
 
-    for (const s of billSpikes(bills, from)) {
+    for (const s of billSpikes(bills, from, (id) => letGo("billSpike", id))) {
       const b = billById.get(s.billId)!;
       out.push({
-        key: `spike:${b.id}`,
+        dto: {
+          key: `spike:${b.id}`,
+          kind: "billSpike",
+          day: b.date,
+          amountKurus: b.totalKurus,
+          usual: s.usualKurus,
+          count: null,
+          limit: s.limitKurus,
+          letGo: s.letGo,
+          name: supplierName.get(s.supplierId) ?? null,
+          note: null,
+          href: `/panel/faturalar?fatura=${encodeURIComponent(b.id)}`,
+        },
         kind: "billSpike",
-        day: b.date,
-        amountKurus: b.totalKurus,
-        usual: s.usualKurus,
-        count: null,
-        name: b.supplierId ? (supplierName.get(b.supplierId) ?? null) : null,
-        note: null,
-        href: `/panel/faturalar?fatura=${encodeURIComponent(b.id)}`,
+        subject: s.supplierId,
+        quiet: s.quiet,
       });
     }
 
-    for (const [a, b] of twiceBills(bills, from)) {
+    for (const t of twiceBills(bills, from, (id) => letGo("billTwice", id))) {
+      const [a, b] = t.billIds;
       const second = billById.get(b)!;
       out.push({
-        key: `twice:${a}:${b}`,
+        dto: {
+          key: `twice:${a}:${b}`,
+          kind: "billTwice",
+          day: second.date,
+          amountKurus: second.totalKurus,
+          usual: null,
+          count: 2,
+          limit: null,
+          letGo: t.letGo,
+          name: supplierName.get(t.supplierId) ?? null,
+          note: null,
+          href: `/panel/faturalar?fatura=${encodeURIComponent(b)}`,
+        },
         kind: "billTwice",
-        day: second.date,
-        amountKurus: second.totalKurus,
-        usual: null,
-        count: 2,
-        name: second.supplierId ? (supplierName.get(second.supplierId) ?? null) : null,
-        note: null,
-        href: `/panel/faturalar?fatura=${encodeURIComponent(b)}`,
+        subject: t.supplierId,
+        quiet: t.quiet,
       });
     }
-    return out.sort((x, y) => y.day.localeCompare(x.day));
+    return out.sort((x, y) => y.dto.day.localeCompare(x.dto.day));
   }
 
   // ─────────────────────────────────────────── C14: the next 30 days
@@ -394,6 +473,12 @@ export class WatchService {
     ]);
     const used = new Map<string, number>();
     for (const m of moves) used.set(m.itemId, (used.get(m.itemId) ?? 0) - m.changeMilli);
+    // How this café answered earlier suggestions: the bills that followed them.
+    const suggested = await this.d.store.listSuggestions(cafeId, plusDays(today, -ORDER_LEARN_DAYS - ORDER_LEARN_WITHIN));
+    const bought = bills
+      .filter((b) => !b.voidedAt)
+      .flatMap((b) => b.lines.flatMap((l) => (l.itemId && l.qtyMilli ? [{ itemId: l.itemId, date: b.date, qtyMilli: l.qtyMilli }] : [])));
+    const habits = orderHabits(suggested, bought, today);
     // Who it usually comes from: the supplier on its newest bill.
     const from = new Map<string, string | null>();
     for (const b of [...bills].filter((x) => !x.voidedAt).sort((a, b) => a.date.localeCompare(b.date)))
@@ -406,6 +491,7 @@ export class WatchService {
       if (!amount) continue;
       const supplierId = from.get(item.id) ?? null;
       const lines = groups.get(supplierId) ?? [];
+      const habit = habits.get(item.id);
       lines.push({
         itemId: item.id,
         name: item.name,
@@ -413,10 +499,18 @@ export class WatchService {
         qtyMilli: item.qtyMilli,
         usedPerDayMilli,
         daysLeft: amount.daysLeft,
-        orderMilli: amount.orderMilli,
+        orderMilli: learnedOrder(amount.orderMilli, habit),
+        ruleMilli: amount.orderMilli,
+        habit: habit ? { times: habit.times, pct: Math.round(habit.ratio * 100) } : null,
       });
       groups.set(supplierId, lines);
     }
+    // Remembered as the rule said it, so the next bills can be compared with it.
+    await this.d.store.noteSuggestions(
+      cafeId,
+      today,
+      [...groups.values()].flat().map((l) => ({ itemId: l.itemId, orderMilli: l.ruleMilli })),
+    );
     return [...groups.entries()]
       .map(([supplierId, lines]) => {
         const s = supplierId ? supplierById.get(supplierId) : undefined;
@@ -461,6 +555,8 @@ export class WatchService {
     let orderSum = 0;
     let personHours = 0;
     const byWeekdayHour = new Map<string, number>();
+    // Orders and people in each weekday-hour that had someone on, for this café's own busy and quiet.
+    const staffed = new Map<string, { orders: number; people: number }>();
     for (const [k, n] of counts) {
       const [day, h] = [k.slice(0, 10), Number(k.slice(11))];
       byWeekdayHour.set(`${weekdayOf(day)}:${h}`, (byWeekdayHour.get(`${weekdayOf(day)}:${h}`) ?? 0) + n);
@@ -468,10 +564,14 @@ export class WatchService {
       if (p > 0) {
         orderSum += n;
         personHours += p;
+        const row = staffed.get(`${weekdayOf(day)}:${h}`) ?? { orders: 0, people: 0 };
+        staffed.set(`${weekdayOf(day)}:${h}`, { orders: row.orders + n, people: row.people + p });
       }
     }
     const fromHistory = personHours >= 20;
     const usualLoad = fromHistory ? Math.round((orderSum / personHours) * 10) / 10 : STAFFING_DEFAULT_LOAD;
+    const pastLoads = fromHistory ? [...staffed.values()].map((x) => x.orders / x.people) : [];
+    const bars = staffingBars(pastLoads, usualLoad);
     const weeks = FORECAST_HISTORY_DAYS / 7;
     const slots: StaffingSlot[] = [];
     for (let i = 0; i < 7; i++) {
@@ -488,7 +588,9 @@ export class WatchService {
       week,
       usualLoad,
       fromHistory,
-      hints: staffingHints(slots, usualLoad).map((h) => ({
+      ...bars,
+      barsFromHistory: pastLoads.length >= STAFFING_SPREAD_AFTER,
+      hints: staffingHints(slots, bars).map((h) => ({
         kind: h.kind,
         day: dayOf(h.weekday),
         fromHour: h.fromHour,

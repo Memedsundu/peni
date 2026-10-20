@@ -2,6 +2,7 @@
 
 import { PeniApiError, type ForecastDTO, type OrderSuggestionDTO, type StaffingDTO, type WatchDTO, type WatchPriceDTO, type WatchUnusualDTO } from "@peni/api";
 import { formatTL } from "@peni/brand/format";
+import { PRICE_CHANGE_MIN_PCT, WATCH_LEARN_RAISE, WATCH_TWICE_DAYS } from "@peni/core";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice } from "../../kasa/ui";
@@ -24,7 +25,8 @@ const longDay = (day: string, lang: Lang) =>
 /**
  * Gözcü (plan piece 31): prices bills changed (C12), anything out of the ordinary (C13), the
  * next 30 days of money (C14), what to order (C15) and the week's staffing (C16), each from
- * the café's own records. "Gördüm" lets a price or a finding go for everyone.
+ * the café's own records. "Gördüm" lets a price or a finding go for everyone; a kind let go
+ * again and again is shown less, and the card says so.
  */
 export function Watch({ cafeSlug }: { cafeSlug: string | null }) {
   return (
@@ -86,6 +88,7 @@ function WatchPage({ cafe, t, lang, signedOut }: PanelProps) {
               </ul>
             )}
             {data.seen > 0 && <p className="text-sm text-muted">{fill(t("wSeenCount"), { n: data.seen })}</p>}
+            {data.quiet > 0 && <p className="text-sm text-muted">{fill(t("wQuietCount"), { n: data.quiet })}</p>}
           </Section>
 
           {data.orders && <Orders orders={data.orders} t={t} lang={lang} />}
@@ -131,25 +134,33 @@ function SeenButton({ t, busy, onSeen }: { t: T; busy: boolean; onSeen: () => vo
 function Unusual({ u, t, lang, href, busy, onSeen }: { u: WatchUnusualDTO; t: T; lang: Lang; href: (p: string) => string; busy: boolean; onSeen: () => void }) {
   const day = formatDay(u.day, lang);
   const amount = u.amountKurus === null ? "" : lira(Math.abs(u.amountKurus));
+  const num = (n: number) => n.toLocaleString(lang === "tr" ? "tr-TR" : "en-GB");
   const words =
     u.kind === "cashGap"
       ? {
           title: fill(t("wCashGap"), { amount: `${u.amountKurus! < 0 ? "−" : "+"}${amount}` }),
-          detail: [fill(t("wCashGapBy"), { day, name: u.name ?? "?" }), u.note].filter(Boolean).join(" · "),
+          detail: [fill(t("wCashGapBy"), { day, name: u.name ?? "?" }), u.note, u.limit !== null && fill(t("wCashGapLimit"), { limit: lira(u.limit) })]
+            .filter(Boolean)
+            .join(" · "),
         }
       : u.kind === "voids"
         ? {
             title: fill(t("wVoids"), { name: u.name ?? "?", n: u.count ?? 0 }),
-            detail: fill(t("wVoidsUsual"), { usual: (u.usual ?? 0).toLocaleString(lang === "tr" ? "tr-TR" : "en-GB") }),
+            detail: fill(t("wVoidsUsual"), { usual: num(u.usual ?? 0), limit: num(u.limit ?? 0) }),
           }
         : u.kind === "billSpike"
-          ? { title: fill(t("wSpike"), { name: u.name ?? "?", amount }), detail: fill(t("wSpikeUsual"), { day, usual: lira(u.usual ?? 0) }) }
+          ? { title: fill(t("wSpike"), { name: u.name ?? "?", amount }), detail: fill(t("wSpikeUsual"), { day, usual: lira(u.usual ?? 0), limit: lira(u.limit ?? 0) }) }
           : { title: fill(t("wTwice"), { name: u.name ?? "?", amount }), detail: fill(t("wTwiceHelp"), { day }) };
+  // Why it is shown less now: the owner kept letting such ones go.
+  const letGo =
+    u.letGo > 0 &&
+    (u.kind === "billTwice" ? fill(t("wLetGoTwice"), { n: u.letGo, days: WATCH_TWICE_DAYS / WATCH_LEARN_RAISE }) : fill(t("wLetGo"), { n: u.letGo }));
   return (
     <Card tone={u.kind === "cashGap" || u.kind === "billTwice" ? "red" : "line"}>
       <div className="flex flex-col gap-1">
         <p className="text-lg font-semibold">{words.title}</p>
         <p className="text-sm leading-normal text-muted">{words.detail}</p>
+        {letGo && <p className="text-sm leading-normal text-muted">{letGo}</p>}
       </div>
       <div className="flex shrink-0 gap-2">
         <a href={href(u.href)} className="inline-flex min-h-11 items-center rounded-full border border-line px-4 text-sm font-semibold">
@@ -176,6 +187,7 @@ function Price({ p, t, lang, href, busy, onSeen }: { p: WatchPriceDTO; t: T; lan
         <a href={href(`/panel/faturalar?fatura=${encodeURIComponent(p.billId)}`)} className="self-start text-sm text-muted underline underline-offset-4">
           {fill(t("wPriceFrom"), { supplier: p.supplier ?? "—", day: formatDay(p.date, lang) })}
         </a>
+        {p.letGo > 0 && <p className="text-sm text-muted">{fill(t("wLetGoPrice"), { n: p.letGo, pct: PRICE_CHANGE_MIN_PCT * WATCH_LEARN_RAISE })}</p>}
         {p.products.length === 0 ? (
           <p className="text-sm text-muted">{t("wNoProducts")}</p>
         ) : (
@@ -351,6 +363,19 @@ function Orders({ orders, t, lang }: { orders: OrderSuggestionDTO[]; t: T; lang:
                     </tbody>
                   </table>
                 </div>
+                {o.lines
+                  .filter((l) => l.habit)
+                  .map((l) => (
+                    <p key={l.itemId} className="text-sm leading-normal text-muted">
+                      {fill(t("wHabit"), {
+                        name: l.name,
+                        rule: `${qty(l.ruleMilli, lang)} ${unitWord(l.unit, lang)}`,
+                        times: l.habit!.times,
+                        x: (l.habit!.pct / 100).toLocaleString(lang === "tr" ? "tr-TR" : "en-GB", { maximumFractionDigits: 1 }),
+                        order: `${qty(l.orderMilli, lang)} ${unitWord(l.unit, lang)}`,
+                      })}
+                    </p>
+                  ))}
                 <p className="rounded-2xl bg-panel px-4 py-3 text-sm leading-normal">{o.message}</p>
                 <div className="flex flex-wrap gap-2">
                   <Button size="sm" onClick={() => copy(key, o.message)}>
@@ -378,9 +403,14 @@ function Orders({ orders, t, lang }: { orders: OrderSuggestionDTO[]; t: T; lang:
 
 function Staffing({ s, t, lang, href }: { s: StaffingDTO; t: T; lang: Lang; href: (p: string) => string }) {
   const week = rangeLabel({ from: s.week, through: new Date(Date.parse(`${s.week}T12:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10) }, lang);
-  const load = s.usualLoad.toLocaleString(lang === "tr" ? "tr-TR" : "en-GB");
+  const num = (n: number) => n.toLocaleString(lang === "tr" ? "tr-TR" : "en-GB");
+  const note = !s.fromHistory ? ` ${t("wStaffingDefault")}` : !s.barsFromHistory ? ` ${t("wStaffingBarsDefault")}` : "";
   return (
-    <Section id="vardiya" title={t("wStaffing")} help={`${fill(t("wStaffingHelp"), { week, load })}${s.fromHistory ? "" : ` ${t("wStaffingDefault")}`}`}>
+    <Section
+      id="vardiya"
+      title={t("wStaffing")}
+      help={`${fill(t("wStaffingHelp"), { week, load: num(s.usualLoad), busy: num(s.busyAt), quiet: num(s.quietAt) })}${note}`}
+    >
       {s.hints.length === 0 ? (
         <p className="text-muted">{t("wStaffingNone")}</p>
       ) : (
