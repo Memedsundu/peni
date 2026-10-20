@@ -143,7 +143,7 @@ export class Ledger {
         if (balance + delta < 0) {
           throw new PeniError(
             "INSUFFICIENT_BALANCE",
-            `${accountId} has ${balance} peni, needs ${-delta}`,
+            `${accountId} has ${balance} pennies, needs ${-delta}`,
           );
         }
       }

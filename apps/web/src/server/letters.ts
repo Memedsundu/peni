@@ -490,6 +490,6 @@ ${b.points.map((p) => `<p style="${font};font-size:16px;line-height:1.55"><stron
         ? `\n<p><a href="${escape(link)}" style="display:inline-block;padding:12px 20px;border-radius:999px;background:#111;color:#fff;${font};text-decoration:none">Mektubu aç</a></p>`
         : ""
     }
-<p style="${font};font-size:13px;color:#888">Rakamlar Peni'nin kayıtlarından, yazı asistandan. Bu e-postayı Bugün sayfasından kapatabilirsin.</p>`,
+<p style="${font};font-size:13px;color:#888">Rakamlar Penny'nin kayıtlarından, yazı asistandan. Bu e-postayı Bugün sayfasından kapatabilirsin.</p>`,
   };
 }

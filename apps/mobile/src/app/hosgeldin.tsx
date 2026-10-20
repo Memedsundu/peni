@@ -14,7 +14,7 @@ export default function Welcome() {
     <Screen back={false}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <Txt serif size={30}>
-          Peni
+          Penny
         </Txt>
         <Btn kind="bare" size="sm" onPress={toggleLang} accessibilityLabel={lang === "tr" ? "English" : "Türkçe"}>
           {lang === "tr" ? "EN" : "TR"}

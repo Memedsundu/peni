@@ -28,7 +28,7 @@ export function reportMarkdown(report: MoveReport, rows: CheckRow[], meta: { whe
     "",
     "## Totals",
     "",
-    "| | | Shelby | Peni | |",
+    "| | | Shelby | Penny | |",
     "|---|---|---:|---:|---|",
     ...rows.map(
       (r) => `| ${r.group} | ${r.label} | ${value(r.unit, r.shelby)} | ${value(r.unit, r.peni)} | ${r.ok ? (r.shelby === r.peni ? "✓" : "✓ rounding") : "✗"} |`,

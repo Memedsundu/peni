@@ -101,7 +101,7 @@ function CafeCard({ cafe, onPress }: { cafe: CafeSummaryDTO; onPress: () => void
   const peni = cafe.balancePeni ?? 0;
   const asGoods = goods(peni, cafe.refItems);
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${cafe.name}, ${peni} peni`} style={({ pressed }) => [{ gap: 14 }, pressed && { opacity: 0.8 }]}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={`${cafe.name}, ${peni} penny`} style={({ pressed }) => [{ gap: 14 }, pressed && { opacity: 0.8 }]}>
       <Photo url={cafe.coverImageUrl} label={cafe.name} aspect={2} />
       <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
         <View style={{ flex: 1, gap: 2 }}>
@@ -112,7 +112,7 @@ function CafeCard({ cafe, onPress }: { cafe: CafeSummaryDTO; onPress: () => void
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Txt serif size={44} color={c.cafe}>
-            {peni} <Txt serif size={22} color={c.cafe}>peni</Txt>
+            {peni} <Txt serif size={22} color={c.cafe}>penny</Txt>
           </Txt>
           {asGoods ? (
             <Txt size={14} muted>

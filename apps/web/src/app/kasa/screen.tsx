@@ -12,7 +12,7 @@ import { Photo } from "./ui";
 const SLIDE_MS = 8_000;
 
 const earnText = (lang: Lang, peni: number) =>
-  lang === "tr" ? `Bu siparişten ${peni} peni kazanırsın.` : `You earn ${peni} peni with this order.`;
+  lang === "tr" ? `Bu siparişten ${peni} penny kazanırsın.` : `You earn ${peni} pennies with this order.`;
 
 /**
  * Müşteri ekranı: the order as the barista enters it, then thanks and the peni QR and

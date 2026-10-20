@@ -32,10 +32,10 @@ Owner's steps:
 
 Listing (Turkish first):
 
-- **Name:** Peni
-- **Subtitle:** Mahalle kafende peni biriktir / Collect peni at your local café
-- **Description (TR):** Kahveni aldığın kafede peni biriktir, harca, bir arkadaşına ısmarla, askıya bırak. Kasadaki QR'ı okut, peni hesabına geçsin; bir sonraki siparişte ödeme kodunu göster. Kafenin akışını takip et, masasına otur, etkinliklerine katıl. 1 peni, o kafede 1 TL değerindedir.
-- **Description (EN):** Collect peni at the café you buy your coffee from, spend them, treat a friend, leave some on the askı. Scan the QR at the till and the peni is yours; show your payment code next time. Follow the café's feed, pull up a chair at its table, join its events. 1 peni is worth ₺1 at that café.
+- **Name:** Penny
+- **Subtitle:** Mahalle kafende penny biriktir / Collect pennies at your local café
+- **Description (TR):** Kahveni aldığın kafede penny biriktir, harca, bir arkadaşına ısmarla, askıya bırak. Kasadaki QR'ı okut, penny hesabına geçsin; bir sonraki siparişte ödeme kodunu göster. Kafenin akışını takip et, masasına otur, etkinliklerine katıl. 1 penny, o kafede 1 TL değerindedir.
+- **Description (EN):** Collect pennies at the café you buy your coffee from, spend them, treat a friend, leave some on the askı. Scan the QR at the till and the pennies are yours; show your payment code next time. Follow the café's feed, pull up a chair at its table, join its events. 1 penny is worth ₺1 at that café.
 - **Category:** Food & Drink (Lifestyle second)
 
 Privacy answers (App Store "nutrition label" and Play "data safety"): collected and linked to the person, not used for tracking, not sold: name, email address, phone number (optional), user content (posts, comments), purchase history (peni earned and spent at cafés), device id (push token). Data is encrypted in transit; people can delete their account in the app and at `/hesap`.

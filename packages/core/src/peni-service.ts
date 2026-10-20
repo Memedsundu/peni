@@ -192,13 +192,13 @@ export class PeniService {
     const membership = await this.requireActiveMembership(membershipId);
     return this.ledger.atomically(async () => {
       const claim = await this.claims.getClaim(claimId);
-      if (!claim) throw new PeniError("NOT_FOUND", "No such peni code");
+      if (!claim) throw new PeniError("NOT_FOUND", "No such penny code");
       if (claim.cafeId !== membership.cafeId) throw new PeniError("CROSS_CAFE", "This code is for another café");
       const now = this.clock();
       const state = claimState(claim, now);
       if (state === "claimed") {
         if (claim.claimedByMembershipId === membership.id) return { claim, already: true };
-        throw new PeniError("CLAIM_TAKEN", "Someone already took these peni");
+        throw new PeniError("CLAIM_TAKEN", "Someone already took these pennies");
       }
       if (state === "cancelled") throw new PeniError("CLAIM_CANCELLED", "This sale was refunded");
       if (state === "expired") throw new PeniError("CLAIM_EXPIRED", "This code closed at the end of the day");
@@ -262,7 +262,7 @@ export class PeniService {
       if (again) return inflow(again, account.redemption(membership.cafeId));
       const balance = await this.ledger.balance(account.member(membership.id));
       const peni = Math.min(input.requestedPeni, input.capPeni, balance);
-      if (peni <= 0) throw new PeniError("NOTHING_TO_SPEND", "No peni can go on this order");
+      if (peni <= 0) throw new PeniError("NOTHING_TO_SPEND", "No pennies can go on this order");
       await this.ledger.post({
         cafeId: membership.cafeId,
         kind: "redeem",
@@ -400,7 +400,7 @@ export class PeniService {
       if (sentToday + input.peni > settings.dailyGiftLimitPeni) {
         throw new PeniError(
           "GIFT_LIMIT",
-          `Daily gift limit is ${settings.dailyGiftLimitPeni} peni; ${sentToday} already sent today`,
+          `Daily gift limit is ${settings.dailyGiftLimitPeni} pennies; ${sentToday} already sent today`,
         );
       }
 
@@ -915,7 +915,7 @@ const HISTORY_KIND: Partial<Record<LedgerTransaction["kind"], MemberHistoryKind>
 
 function assertPositivePeni(peni: Peni): void {
   assertWholeNumber(peni, "peni");
-  if (peni <= 0) throw new PeniError("INVALID_TRANSACTION", "Amount must be at least 1 peni");
+  if (peni <= 0) throw new PeniError("INVALID_TRANSACTION", "Amount must be at least 1 pennies");
 }
 
 /** Net amount `tx` moved into `accountId` (negative if it moved out). */

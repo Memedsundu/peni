@@ -137,7 +137,7 @@ export class OrderService {
     if (order.status !== "open") throw new AppError("ORDER_NOT_OPEN", "This order is already closed", 409);
     // The peni were worked out for these lines: they go back first.
     const paid = await this.payments.list(ctx.cafe.id, [order.id]);
-    if (peniKurusOf(paid) > 0) throw new AppError("PENI_ON_ORDER", "Give the peni back before changing the order", 409);
+    if (peniKurusOf(paid) > 0) throw new AppError("PENI_ON_ORDER", "Give the pennies back before changing the order", 409);
     if (askidaKurusOf(paid) > 0) throw new AppError("ASKIDA_ON_ORDER", "Put the askı items back before changing the order", 409);
     const lines = await this.priced(ctx, input.lines);
     const discountPercent = input.discountPercent ?? order.discountPercent;
@@ -400,7 +400,7 @@ export class OrderService {
   /** One wallet per order, so it's always clear whose peni to give back. */
   private sameWallet(payments: Payment[], membershipId: string): void {
     const wallet = peniKurusOf(payments) > 0 ? walletOf(payments) : null;
-    if (wallet && wallet !== membershipId) throw new AppError("PENI_OTHER_WALLET", "Someone else's peni are on this order", 409);
+    if (wallet && wallet !== membershipId) throw new AppError("PENI_OTHER_WALLET", "Someone else's pennies are on this order", 409);
   }
 
   private async spendCap(order: Order, payments: Payment[]): Promise<number> {
@@ -535,7 +535,7 @@ export class OrderService {
       if (await this.claims.saveClaim(claim)) return claim;
       used.add(code);
     }
-    throw new AppError("CLAIM_CODE_BUSY", "No free peni code right now", 503);
+    throw new AppError("CLAIM_CODE_BUSY", "No free penny code right now", 503);
   }
 
   private async withClaim(ctx: StaffContext, order: Order, claim: PeniClaim | null): Promise<OrderDTO> {

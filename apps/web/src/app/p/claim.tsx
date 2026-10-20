@@ -54,7 +54,7 @@ export function Shell({ lang, onLang, hue, children }: { lang: Lang; onLang: () 
     >
       <header className="flex items-center justify-between">
         <a href="/" className="font-serif text-2xl">
-          Peni
+          Penny
         </a>
         <Button kind="bare" size="sm" onClick={onLang} aria-label={lang === "tr" ? "English" : "Türkçe"}>
           {lang === "tr" ? "EN" : "TR"}
@@ -78,7 +78,7 @@ export function Amount({ peni, goods, caption }: { peni: number; goods: string |
   return (
     <div className="flex flex-col gap-1">
       <p className="font-serif text-7xl leading-none text-[var(--cafe)] tabular">
-        {peni} <span className="text-4xl">peni</span>
+        {peni} <span className="text-4xl">penny</span>
       </p>
       <p className="text-lg">
         {caption}

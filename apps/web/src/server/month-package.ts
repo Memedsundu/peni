@@ -317,7 +317,7 @@ export class MonthPackageService {
         { title: "Net (nakit+kart−iade)", kind: "tl", width: 20 },
         { title: "Z raporu", kind: "tl", width: 12 },
         { title: "Fark", kind: "tl", width: 10 },
-        { title: "Peni ile", kind: "tl", width: 12 },
+        { title: "Penny ile", kind: "tl", width: 12 },
         { title: "Askıdan", kind: "tl", width: 12 },
       ],
       rows: salesRows,
@@ -378,7 +378,7 @@ function readmeText(r: {
   const at = r.at.toLocaleString("tr-TR", { timeZone: r.tz, dateStyle: "long", timeStyle: "short" });
   return [
     `${r.cafe} · ${monthName} · mali müşavir paketi`,
-    `Peni'den ${at} tarihinde hazırlandı.${r.closed ? " Ay kapanmış; rakamlar kilitli." : " Ay henüz kapanmadı; rakamlar değişebilir."}`,
+    `Penny'den ${at} tarihinde hazırlandı.${r.closed ? " Ay kapanmış; rakamlar kilitli." : " Ay henüz kapanmadı; rakamlar değişebilir."}`,
     "",
     "İçindekiler:",
     `- Excel dosyası: Özet, Faturalar (KDV oranlarına göre), KDV (alış ve satış), Satışlar (gün gün, Z raporuyla).`,

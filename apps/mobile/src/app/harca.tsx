@@ -55,7 +55,7 @@ export default function SpendCode() {
   if (!me) body = <SignIn prompt={t("signInToSpend")} />;
   else if (cafes && cafes.length === 0) body = <Txt size={18}>{t("spendNoCafe")}</Txt>;
   else if (cafes && !cafe)
-    body = <CafePicker title={t("spendWhichCafe")} cafes={cafes.map((c) => ({ slug: c.cafeSlug, name: c.cafeName, right: `${c.balancePeni} peni` }))} onPick={setCafe} />;
+    body = <CafePicker title={t("spendWhichCafe")} cafes={cafes.map((c) => ({ slug: c.cafeSlug, name: c.cafeName, right: `${c.balancePeni} penny` }))} onPick={setCafe} />;
   else if (code) {
     const pretty = `${code.code.slice(0, 3)} ${code.code.slice(3)}`;
     body = (
@@ -72,7 +72,7 @@ export default function SpendCode() {
           {`${t("spendValid")}: `}
           <Txt>{`${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`}</Txt>
         </Txt>
-        <Stat label={t("balance")} value={`${code.balancePeni} peni`} />
+        <Stat label={t("balance")} value={`${code.balancePeni} penny`} />
         <Txt muted>{t("spendHelp")}</Txt>
         <Btn kind="quiet" onPress={() => fetchCode(code.cafeSlug)}>
           {t("spendRenew")}

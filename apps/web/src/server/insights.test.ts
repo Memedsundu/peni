@@ -39,7 +39,7 @@ describe("Müdavimler (plan piece 32)", { timeout: 30_000 }, () => {
     expect(await code(app.insights.get(leyla, "2024-01"))).toBe("VALIDATION");
   });
 
-  it("compares coming back after peni, treats, the askı and events, only once everyone has had 30 days", async () => {
+  it("compares coming back after penny, treats, the askı and events, only once everyone has had 30 days", async () => {
     const d = await app.insights.get(leyla);
     expect([d.effectFrom, d.effectThrough]).toEqual(["2026-06-19", "2026-09-16"]);
     const by = Object.fromEntries(d.effects.map((e) => [e.kind, e]));
@@ -84,7 +84,7 @@ describe("Müdavimler (plan piece 32)", { timeout: 30_000 }, () => {
     expect(await code(app.insights.get(await at("hakan")))).toBe("FORBIDDEN");
     const chat = await app.chat.ask(leyla, { key: "c1", text: "Bu ay müdavimler geri geliyor mu?" });
     expect(chat.messages[1]!.text).toBe(
-      "Ekim 2026: 16 üye geldi (geçen ay aynı günlerde 15); 4 kişi müdavim. Geçen ay gelen 17 kişinin %71'i bu ay da geldi. Sadece Peni kullanan üyeler sayılıyor. (Demo yanıtı.)",
+      "Ekim 2026: 16 üye geldi (geçen ay aynı günlerde 15); 4 kişi müdavim. Geçen ay gelen 17 kişinin %71'i bu ay da geldi. Sadece Penny kullanan üyeler sayılıyor. (Demo yanıtı.)",
     );
     expect(chat.messages[1]!.sources).toEqual([{ kind: "page", label: "mudavimler", href: "/panel/mudavimler?kafe=moda&ay=2026-10" }]);
   });

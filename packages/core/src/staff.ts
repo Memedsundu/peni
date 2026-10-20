@@ -45,7 +45,7 @@ export const SECTIONS = {
   shifts: { tr: "Vardiyalar", en: "Shifts" },
   pay: { tr: "Puantaj ve maaş", en: "Hours and pay" },
   tasks: { tr: "Görevler", en: "Tasks" },
-  peni: { tr: "Peni ve askı", en: "Peni and askı" },
+  peni: { tr: "Penny ve askı", en: "Pennies and askı" },
   posts: { tr: "Paylaşımlar", en: "Posts and events" },
   reports: { tr: "Raporlar", en: "Reports" },
   assistant: { tr: "Asistan", en: "Assistant" },
@@ -254,8 +254,8 @@ export const PERMISSIONS = {
   },
   "peni.view": {
     section: "peni",
-    label: { tr: "Peni ve askı rakamlarını görür", en: "Sees peni and askı numbers" },
-    hint: { tr: "Verilen ve harcanan peni, askıdaki tutar, üye sayısı.", en: "Peni given and spent, what is on the askı, members." },
+    label: { tr: "Penny ve askı rakamlarını görür", en: "Sees pennies and askı numbers" },
+    hint: { tr: "Verilen ve harcanan penny, askıdaki tutar, üye sayısı.", en: "Pennies given and spent, what is on the askı, members." },
     roles: MANAGER,
   },
   "peni.till": {
@@ -314,7 +314,7 @@ export const PERMISSIONS = {
   "settings.edit": {
     section: "settings",
     label: { tr: "Kafe ayarlarını değiştirir", en: "Changes café settings" },
-    hint: { tr: "Kafe bilgileri, peni oranı, askı kuralları.", en: "Café details, peni rate, askı rules." },
+    hint: { tr: "Kafe bilgileri, penny oranı, askı kuralları.", en: "Café details, penny rate, askı rules." },
     roles: OWNER,
   },
   "devices.manage": {

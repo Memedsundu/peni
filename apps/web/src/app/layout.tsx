@@ -5,7 +5,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Peni", template: "%s · Peni" },
+  title: { default: "Penny", template: "%s · Penny" },
   description: "Sokağının kahvesi, şimdi cebinde.",
 };
 

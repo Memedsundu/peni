@@ -219,13 +219,13 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     nameOf.set(u.id, u.name);
   }
   const first = members.find((m) => m.role === "owner");
-  if (!first) throw new Error("Shelby has no admin for this café: Peni needs an owner to move into");
+  if (!first) throw new Error("Shelby has no admin for this café: Penny needs an owner to move into");
   const owner = first.id;
   const who = (userId: string | null | undefined) => (userId && memberOf.get(userId)) || owner;
   skip(
     "Role permission changes",
     snap.rolePermissions.length,
-    "Peni's pages differ from Shelby's; each role starts with Peni's defaults, to review in Ayarlar → Ekip.",
+    "Penny's pages differ from Shelby's; each role starts with Penny's defaults, to review in Ayarlar → Ekip.",
   );
 
   // ── Menu
@@ -263,7 +263,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     };
   });
   const units = [...new Set(snap.stockItems.map((s) => s.unit).filter((u) => !["kg", "g", "l", "ml", "pcs", "adet"].includes(u.trim().toLowerCase())))];
-  if (units.length) warnings.push(`Stock counted in ${units.map((u) => `"${u}"`).join(", ")} in Shelby is counted in adet in Peni.`);
+  if (units.length) warnings.push(`Stock counted in ${units.map((u) => `"${u}"`).join(", ")} in Shelby is counted in adet in Penny.`);
   const below = snap.stockItems.filter((s) => s.currentStock < 0);
   if (below.length) warnings.push(`${below.length} stock item(s) were below zero in Shelby (${below.map((s) => s.name).join(", ")}); they start at zero.`);
   const stockStart: StockBatch | null = snap.stockItems.length
@@ -281,8 +281,8 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
         })),
       }
     : null;
-  skip("Stock history (each change)", snap.stockLogs.length, "Peni starts each item from today's amount; the history stays readable in Shelby.");
-  if (snap.stockCategories.length) skip("Stock categories", snap.stockCategories.length, "Peni groups stock as ingredients and supplies only.");
+  skip("Stock history (each change)", snap.stockLogs.length, "Penny starts each item from today's amount; the history stays readable in Shelby.");
+  if (snap.stockCategories.length) skip("Stock categories", snap.stockCategories.length, "Penny groups stock as ingredients and supplies only.");
 
   const recipes: Recipe[] = [];
   let legacyStock = 0;
@@ -433,7 +433,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     if (paidAt) payments.push(payment("sale", totalKurus, paidAt, owner));
     if (refundKurus !== null) payments.push(payment("refund", refundKurus, o.refundedAt ?? o.updatedAt, who(o.refundedByUserId)));
   }
-  if (missingItems) warnings.push(`${missingItems} order(s) lost some of their lines in Shelby (a product was deleted); Peni keeps Shelby's total for them.`);
+  if (missingItems) warnings.push(`${missingItems} order(s) lost some of their lines in Shelby (a product was deleted); Penny keeps Shelby's total for them.`);
 
   // ── Suppliers and bills. Wages come from Puantaj, not from Shelby's weekly wage bills.
   const suppliers: Supplier[] = snap.suppliers.map((s) => ({
@@ -452,7 +452,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
   skip(
     "Weekly wage bills",
     wageBills.filter((e) => kept(e.date)).length,
-    "Shelby wrote one per week from the timesheets; Peni keeps the same pay as hours and payouts in Puantaj ve maaş.",
+    "Shelby wrote one per week from the timesheets; Penny keeps the same pay as hours and payouts in Puantaj ve maaş.",
   );
   const expenses = snap.expenses.filter((e) => e.sourceType !== "timesheet_wages" && kept(e.date));
   const receiptOf = new Map(snap.receipts.map((r) => [r.id, r]));
@@ -580,7 +580,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     });
   }
   if (legacyPaid) warnings.push(`${legacyPaid} older bill(s) were marked paid in Shelby with no payment; each gets one payment on its own date.`);
-  if (stale) warnings.push(`${stale} bill(s) had a paid amount in Shelby that didn't match their payments; Peni goes by the payments.`);
+  if (stale) warnings.push(`${stale} bill(s) had a paid amount in Shelby that didn't match their payments; Penny goes by the payments.`);
 
   // Checks written before Shelby linked them to a payment.
   const movedExpense = new Set(expenses.map((e) => e.id));
@@ -695,9 +695,9 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     skip(
       "Money movements (each one)",
       snap.moneyMovements.length,
-      "Peni starts from today's balances in the drawer, the reserve and the bank; the history stays readable in Shelby.",
+      "Penny starts from today's balances in the drawer, the reserve and the bank; the history stays readable in Shelby.",
     );
-  } else warnings.push("Shelby never started keeping the café's money (Nakit ve banka), so Peni doesn't start it either: press Başla there.");
+  } else warnings.push("Shelby never started keeping the café's money (Nakit ve banka), so Penny doesn't start it either: press Başla there.");
 
   // ── Shifts. Weeks drawn with blocks; the oldest ones with shift templates.
   const scheduleWeek = new Map(snap.schedules.map((s) => [s.id, mondayOf(s.weekStart)]));
@@ -900,7 +900,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
   skip(
     "Tasks left undone",
     occurrences.filter((o) => o.status === "pending" || o.status === "overdue").length,
-    "Peni keeps the tasks that were done or skipped; the rest show as not done.",
+    "Penny keeps the tasks that were done or skipped; the rest show as not done.",
   );
 
   // ── What stays in Shelby.
@@ -914,10 +914,10 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
   }
   const files = snap.attachments.filter((a) => a.status === "ready");
   skip("Bill photos and PDFs", files.length, "They're in Shelby's private file store; copying them needs its BLOB_READ_WRITE_TOKEN.");
-  skip("AI conversations", snap.counts.aiConversations, "Peni's assistant starts fresh.");
-  skip("Alerts", snap.counts.operationalAlerts, "Peni works out its own (Bugün).");
+  skip("AI conversations", snap.counts.aiConversations, "Penny's assistant starts fresh.");
+  skip("Alerts", snap.counts.operationalAlerts, "Penny works out its own (Bugün).");
   skip("Old product stock log", snap.counts.inventoryLogs, "From before Shelby had stock items.");
-  skip("Card terminal settings", snap.counts.posConfig, "Peni's till takes card payments by hand until the Ingenico link.");
+  skip("Card terminal settings", snap.counts.posConfig, "Penny's till takes card payments by hand until the Ingenico link.");
 
   const records: PeniRecords = {
     cafe,

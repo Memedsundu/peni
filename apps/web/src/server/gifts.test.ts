@@ -33,7 +33,7 @@ describe("gifts on the web (plan piece 12)", () => {
     await toMehmet("gift-key-1", { message: "Çay benden <3" });
     const mails = outbox.sent.filter((m) => m.to === "mehmet@example.com");
     expect(mails).toHaveLength(1);
-    expect(mails[0]!.subject).toBe("Ayşe Y. sana 20 peni ısmarladı · Moda Kahvesi");
+    expect(mails[0]!.subject).toBe("Ayşe Y. sana 20 penny ısmarladı · Moda Kahvesi");
     expect(mails[0]!.text).toContain(`https://peni.example/hediye/${gift.id}`);
     expect(mails[0]!.text).toContain("“Çay benden <3”");
     expect(mails[0]!.html).toContain("Çay benden &#60;3");

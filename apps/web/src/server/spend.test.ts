@@ -29,8 +29,8 @@ beforeEach(async () => {
   mehmet = (await app.identity.getCustomer("cus_mehmet"))!;
 });
 
-describe("spending peni at the till (plan piece 11)", () => {
-  it("opens the wallet with a live ödeme kodu and pays part of the order with peni, the rest in cash", async () => {
+describe("spending pennies at the till (plan piece 11)", () => {
+  it("opens the wallet with a live ödeme kodu and pays part of the order with penny, the rest in cash", async () => {
     const before = await balance(ayse);
     expect(before).toBeGreaterThan(40);
     const o = await order();
@@ -55,7 +55,7 @@ describe("spending peni at the till (plan piece 11)", () => {
     expect((await app.cash.state(ece)).open!.totals.cashSalesKurus).toBe(22_500);
   });
 
-  it("pays a whole order with peni, and refunds the peni back to the wallet", async () => {
+  it("pays a whole order with pennies, and refunds the pennies back to the wallet", async () => {
     const o = await app.till.create(ece, { createKey: key(), lines: [{ productId: "cay", quantity: 1 }] });
     const before = await balance(ayse);
     const paid = await app.till.usePeni(ece, o.id, { code: await spendCode(ayse), peni: 99, payKey: key() });
@@ -66,7 +66,7 @@ describe("spending peni at the till (plan piece 11)", () => {
     expect(await balance(ayse)).toBe(before);
   });
 
-  it("refunds a split order both ways: peni to the wallet, cash from the drawer", async () => {
+  it("refunds a split order both ways: pennies to the wallet, cash from the drawer", async () => {
     const before = await balance(ayse);
     const o = await order();
     await app.till.usePeni(ece, o.id, { code: await spendCode(ayse), peni: 65, payKey: key() });
@@ -80,7 +80,7 @@ describe("spending peni at the till (plan piece 11)", () => {
     expect((await app.cash.state(ece)).open!.totals).toMatchObject({ cashSalesKurus: 20_000, cashRefundsKurus: 20_000 });
   });
 
-  it("gives peni back on an unpaid order, before changing it, and when voiding", async () => {
+  it("gives pennies back on an unpaid order, before changing it, and when voiding", async () => {
     const before = await balance(ayse);
     const o = await order();
     const c = await spendCode(ayse);
@@ -99,7 +99,7 @@ describe("spending peni at the till (plan piece 11)", () => {
     expect(await balance(ayse)).toBe(before);
   });
 
-  it("refuses expired or unknown codes, other cafés' codes and peni beyond the café's share", async () => {
+  it("refuses expired or unknown codes, other cafés' codes and pennies beyond the café's share", async () => {
     const o = await order();
     const c = await spendCode(ayse);
     expect(await code(app.till.checkPeni(ece, o.id, { code: c === "000000" ? "000001" : "000000" }))).toBe("SPEND_CODE_WRONG");
