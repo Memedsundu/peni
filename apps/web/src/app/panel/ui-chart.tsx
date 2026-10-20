@@ -65,7 +65,10 @@ export function ChartTooltip({
       content={(props) => {
         const { active, payload, label } = props as { active?: boolean; payload?: readonly (Row & { payload?: Record<string, unknown> })[]; label?: unknown };
         if (!active || !payload?.length) return null;
-        const rows = payload.filter((p) => typeof p.value === "number");
+        // In the order the chart names them (this period before the one it's set against), not the order they're drawn.
+        const order = Object.keys(config);
+        const at = (p: Row) => order.indexOf(String(p.dataKey ?? p.name ?? ""));
+        const rows = payload.filter((p) => typeof p.value === "number").sort((a, b) => at(a) - at(b));
         if (!rows.length) return null;
         return (
           <div className="flex min-w-36 flex-col gap-1.5 rounded-xl border border-line bg-paper px-3 py-2 text-xs shadow-sm">

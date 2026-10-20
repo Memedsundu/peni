@@ -387,6 +387,12 @@ function HoursChart({ data, t }: { data: SalesReportDTO; t: T }) {
   );
 }
 
+/** "Cumartesi": the whole name of a weekday, 1 for Monday to 7 for Sunday. */
+function weekdayName(weekday: number, lang: Lang): string {
+  // 19 October 2026 is a Monday.
+  return new Date(Date.UTC(2026, 9, 18 + weekday, 12)).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-GB", { weekday: "long", timeZone: "UTC" });
+}
+
 /** What the green bar means, under the chart, with a swatch of it. */
 function Note({ children }: { children: string }) {
   return (
@@ -416,7 +422,7 @@ function WeekdayChart({ data, t, lang }: { data: SalesReportDTO; t: T; lang: Lan
           </Bar>
         </BarChart>
       </ChartContainer>
-      <Note>{fill(t("rpBestDayNote"), { d: t(`wd_${best.weekday}` as TextKey), v: lira(best.avgKurus) })}</Note>
+      <Note>{fill(t("rpBestDayNote"), { d: weekdayName(best.weekday, lang), v: lira(best.avgKurus) })}</Note>
     </section>
   );
 }
