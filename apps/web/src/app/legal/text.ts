@@ -35,17 +35,19 @@ export function controllerFromEnv(): Controller {
 
 const PROVIDERS = {
   tr: [
-    "Vercel Inc. (ABD): sitenin ve uygulamanın sunucuları.",
-    "Neon Inc. (ABD): veritabanı.",
+    "Vercel Inc. (ABD): sitenin ve uygulamanın sunucuları, Frankfurt'ta.",
+    "Neon Inc. (ABD): veritabanı, Frankfurt'ta.",
     "Resend (ABD): giriş kodu ve bildirim e-postaları.",
-    "OpenAI (ABD): yalnızca kafe panelindeki asistan; kafenin yüklediği belgeler ve ekibin sorduğu sorular kafenin kayıtlarıyla birlikte işlenir.",
+    "Anthropic PBC (ABD): yalnızca kafe panelindeki asistan (Claude); kafenin yüklediği belgeler ve ekibin sorduğu sorular kafenin kayıtlarıyla birlikte işlenir.",
+    "OpenAI (ABD): yalnızca kafe ekibinin sesli hızlı girişi açıksa, söyleneni yazıya çevirmek için; kayıt saklanmaz.",
     "Google ve Apple: onlarla giriş yaparsan, kim olduğunu doğrulamak için.",
   ],
   en: [
-    "Vercel Inc. (USA): the servers for the site and the app.",
-    "Neon Inc. (USA): the database.",
+    "Vercel Inc. (USA): the servers for the site and the app, in Frankfurt.",
+    "Neon Inc. (USA): the database, in Frankfurt.",
     "Resend (USA): sign-in codes and notification emails.",
-    "OpenAI (USA): only the assistant in the café panel; documents the café uploads and questions its team asks are processed with the café's records.",
+    "Anthropic PBC (USA): only the assistant in the café panel (Claude); documents the café uploads and questions its team asks are processed with the café's records.",
+    "OpenAI (USA): only when a café team uses spoken quick entry, to turn what was said into text; the recording isn't kept.",
     "Google and Apple: if you sign in with them, to confirm who you are.",
   ],
 };

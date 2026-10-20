@@ -14,7 +14,7 @@ Every pull request also gets its own address from Vercel (it posts the link on t
 
 - **Vercel project `peni`** (team memedsundus-projects), built from `apps/web`, servers in Frankfurt (`fra1`). Vercel's "Production" environment is the `production` branch; every other branch, `main` included, is "Preview", which is staging.
 - **Neon project `Peni`** (`winter-brook-49336637`), in Frankfurt (`aws-eu-central-1`), with two branches: `production` and `staging`. They're separate databases with separate passwords. Real data is never copied into staging.
-- **Settings** are in Vercel → peni → Settings → Environment Variables. Production has `PENI_DEMO=0`; staging (Preview) has `PENI_DEMO=1`. `DATABASE_URL` is Neon's pooled address, `DIRECT_URL` the direct one that migrations use. The staging demo staff password is `PENI_DEMO_STAFF_PASSWORD` there (staff emails are in `DEMO_STAFF`, `apps/web/src/server/seed.ts`).
+- **Settings** are in Vercel → peni → Settings → Environment Variables. Production has `PENI_DEMO=0`; staging (Preview) has `PENI_DEMO=1`. `DATABASE_URL` is Neon's pooled address, `DIRECT_URL` the direct one that migrations use. The staging demo staff password is `PENI_DEMO_STAFF_PASSWORD` there; Vercel keeps it as sensitive, so it can't be read back, and the copy to sign in with is in `.env.staging` on Mehmet's Mac (never committed). Staff emails are in `DEMO_STAFF`, `apps/web/src/server/seed.ts`: `leyla@moda.test` owns Moda.
 - **Database changes** (migrations) run on every Vercel build, before the app is built: a build for staging migrates the staging database, a release migrates production. A migration that fails stops the build, and the version already running stays up.
 
 ## Releasing to production
@@ -34,7 +34,7 @@ The demo history is dated from the day it was made, so after some weeks staging 
 
 ```sh
 DATABASE_URL=<staging direct> pnpm --filter @peni/db exec prisma migrate reset --force
-DATABASE_URL=<staging pooled> PENI_DEMO=1 PENI_DEMO_STAFF_PASSWORD=<from Vercel> npx tsx -e 'import("./src/server/runtime.ts").then(async (m) => { await m.getApp(); process.exit(0); })'
+DATABASE_URL=<staging pooled> PENI_DEMO=1 PENI_DEMO_STAFF_PASSWORD=<from .env.staging> npx tsx -e 'import("./src/server/runtime.ts").then(async (m) => { await m.getApp(); process.exit(0); })'
 ```
 
 The demo cafés are written from your Mac rather than on the site's first visit, because the full history takes minutes and a visit would run out of time.
@@ -49,5 +49,5 @@ In EAS, the build service for the app (see [launch.md](launch.md)), set `EXPO_PU
 ## Still to add (only Mehmet has these)
 
 - **Production address:** a custom domain (peni.app) in Vercel → peni → Settings → Domains, then the same address as `PENI_PUBLIC_URL` in production.
-- **Keys**, in production and, if wanted, staging: `RESEND_API_KEY` and `EMAIL_FROM` (email codes; without them staging keeps codes in its outbox and production has email sign-in off), `OPENAI_API_KEY` (the assistant; without it staging uses a stand-in and production has it off), `GOOGLE_CLIENT_IDS` and `APPLE_CLIENT_IDS` (sign-in buttons), and the inbox settings.
+- **Keys**, in production and, if wanted, staging: `RESEND_API_KEY` and `EMAIL_FROM` (email codes; without them staging keeps codes in its outbox and production has email sign-in off), `ANTHROPIC_API_KEY` (the assistant, on Claude Haiku 5.5; without it staging uses a stand-in and production has it off), `OPENAI_API_KEY` only if spoken quick entry is wanted (Claude can't turn speech into text), `GOOGLE_CLIENT_IDS` and `APPLE_CLIENT_IDS` (sign-in buttons), and the inbox settings.
 - **Neon plan:** the free plan pauses a database after 5 minutes unused, so the first visit after a pause waits about half a second. Fine for staging; move production to a paid plan before switch day.

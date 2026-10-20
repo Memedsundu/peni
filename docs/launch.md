@@ -16,7 +16,7 @@ Plan piece 34. What is built, and what only the owner can do before Peni opens t
 
 1. **Company details.** Set `PENI_LEGAL_NAME` (the company's title), `PENI_LEGAL_ADDRESS` and `PENI_CONTACT_EMAIL` in Vercel. The privacy and terms pages show them as the data controller and the address for requests; without them they say "Peni" and point to the in-app tools.
 2. **A lawyer reads the two texts.** They are written in plain words from what the code does, and haven't been reviewed.
-3. **Transfers abroad (KVKK m. 9).** Vercel, Neon, Resend and OpenAI are in the USA. Since the 2024 change the usual basis is the Board's standard contract signed with each provider, notified to the Board within five working days. Explicit consent is the other route. Decide which, and sign or collect it, before real customers sign up.
+3. **Transfers abroad (KVKK m. 9).** Vercel, Neon, Resend, Anthropic and OpenAI are US companies (Peni's servers and database are in Frankfurt, which is still abroad for KVKK). Since the 2024 change the usual basis is the Board's standard contract signed with each provider, notified to the Board within five working days. Explicit consent is the other route. Decide which, and sign or collect it, before real customers sign up.
 4. **VERBİS.** Check whether the company must register (it depends on staff count and yearly turnover, or on processing special categories, which Peni doesn't).
 5. **Cafés as controllers.** Each café keeps its own staff, sales and bill records in Peni; a short data processing agreement with each café (Peni processes on the café's behalf) belongs in the café sign-up.
 

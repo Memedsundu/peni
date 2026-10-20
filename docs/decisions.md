@@ -43,7 +43,7 @@ Started 2026-10-17. The existing v0.1 code (github.com/Memedsundu/peni) is a sta
 - **D20 (2026-10-17) AI scope:** all 17 ideas in ai-ideas.md are in scope, not only the suggested first set.
 - **D21 (2026-10-17) AI may create records** as drafts the owner confirms. It never pays, deletes or changes money by itself.
 - **D22 (2026-10-17) e-Fatura:** not needed for now.
-- **D23 (2026-10-17) AI provider:** keep OpenAI for now.
+- **D23 (2026-10-17) AI provider:** keep OpenAI for now. **Changed 2026-10-20:** the assistant runs on Claude Haiku 5.5 (`AnthropicModel`, `ANTHROPIC_API_KEY`; `ANTHROPIC_MODEL` overrides), about 2.5× cheaper per input token and 4× per output token than gpt-5-mini ($0.10/$0.50 vs $0.25/$2.00 per million), and OpenAI listed the gpt-5-mini-2025-08-07 snapshot for shutdown on 11 Dec 2026. Claude has no speech to text, so spoken quick entry stays on OpenAI and only works when `OPENAI_API_KEY` is also set. `OpenAiModel` stays as the fallback when only an OpenAI key is set. Structured outputs through the SDK's `zodOutputFormat`, effort medium, thinking left adaptive. Anthropic added to the privacy page's providers and to the KVKK transfers.
 - **D24 (2026-10-17) Ingenico:** no protocol documents yet; Mehmet will apply for them later. Until then the till records cash/card manually and the terminal is used on its own. The Ingenico bridge is built once the documents arrive.
 
 ## Notes: outside permissions (researched 2026-10-17, not legal advice)

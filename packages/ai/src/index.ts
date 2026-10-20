@@ -1,5 +1,6 @@
 export * from "./model";
 export * from "./openai";
+export * from "./anthropic";
 export * from "./bill-reading";
 export * from "./check-reading";
 export * from "./quick-reading";

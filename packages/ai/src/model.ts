@@ -6,7 +6,7 @@ import { z } from "zod";
  * the answer must have. The answer is checked against that shape before anyone sees it,
  * so a model can only ever hand back data, never act (D21).
  *
- * OpenAI behind it for now (D23); another provider is another AiModel.
+ * Claude (AnthropicModel) or OpenAI (OpenAiModel) behind it (D23); another provider is another AiModel.
  */
 
 export type AiPart =
