@@ -79,7 +79,7 @@ export function Amount({ peni, goods, caption }: { peni: number; goods: string |
     <div className="flex flex-col gap-1">
       <p className="flex items-center gap-4 font-serif text-7xl leading-none text-[var(--cafe)] tabular">
         <Coin size={64} />
-        <span>
+        <span className="whitespace-nowrap">
           {peni} <span className="text-4xl">penny</span>
         </span>
       </p>

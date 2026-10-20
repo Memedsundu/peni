@@ -76,8 +76,8 @@ export function CafePage({ slug }: { slug: string }) {
           <div className="flex items-center justify-between">
             <span className="text-muted">{t("yourPeni")}</span>
             <span className="tabular inline-flex items-center gap-3 font-serif text-5xl leading-none text-[var(--cafe)]">
-              <Coin size={44} />
-              <span>
+              <Coin size={40} />
+              <span className="whitespace-nowrap">
                 {cafe.membership!.balancePeni} <span className="text-2xl">penny</span>
               </span>
             </span>

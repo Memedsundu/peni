@@ -370,7 +370,7 @@ function Amount({
         )}
         <p className="flex items-center gap-3 font-serif text-6xl leading-none text-[var(--cafe)] tabular">
           <Coin size={56} />
-          <span>
+          <span className="whitespace-nowrap">
             {peni} <span className="text-3xl">penny</span>
           </span>
         </p>
