@@ -1,7 +1,7 @@
 import type { BillCategory, BillKdv } from "./bills";
 import type { CheckOutcome, StatementProposal, ZReportProposal } from "./checks";
 import { sniffImageType, type ImageType } from "./images";
-import { MILLI, STOCK_MAX_MILLI, type StockKind, type StockUnit } from "./stock";
+import { MILLI, STOCK_MAX_MILLI, type NewStockItem, type StockKind, type StockUnit } from "./stock";
 
 /**
  * The assistant's ground (plan piece 24): the documents a café hands it, the drafts it
@@ -176,13 +176,6 @@ export interface ProposalLine {
   readUnit: string | null;
   /** How it was matched: the model's guess, or what a person confirmed for this line before. */
   matchedBy: "model" | "learned" | null;
-}
-
-/** A stock item a bill line could start: "Laktozsuz süt", kept in litres, an ingredient. */
-export interface NewStockItem {
-  name: string;
-  unit: StockUnit;
-  kind: StockKind;
 }
 
 /** An earlier bill or draft that looks like the same document (piece 25's duplicate guard). */
