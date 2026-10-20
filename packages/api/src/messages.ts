@@ -20,17 +20,17 @@ export const errorMessagesTr: Record<string, string> = {
   GIFT_NOT_PENDING: "Bu ısmarlama artık geçerli değil.",
   GIFT_NOT_ACCEPTED: "Teşekkür etmek için önce ısmarlamayı kabul et.",
   LOOKUP_LIMITED: "Çok fazla numara denedin. Biraz sonra tekrar dene.",
-  CLAIM_NOT_FOUND: "Bu peni kodu bulunamadı.",
-  CLAIM_CODE_WRONG: "Bu kodla açık bir peni yok. Ekrandaki kodu kontrol et.",
+  CLAIM_NOT_FOUND: "Bu penny kodu bulunamadı.",
+  CLAIM_CODE_WRONG: "Bu kodla açık bir penny yok. Ekrandaki kodu kontrol et.",
   CLAIM_CODE_LIMITED: "Çok fazla kod denedin. Biraz sonra tekrar dene.",
-  CLAIM_TAKEN: "Bu peni başka bir hesaba geçmiş. Kasaya sorabilirsin.",
+  CLAIM_TAKEN: "Bu penny başka bir hesaba geçmiş. Kasaya sorabilirsin.",
   CLAIM_EXPIRED: "Bu kodun süresi doldu. Kodlar gün sonunda kapanır.",
-  CLAIM_CANCELLED: "Bu satış iade edildi, peni kodu kapandı.",
+  CLAIM_CANCELLED: "Bu satış iade edildi, penny kodu kapandı.",
   SPEND_CODE_WRONG: "Bu ödeme kodu bu kafede yok. Müşteriden kodu yeniden açmasını iste.",
   SPEND_CODE_EXPIRED: "Ödeme kodunun süresi dolmuş. Müşteri kodu yeniden açsın.",
-  NOTHING_TO_SPEND: "Bu siparişe düşülecek peni yok.",
-  PENI_ON_ORDER: "Siparişte peni var. Değiştirmeden önce peniyi geri ver.",
-  PENI_OTHER_WALLET: "Bu siparişte başka birinin penisi var.",
+  NOTHING_TO_SPEND: "Bu siparişe düşülecek penny yok.",
+  PENI_ON_ORDER: "Siparişte penny var. Değiştirmeden önce penny'yi geri ver.",
+  PENI_OTHER_WALLET: "Bu siparişte başka birinin penny'si var.",
   ASKIDA_DISABLED: "Bu kafede askı yok.",
   ASKIDA_EMPTY: "Askı şu an boş. Biri bıraktığında burada görünür.",
   ASKIDA_LIMIT: "Bugünkü ikramını aldın. Yarın yine gel.",
@@ -97,7 +97,7 @@ export const errorMessagesTr: Record<string, string> = {
   PRODUCT_UNAVAILABLE: "Siparişteki bir ürün şu an satışta değil. Siparişi yenile.",
   REASON_REQUIRED: "Bir sebep yaz.",
   REASON_TOO_LONG: "Sebep en çok 200 karakter olabilir.",
-  CLAIM_CODE_BUSY: "Şu an peni kodu verilemedi. Ödemeyi tekrar kaydet.",
+  CLAIM_CODE_BUSY: "Şu an penny kodu verilemedi. Ödemeyi tekrar kaydet.",
   PAYMENT_NOT_FOUND: "Bu ödeme bulunamadı.",
   PAYMENT_NOT_PENDING: "Bu ödeme zaten sonuçlanmış.",
   PAYMENT_APPROVED: "Bu ödeme onaylanmış. Geri vermek için siparişi iade et.",
@@ -237,5 +237,5 @@ export function formatKurus(kurus: number): string {
 }
 
 export function formatPeni(peni: number): string {
-  return `${new Intl.NumberFormat("tr-TR").format(peni)} peni`;
+  return `${new Intl.NumberFormat("tr-TR").format(peni)} penny`;
 }

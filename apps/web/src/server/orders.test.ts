@@ -158,8 +158,8 @@ describe("the till's orders (plan piece 6)", () => {
     expect(await code(app.till.remove(atTill, o.id, { reason: "Deneme" }))).toBe("NEEDS_PASSWORD");
   });
 
-  describe("peni for the customer screen (plan piece 7)", () => {
-    it("makes a one-time claim when an order is paid: a 4-digit code, a QR token and the peni at the café's rate", async () => {
+  describe("pennies for the customer screen (plan piece 7)", () => {
+    it("makes a one-time claim when an order is paid: a 4-digit code, a QR token and the pennies at the café's rate", async () => {
       const o = await order(ece, [{ productId: "latte", quantity: 2, discountPercent: 10 }, { productId: "simit", quantity: 1 }]);
       const started = await app.till.pay(ece, o.id, { method: "card", payKey: key() });
       // Nothing to claim while the card is still on the terminal.
@@ -185,7 +185,7 @@ describe("the till's orders (plan piece 6)", () => {
       expect(codes.size).toBe(40);
     });
 
-    it("makes no claim when the order earns nothing or the café has peni off", async () => {
+    it("makes no claim when the order earns nothing or the café has pennies off", async () => {
       const cheap = await order(ece, [{ productId: "cay", quantity: 1 }], 100);
       expect((await app.till.pay(ece, cheap.id, { method: "cash", payKey: key() })).order.claim).toBeNull();
       await app.directory.saveSettings({ ...(await app.directory.getSettings("cafe_moda")), peniEnabled: false });

@@ -108,7 +108,7 @@ function readBack(tool: string, r: Record<string, unknown>): string {
     return [
       `${new Date(`${r.month}-15T12:00:00Z`).toLocaleDateString("tr-TR", { month: "long", year: "numeric", timeZone: "UTC" })}: ${came.now} üye geldi (geçen ay aynı günlerde ${came.sameDaysLastMonth}); ${regulars.now} kişi müdavim.`,
       back.cameBackPct !== undefined ? `Geçen ay gelen ${back.people} kişinin %${back.cameBackPct}'i bu ay da geldi.` : "",
-      "Sadece Peni kullanan üyeler sayılıyor.",
+      "Sadece Penny kullanan üyeler sayılıyor.",
     ]
       .filter(Boolean)
       .join(" ");

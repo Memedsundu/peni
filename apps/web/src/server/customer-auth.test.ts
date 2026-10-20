@@ -56,7 +56,7 @@ describe("email codes", () => {
     await app.auth.startEmail("  Ayse@Example.com ");
     const sent = outbox.sent.at(-1)!;
     expect(sent.to).toBe("ayse@example.com");
-    expect(sent.subject).toMatch(/^Peni giriş kodun: \d{6}$/);
+    expect(sent.subject).toMatch(/^Penny giriş kodun: \d{6}$/);
     const c = outbox.lastCodeFor("ayse@example.com")!;
     expect(await code(app.signInWithEmailCode("ayse@example.com", c === "000000" ? "000001" : "000000"))).toBe("CODE_WRONG");
     const session = await app.signInWithEmailCode("AYSE@example.com", c);

@@ -21,7 +21,7 @@ export async function writeShelby(stores: PeniStores, r: PeniRecords, progress: 
   const there = (await stores.identity.getCafe(cafeId)) ?? (await stores.identity.getCafeBySlug(r.cafe.slug));
   if (there) {
     const busy = (await stores.orders.listOrders(there.id, { limit: 1 })).length + (await stores.bills.listBills(there.id)).length;
-    if (there.id !== cafeId || busy) throw new Error(`Peni already has the café "${there.name}" (${there.slug}) with records in it; move into an empty one`);
+    if (there.id !== cafeId || busy) throw new Error(`Penny already has the café "${there.name}" (${there.slug}) with records in it; move into an empty one`);
   }
 
   progress("café and team");

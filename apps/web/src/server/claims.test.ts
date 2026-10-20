@@ -33,8 +33,8 @@ beforeEach(async () => {
   await app.identity.saveCustomer(newcomer);
 });
 
-describe("earning peni with the claim QR or code (plan piece 10)", () => {
-  it("shows the QR's peni to anyone, then credits it once to whoever takes it", async () => {
+describe("earning pennies with the claim QR or code (plan piece 10)", () => {
+  it("shows the QR's pennies to anyone, then credits it once to whoever takes it", async () => {
     const { claim } = await sale();
     expect(await app.claimPreview(claim.token, null)).toMatchObject({ cafeSlug: "moda", peni: 6, state: "open", balancePeni: null });
     const before = (await balanceAtModa(ayse))!;
@@ -83,7 +83,7 @@ describe("earning peni with the claim QR or code (plan piece 10)", () => {
     expect(await code(app.claimPreview("no-such-token-at-all", null))).toBe("CLAIM_NOT_FOUND");
   });
 
-  it("takes taken peni back out of the wallet when the sale is refunded", async () => {
+  it("takes taken pennies back out of the wallet when the sale is refunded", async () => {
     const { order, claim } = await sale();
     await app.takeClaim(newcomer, { token: claim.token });
     await app.till.refund(leyla, order.id, { reason: "İade" });

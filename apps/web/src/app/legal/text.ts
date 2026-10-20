@@ -58,12 +58,12 @@ export function privacy(lang: LegalLang, c: Controller): LegalDoc {
     return {
       title: "Privacy",
       updated: `Last updated ${LEGAL_UPDATED.en}`,
-      intro: `This notice explains, as Turkey's data protection law (KVKK, No. 6698) asks, what Peni keeps about you, why, who sees it and what you can ask for. The data controller is ${contact}.`,
+      intro: `This notice explains, as Turkey's data protection law (KVKK, No. 6698) asks, what Penny keeps about you, why, who sees it and what you can ask for. The data controller is ${contact}.`,
       sections: [
         {
           h: "What we keep",
           p: [
-            "If you use Peni as a customer: your name as you write it, your email, the id Google or Apple gives us if you sign in with them, your phone number if you gave one, the cafés you joined, the peni you earned, spent and sent, what you left on or took from the askı, your posts, comments and the events you said you'd go to, and your phone's notification key.",
+            "If you use Penny as a customer: your name as you write it, your email, the id Google or Apple gives us if you sign in with them, your phone number if you gave one, the cafés you joined, the penny you earned, spent and sent, what you left on or took from the askı, your posts, comments and the events you said you'd go to, and your phone's notification key.",
             "If you work at a café: your name, email, your password and till PIN (only as unreadable hashes), your shifts, hours, pay and what was paid to you.",
             "For the café itself: its sales, bills, suppliers, money and stock, and the documents it uploads.",
           ],
@@ -71,16 +71,16 @@ export function privacy(lang: LegalLang, c: Controller): LegalDoc {
         {
           h: "Why",
           p: [
-            "To give you the service: your account, your peni at each café, treats, the askı and the café's feed (KVKK art. 5/2-c).",
+            "To give you the service: your account, your penny at each café, treats, the askı and the café's feed (KVKK art. 5/2-c).",
             "Because the law asks it: cafés keep their sales and bills for their books (art. 5/2-ç).",
-            "To keep Peni safe: limiting sign-in attempts and stopping abuse (art. 5/2-f).",
+            "To keep Penny safe: limiting sign-in attempts and stopping abuse (art. 5/2-f).",
             "Your profile is hidden from other members until you turn it on.",
           ],
         },
         {
           h: "Who sees it",
           p: [
-            "A café you joined sees your name, your peni and askı activity there, and what you post there. Other members see your name only if your profile is visible, and only your initials on events.",
+            "A café you joined sees your name, your penny and askı activity there, and what you post there. Other members see your name only if your profile is visible, and only your initials on events.",
             "Other members are never shown who took from the askı. Müdavimler and other café reports show counts, never names.",
             "We use these providers, some of them abroad (KVKK art. 9):",
             ...PROVIDERS.en,
@@ -90,7 +90,7 @@ export function privacy(lang: LegalLang, c: Controller): LegalDoc {
         {
           h: "How long",
           p: [
-            "While your account is open. When you delete it, your name, email, phone, photo and sign-ins are deleted straight away and you are signed out everywhere. What cafés need for their books (peni earned and spent, treats, the askı) stays under the name “Deleted member”.",
+            "While your account is open. When you delete it, your name, email, phone, photo and sign-ins are deleted straight away and you are signed out everywhere. What cafés need for their books (penny earned and spent, treats, the askı) stays under the name “Deleted member”.",
             "Café records are kept for as long as tax law asks.",
           ],
         },
@@ -111,12 +111,12 @@ export function privacy(lang: LegalLang, c: Controller): LegalDoc {
   return {
     title: "Gizlilik",
     updated: `Son güncelleme ${LEGAL_UPDATED.tr}`,
-    intro: `Bu metin, 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) gereği Peni'nin senin hakkında neyi, neden tuttuğunu, kimin gördüğünü ve neler isteyebileceğini anlatır. Veri sorumlusu: ${contact}.`,
+    intro: `Bu metin, 6698 sayılı Kişisel Verilerin Korunması Kanunu (KVKK) gereği Penny'nin senin hakkında neyi, neden tuttuğunu, kimin gördüğünü ve neler isteyebileceğini anlatır. Veri sorumlusu: ${contact}.`,
     sections: [
       {
         h: "Ne tutuyoruz",
         p: [
-          "Peni'yi müşteri olarak kullanıyorsan: yazdığın adın, e-postan, Google ya da Apple ile girdiysen onların verdiği kimlik, verdiysen telefon numaran, katıldığın kafeler, kazandığın, harcadığın ve ısmarladığın peni, askıya bıraktığın ya da askıdan aldığın, gönderilerin, yorumların, katılacağını söylediğin etkinlikler ve telefonunun bildirim anahtarı.",
+          "Penny'yi müşteri olarak kullanıyorsan: yazdığın adın, e-postan, Google ya da Apple ile girdiysen onların verdiği kimlik, verdiysen telefon numaran, katıldığın kafeler, kazandığın, harcadığın ve ısmarladığın penny, askıya bıraktığın ya da askıdan aldığın, gönderilerin, yorumların, katılacağını söylediğin etkinlikler ve telefonunun bildirim anahtarı.",
           "Bir kafede çalışıyorsan: adın, e-postan, şifren ve kasa PIN'in (yalnızca okunamaz biçimde), vardiyaların, çalışma saatlerin, ücretin ve sana yapılan ödemeler.",
           "Kafenin kendisi için: satışları, faturaları, tedarikçileri, parası, stoku ve yüklediği belgeler.",
         ],
@@ -124,16 +124,16 @@ export function privacy(lang: LegalLang, c: Controller): LegalDoc {
       {
         h: "Neden",
         p: [
-          "Hizmeti verebilmek için: hesabın, her kafedeki penin, ısmarlamalar, askı ve kafenin akışı (KVKK m. 5/2-c).",
+          "Hizmeti verebilmek için: hesabın, her kafedeki penny'n, ısmarlamalar, askı ve kafenin akışı (KVKK m. 5/2-c).",
           "Kanun istediği için: kafeler satış ve faturalarını defterleri için saklar (m. 5/2-ç).",
-          "Peni'yi güvende tutmak için: giriş denemelerini sınırlamak, kötüye kullanımı durdurmak (m. 5/2-f).",
+          "Penny'yi güvende tutmak için: giriş denemelerini sınırlamak, kötüye kullanımı durdurmak (m. 5/2-f).",
           "Profilin, sen açana kadar diğer üyelerden gizlidir.",
         ],
       },
       {
         h: "Kim görüyor",
         p: [
-          "Katıldığın kafe adını, oradaki peni ve askı hareketlerini ve orada paylaştıklarını görür. Diğer üyeler adını yalnızca profilin açıksa görür; etkinliklerde yalnızca baş harflerin görünür.",
+          "Katıldığın kafe adını, oradaki penny ve askı hareketlerini ve orada paylaştıklarını görür. Diğer üyeler adını yalnızca profilin açıksa görür; etkinliklerde yalnızca baş harflerin görünür.",
           "Askıdan kimin aldığı diğer üyelere gösterilmez. Müdavimler ve kafenin diğer raporları isim değil, sayı gösterir.",
           "Şu hizmet sağlayıcılarla çalışıyoruz; bazıları yurt dışında (KVKK m. 9):",
           ...PROVIDERS.tr,
@@ -143,7 +143,7 @@ export function privacy(lang: LegalLang, c: Controller): LegalDoc {
       {
         h: "Ne kadar",
         p: [
-          "Hesabın açık olduğu sürece. Hesabını silince adın, e-postan, telefonun, fotoğrafın ve giriş bilgilerin hemen silinir, her yerden çıkış yapılır. Kafelerin defterleri için gereken hareketler (kazanılan ve harcanan peni, ısmarlamalar, askı) “Silinmiş üye” adıyla kalır.",
+          "Hesabın açık olduğu sürece. Hesabını silince adın, e-postan, telefonun, fotoğrafın ve giriş bilgilerin hemen silinir, her yerden çıkış yapılır. Kafelerin defterleri için gereken hareketler (kazanılan ve harcanan penny, ısmarlamalar, askı) “Silinmiş üye” adıyla kalır.",
           "Kafe kayıtları vergi mevzuatının istediği süre boyunca saklanır.",
         ],
       },
@@ -170,19 +170,19 @@ export function terms(lang: LegalLang, c: Controller): LegalDoc {
     return {
       title: "Terms of use",
       updated: `Last updated ${LEGAL_UPDATED.en}`,
-      intro: `Peni is run by ${c.name}. By using it you agree to these terms.`,
+      intro: `Penny is run by ${c.name}. By using it you agree to these terms.`,
       sections: [
         {
-          h: "What peni is",
+          h: "What pennies is",
           p: [
-            "Peni is a thank-you from a café you visit. 1 peni is worth ₺1, only at the café where you earned it, towards what you buy there.",
-            "Peni isn't money: it can't be paid out in cash, moved to another café, or earn interest. Each café decides how much peni it gives and which items it can be spent on, and may change that.",
+            "Penny is a thank-you from a café you visit. 1 pennies is worth ₺1, only at the café where you earned it, towards what you buy there.",
+            "Penny isn't money: it can't be paid out in cash, moved to another café, or earn interest. Each café decides how much pennies it gives and which items it can be spent on, and may change that.",
           ],
         },
         {
           h: "Treats and the askı",
           p: [
-            "You can treat another member of the same café to peni. A treat not accepted in time goes back to you.",
+            "You can treat another member of the same café to pennies. A treat not accepted in time goes back to you.",
             "What you leave on the askı is a gift to whoever takes it next and can't be taken back.",
           ],
         },
@@ -196,14 +196,14 @@ export function terms(lang: LegalLang, c: Controller): LegalDoc {
         {
           h: "Your account",
           p: [
-            "Keep your sign-in to yourself. You can delete your account at any time on the Account page; peni left at cafés is then given up.",
+            "Keep your sign-in to yourself. You can delete your account at any time on the Account page; pennies left at cafés is then given up.",
             "We may close an account that is used to cheat a café or other members.",
           ],
         },
         {
           h: "Responsibility",
           p: [
-            "Cafés are responsible for what they sell and for honouring the peni they gave. We work to keep Peni running and correct, but can't promise it will never be down.",
+            "Cafés are responsible for what they sell and for honouring the pennies they gave. We work to keep Penny running and correct, but can't promise it will never be down.",
             "Turkish law applies. Consumers can turn to consumer arbitration committees and consumer courts.",
           ],
         },
@@ -212,19 +212,19 @@ export function terms(lang: LegalLang, c: Controller): LegalDoc {
   return {
     title: "Kullanım koşulları",
     updated: `Son güncelleme ${LEGAL_UPDATED.tr}`,
-    intro: `Peni'yi ${c.name} işletir. Peni'yi kullanarak bu koşulları kabul etmiş olursun.`,
+    intro: `Penny'yi ${c.name} işletir. Penny'yi kullanarak bu koşulları kabul etmiş olursun.`,
     sections: [
       {
-        h: "Peni nedir",
+        h: "Penny nedir",
         p: [
-          "Peni, gittiğin kafenin sana teşekkürüdür. 1 peni ₺1 değerindedir; yalnızca kazandığın kafede, oradan aldıklarında geçer.",
-          "Peni para değildir: nakde çevrilmez, başka kafeye taşınmaz, faiz getirmez. Ne kadar peni verileceğine ve hangi ürünlerde harcanacağına her kafe kendisi karar verir ve bunu değiştirebilir.",
+          "Penny, gittiğin kafenin sana teşekkürüdür. 1 penny ₺1 değerindedir; yalnızca kazandığın kafede, oradan aldıklarında geçer.",
+          "Penny para değildir: nakde çevrilmez, başka kafeye taşınmaz, faiz getirmez. Ne kadar penny verileceğine ve hangi ürünlerde harcanacağına her kafe kendisi karar verir ve bunu değiştirebilir.",
         ],
       },
       {
         h: "Ismarlamak ve askı",
         p: [
-          "Aynı kafenin başka bir üyesine peni ısmarlayabilirsin. Süresinde kabul edilmeyen ısmarlama sana geri döner.",
+          "Aynı kafenin başka bir üyesine penny ısmarlayabilirsin. Süresinde kabul edilmeyen ısmarlama sana geri döner.",
           "Askıya bıraktığın, sonraki alan için bir hediyedir; geri alınmaz.",
         ],
       },
@@ -238,14 +238,14 @@ export function terms(lang: LegalLang, c: Controller): LegalDoc {
       {
         h: "Hesabın",
         p: [
-          "Giriş bilgilerini kimseyle paylaşma. Hesabını istediğin zaman Hesabım sayfasından silebilirsin; o zaman kafelerde kalan penin de silinir.",
+          "Giriş bilgilerini kimseyle paylaşma. Hesabını istediğin zaman Hesabım sayfasından silebilirsin; o zaman kafelerde kalan penny'n de silinir.",
           "Bir kafeyi ya da diğer üyeleri kandırmak için kullanılan hesabı kapatabiliriz.",
         ],
       },
       {
         h: "Sorumluluk",
         p: [
-          "Kafeler sattıklarından ve verdikleri peninin karşılığından sorumludur. Peni'nin çalışır ve doğru olması için uğraşırız; hiç kesinti olmayacağını söz veremeyiz.",
+          "Kafeler sattıklarından ve verdikleri penny'nin karşılığından sorumludur. Penny'nin çalışır ve doğru olması için uğraşırız; hiç kesinti olmayacağını söz veremeyiz.",
           "Türk hukuku uygulanır. Tüketiciler tüketici hakem heyetlerine ve tüketici mahkemelerine başvurabilir.",
         ],
       },

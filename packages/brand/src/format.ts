@@ -91,7 +91,7 @@ export function formatNumber(n: number): string {
 export function formatPeni(n: number, opts: { signed?: boolean } = {}): string {
   const v = Math.round(n) + 0;
   const sign = v < 0 ? MINUS : opts.signed && v > 0 ? "+" : "";
-  return `${sign}${numberFmt.format(Math.abs(v))} peni`;
+  return `${sign}${numberFmt.format(Math.abs(v))} penny`;
 }
 
 /** Turkish puts the sign first: `formatPercent(5) === "%5"`. */

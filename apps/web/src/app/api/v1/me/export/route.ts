@@ -5,7 +5,7 @@ import { route } from "@/server/http";
 export const GET = route(
   async ({ app, customer }) => {
     const data = await app.exportAccount(customer!);
-    return NextResponse.json(data, { headers: { "content-disposition": `attachment; filename="peni-verilerim-${data.exportedAt.slice(0, 10)}.json"` } });
+    return NextResponse.json(data, { headers: { "content-disposition": `attachment; filename="penny-verilerim-${data.exportedAt.slice(0, 10)}.json"` } });
   },
   { auth: "customer" },
 );

@@ -135,7 +135,7 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
           <div className="flex items-center justify-between gap-3">
             <span className="flex items-baseline gap-3">
               <a href="/" className="font-serif text-2xl">
-                peni
+                penny
               </a>
               <span className="text-sm text-muted">{t("panel")}</span>
             </span>

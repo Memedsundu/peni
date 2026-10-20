@@ -369,7 +369,7 @@ function Amount({
           />
         )}
         <p className="font-serif text-6xl leading-none text-[var(--cafe)] tabular">
-          {peni} <span className="text-3xl">peni</span>
+          {peni} <span className="text-3xl">penny</span>
         </p>
         {goods(peni, refItems) && <p className="text-muted">≈ {goods(peni, refItems)}</p>}
       </div>

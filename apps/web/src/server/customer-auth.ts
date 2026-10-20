@@ -249,15 +249,15 @@ function sameHash(a: string, b: string): boolean {
   return a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-const CODE_SUBJECT = "Peni giriş kodun";
+const CODE_SUBJECT = "Penny giriş kodun";
 
 /** Turkish, sen, short: the code first so it shows in the notification. */
 function codeEmail(to: string, code: string): EmailMessage {
   return {
     to,
     subject: `${CODE_SUBJECT}: ${code}`,
-    text: `Peni giriş kodun: ${code}\n\nKod 10 dakika geçerli. Bu girişi sen istemediysen bu e-postayı yok sayabilirsin.`,
-    html: `<p style="font-family:system-ui,sans-serif;font-size:16px">Peni giriş kodun:</p>
+    text: `Penny giriş kodun: ${code}\n\nKod 10 dakika geçerli. Bu girişi sen istemediysen bu e-postayı yok sayabilirsin.`,
+    html: `<p style="font-family:system-ui,sans-serif;font-size:16px">Penny giriş kodun:</p>
 <p style="font-family:system-ui,sans-serif;font-size:32px;font-weight:600;letter-spacing:6px">${code}</p>
 <p style="font-family:system-ui,sans-serif;color:#555">Kod 10 dakika geçerli. Bu girişi sen istemediysen bu e-postayı yok sayabilirsin.</p>`,
   };

@@ -152,7 +152,7 @@ export function Till() {
     <div className="flex h-dvh flex-col overflow-hidden bg-paper text-ink">
       <header className="flex h-16 shrink-0 items-center justify-between gap-4 border-b border-line px-6">
         <div className="flex min-w-0 items-center gap-4">
-          <span className="font-serif text-[26px] leading-none">peni</span>
+          <span className="font-serif text-[26px] leading-none">penny</span>
           <span className="truncate text-[15px] text-muted">
             {cafeName ? `${cafeName} · ` : ""}
             {title}

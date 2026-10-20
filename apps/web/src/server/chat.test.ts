@@ -197,7 +197,7 @@ describe("The assistant's chat (plan piece 29)", () => {
     expect((await app.chat.current(leyla)).chatId).toBe(fresh.chatId);
   });
 
-  it("explains a part of Raporlar from the numbers Peni works out, not the page's", async () => {
+  it("explains a part of Raporlar from the numbers Penny works out, not the page's", async () => {
     const page = await app.salesReports.get(leyla, { from: "2026-10-01", through: "2026-10-15" });
     steps = [
       (r) => {

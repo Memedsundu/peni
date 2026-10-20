@@ -76,7 +76,7 @@ export function CafePage({ slug }: { slug: string }) {
           <div className="flex items-baseline justify-between">
             <span className="text-muted">{t("yourPeni")}</span>
             <span className="tabular font-serif text-5xl leading-none text-[var(--cafe)]">
-              {cafe.membership!.balancePeni} <span className="text-2xl">peni</span>
+              {cafe.membership!.balancePeni} <span className="text-2xl">penny</span>
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">

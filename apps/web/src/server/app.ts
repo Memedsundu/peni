@@ -882,7 +882,7 @@ export class PeniApp {
   /** What the customer screen's QR opens: public, and personal once signed in. */
   async claimPreview(token: string, viewer: CustomerRecord | null): Promise<ClaimDTO> {
     const claim = await this.claims.getClaimByToken(token);
-    if (!claim) throw new AppError("CLAIM_NOT_FOUND", "No such peni code", 404);
+    if (!claim) throw new AppError("CLAIM_NOT_FOUND", "No such penny code", 404);
     return this.claimDTO(claim, viewer, false);
   }
 
@@ -895,7 +895,7 @@ export class PeniApp {
     let claim: PeniClaim | null;
     if ("token" in input) {
       claim = await this.claims.getClaimByToken(input.token);
-      if (!claim) throw new AppError("CLAIM_NOT_FOUND", "No such peni code", 404);
+      if (!claim) throw new AppError("CLAIM_NOT_FOUND", "No such penny code", 404);
     } else {
       const cafe = await this.requireCafe(input.cafeSlug);
       const now = this.now();
@@ -908,13 +908,13 @@ export class PeniApp {
       // Someone else's taken code counts as a miss too: it's what a guess would hit.
       if (!claim || (claim.claimedAt && !own)) {
         await this.claims.recordMiss(customer.id, now);
-        if (!claim) throw new AppError("CLAIM_CODE_WRONG", "No open peni code like that here", 404);
+        if (!claim) throw new AppError("CLAIM_CODE_WRONG", "No open penny code like that here", 404);
       }
     }
     const before = await this.directory.findMembership(customer.id, claim.cafeId);
     // Only peni that can still be taken make someone a member.
     const state = claimState(claim, this.now());
-    if (!before && state !== "open") throw new PeniError(CLOSED_CLAIM[state], "This peni code is closed");
+    if (!before && state !== "open") throw new PeniError(CLOSED_CLAIM[state], "This penny code is closed");
     const membershipId = before?.id ?? (await this.ensureMembership(customer.id, claim.cafeId));
     const { claim: taken } = await this.peni.takeClaim(claim.id, membershipId);
     return this.claimDTO(taken, customer, !before);

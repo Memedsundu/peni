@@ -50,7 +50,7 @@ describe("café cards and the café page (G1, G2, G9, G12)", () => {
     expect((await app.wallet(ayse())).cafes.find((c) => c.cafeSlug === "moda")!.refItems).toEqual(moda!.refItems);
   });
 
-  it("puts the next upcoming Peni masası on the card, never a past one", async () => {
+  it("puts the next upcoming Penny masası on the card, never a past one", async () => {
     const [moda] = await app.listCafes(null);
     expect(moda!.nextEvent).toEqual({
       postId: "post_event_1",
@@ -132,7 +132,7 @@ describe("the feed and events (G4, G13)", () => {
     await expect(app.rsvp(deniz(), "moda", "post_event_1")).rejects.toMatchObject({ code: "EVENT_FULL" });
   });
 
-  it("serves a Peni masası as an .ics file", async () => {
+  it("serves a Penny masası as an .ics file", async () => {
     const { filename, body } = await app.eventIcs("moda", "post_event_1");
     expect(filename).toBe("peni-masasi-2026-10-22.ics");
     expect(body).toContain("BEGIN:VEVENT\r\n");
@@ -146,7 +146,7 @@ describe("the feed and events (G4, G13)", () => {
 });
 
 describe("membership (G7b)", () => {
-  it("gives each membership a stable Peni kodu", async () => {
+  it("gives each membership a stable Penny kodu", async () => {
     const mine = (await modaFor(ayse())).membership!;
     expect(mine.memberCode).toMatch(/^[B-DF-HJ-NP-TV-Z2-9]{3}-[B-DF-HJ-NP-TV-Z2-9]{3}$/);
     expect(mine.memberCode).toBe(await app.memberCodeFor(mine.id));
@@ -206,7 +206,7 @@ describe("gifts (G6, G11, G15, G16, G17)", () => {
     expect(await app.lookupMember(ayse(), "moda", { phone: DEMO_CUSTOMERS.mehmet.phone })).toMatchObject({ firstName: "Mehmet" });
   });
 
-  it("finds a recipient by Peni kodu, typed any way, only at that café (D28)", async () => {
+  it("finds a recipient by Penny kodu, typed any way, only at that café (D28)", async () => {
     const code = (await modaFor(mehmet())).membership!.memberCode;
     expect(await app.lookupMember(ayse(), "moda", { code: code.replace("-", " ").toLowerCase() })).toEqual({ firstName: "Mehmet", lastInitial: "K" });
     await expect(app.lookupMember(ayse(), "moda", { code: "BCD-FGH" })).rejects.toMatchObject({ code: "RECIPIENT_NOT_MEMBER" });

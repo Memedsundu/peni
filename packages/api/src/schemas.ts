@@ -32,7 +32,7 @@ export const sendGiftSchema = z
     message: z.string().trim().max(140).optional(),
     idempotencyKey: z.string().min(8).max(100),
   })
-  .refine(oneRecipient, "Telefon, Peni kodu veya üyeden birini seç");
+  .refine(oneRecipient, "Telefon, Penny kodu veya üyeden birini seç");
 
 export const donateAskidaSchema = z.object({
   cafeSlug: z.string().min(1),
@@ -116,7 +116,7 @@ export const pauseMemberSchema = z.object({ paused: z.boolean() });
 /** `POST /cafes/:slug/members/lookup`: by phone or by Peni kodu, one of them. [G6, D28] */
 export const memberLookupSchema = z
   .object({ phone: phoneSchema.optional(), code: memberCodeSchema.optional() })
-  .refine((r) => (r.phone === undefined) !== (r.code === undefined), "Telefon veya Peni kodu gir");
+  .refine((r) => (r.phone === undefined) !== (r.code === undefined), "Telefon veya Penny kodu gir");
 
 /** `GET /cafes/:slug/members?q=`: the café's members who show their profile. [D28] */
 export const cafeMembersQuerySchema = z.object({ q: z.string().trim().max(40).optional() });

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Peni",
+    "name": "Penny",
     "slug": "peni",
     "scheme": "peni",
     "version": "0.1.0",
@@ -54,7 +54,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Peni, kasadaki QR'ı okutup peni'ni alman için kamerayı kullanır.",
+          "cameraPermission": "Penny, kasadaki QR'ı okutup penny'ni alman için kamerayı kullanır.",
           "microphonePermission": false,
           "recordAudioAndroid": false
         }

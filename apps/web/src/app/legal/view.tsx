@@ -6,7 +6,7 @@ export function LegalView({ doc, lang, path, other }: { doc: LegalDoc; lang: Leg
     <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-10 px-6 pb-16 pt-6">
       <header className="flex items-center justify-between">
         <a href="/" className="font-serif text-2xl">
-          Peni
+          Penny
         </a>
         <a href={lang === "tr" ? `${path}?lang=en` : path} className="text-sm font-medium" lang={lang === "tr" ? "en" : "tr"}>
           {lang === "tr" ? "EN" : "TR"}

@@ -16,7 +16,7 @@ beforeEach(async () => {
 const zeynep = async () => (await app.identity.getCustomer("cus_zeynep"))!;
 
 describe("Verilerimi indir and Hesabımı sil (plan piece 34)", { timeout: 30_000 }, () => {
-  it("gives the customer everything Peni keeps about them", async () => {
+  it("gives the customer everything Penny keeps about them", async () => {
     const data = await app.exportAccount(await zeynep());
     expect(data.profile).toMatchObject({ displayName: "Zeynep Demir", phone: "+905320000011", profileVisible: true });
     expect(data.cafes.map((c) => c.cafe)).toContain("Moda Kahvesi");

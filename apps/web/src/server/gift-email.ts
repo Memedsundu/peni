@@ -9,9 +9,9 @@ const escape = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)}
  */
 export function giftEmail(input: { to: string; fromName: string; peni: number; cafeName: string; message: string | null; link: string; expiresInHours: number }): EmailMessage {
   const { to, fromName, peni, cafeName, message, link, expiresInHours } = input;
-  const headline = `${fromName} sana ${peni} peni ısmarladı`;
+  const headline = `${fromName} sana ${peni} penny ısmarladı`;
   const note = message ? `“${message}”` : null;
-  const after = `${expiresInHours} saat içinde kabul etmezsen peni gönderene geri döner.`;
+  const after = `${expiresInHours} saat içinde kabul etmezsen penny gönderene geri döner.`;
   return {
     to,
     subject: `${headline} · ${cafeName}`,

@@ -75,12 +75,12 @@ describe("formatTL", () => {
 });
 
 describe("numbers", () => {
-  it('formatPeni(1240) === "1.240 peni"', () => expect(formatPeni(1240)).toBe("1.240 peni"));
+  it('formatPeni(1240) === "1.240 penny"', () => expect(formatPeni(1240)).toBe("1.240 penny"));
   it("formatPeni signs", () => {
-    expect(formatPeni(90)).toBe("90 peni");
-    expect(formatPeni(2, { signed: true })).toBe("+2 peni");
-    expect(formatPeni(-90)).toBe("−90 peni");
-    expect(formatPeni(0, { signed: true })).toBe("0 peni");
+    expect(formatPeni(90)).toBe("90 penny");
+    expect(formatPeni(2, { signed: true })).toBe("+2 penny");
+    expect(formatPeni(-90)).toBe("−90 penny");
+    expect(formatPeni(0, { signed: true })).toBe("0 penny");
   });
   it("formatNumber, formatPercent, numberWord", () => {
     expect(formatNumber(1240)).toBe("1.240");
@@ -104,7 +104,7 @@ describe("goods", () => {
     { name: "Türk Kahvesi", priceKurus: 9000 },
     { name: "Çay", priceKurus: 3000 },
   ];
-  it('"Sende 90 peni · ≈ 3 çay": the cheapest reference item, lower-cased', () => {
+  it('"Sende 90 penny · ≈ 3 çay": the cheapest reference item, lower-cased', () => {
     expect(goods(90, ref)).toBe("3 çay");
   });
   it('the two-item line: "3 çay · 1 Türk kahvesi"', () => {
@@ -209,11 +209,11 @@ describe("locativeTime", () => {
     expect(locativeTime("20:00")).toBe("20:00'de");
     expect(locativeTime("00:00")).toBe("00:00'da");
   });
-  it('"Kabul edilmezse peni yarın 14:30\'da sana döner."', () => {
+  it('"Kabul edilmezse penny yarın 14:30\'da sana döner."', () => {
     const at = new Date("2026-10-17T11:30:00Z");
     const now = new Date("2026-10-16T11:30:00Z");
-    expect(`Kabul edilmezse peni ${relDay(at, now)} ${locativeTime(at)} sana döner.`).toBe(
-      "Kabul edilmezse peni yarın 14:30'da sana döner.",
+    expect(`Kabul edilmezse penny ${relDay(at, now)} ${locativeTime(at)} sana döner.`).toBe(
+      "Kabul edilmezse penny yarın 14:30'da sana döner.",
     );
   });
 });
@@ -310,14 +310,14 @@ describe("djb2", () => {
   });
 });
 
-describe("peni arithmetic", () => {
+describe("penny arithmetic", () => {
   it("earnPreview(5500, 5) === 2", () => expect(earnPreview(5500, 5)).toBe(2));
   it("earnPreview floors and never goes negative", () => {
     expect(earnPreview(12000, 5)).toBe(6);
     expect(earnPreview(1900, 5)).toBe(0);
     expect(earnPreview(0, 5)).toBe(0);
   });
-  it('usablePeni caps by share: "Bu siparişte en fazla 55 peni kullanabilirsin."', () => {
+  it('usablePeni caps by share: "Bu siparişte en fazla 55 penny kullanabilirsin."', () => {
     expect(usablePeni({ balance: 90, subtotalKurus: 11000, askidaKurus: 0, maxRedeemSharePercent: 50 })).toBe(55);
   });
   it("usablePeni caps by balance, by the askı-reduced subtotal, and by the due amount", () => {

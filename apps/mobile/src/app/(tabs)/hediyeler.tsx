@@ -64,7 +64,7 @@ export default function Treats() {
                     {g.cafeName}
                   </Txt>
                 </View>
-                <Txt serif size={32}>{`${g.peni} peni`}</Txt>
+                <Txt serif size={32}>{`${g.peni} penny`}</Txt>
               </View>
               {g.message ? <Txt serif size={22}>{`“${g.message}”`}</Txt> : null}
               <GiftActions gift={g} onChange={changed} onError={setMessage} />

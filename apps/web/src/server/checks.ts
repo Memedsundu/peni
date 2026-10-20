@@ -209,7 +209,7 @@ export class ChecksService {
     const s = await this.statement(ctx, draft.proposal);
     let correctionKurus: number | null = null;
     if (input.fixBalance) {
-      if (!s.canFix || s.differenceKurus === null) throw new AppError("CHECK_CANT_FIX", "Peni's bank balance can't be set from this statement", 409);
+      if (!s.canFix || s.differenceKurus === null) throw new AppError("CHECK_CANT_FIX", "Penny's bank balance can't be set from this statement", 409);
       const why = `${[s.bankName, s.to && trDay(s.to)].filter(Boolean).join(" ")} ekstresine göre`.trim();
       await this.money.correctBank(ctx, `statement:${draft.id}`, s.differenceKurus, note ? `${why}: ${note}` : why);
       correctionKurus = s.differenceKurus;

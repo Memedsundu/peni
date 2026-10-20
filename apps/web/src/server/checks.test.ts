@@ -121,7 +121,7 @@ describe("Bank and card statements (plan piece 27, A5)", () => {
     expect(s.inTransitKurus).toBe(records.filter(transit).reduce((sum, r) => sum + r.amountKurus, 0));
   });
 
-  it("sets Peni's bank balance to the statement's only when asked, once, by someone who manages the money", async () => {
+  it("sets Penny's bank balance to the statement's only when asked, once, by someone who manages the money", async () => {
     // Peni's balance less the card sales of the last days, which reach the bank after the statement.
     const transit = (await app.money.bankRecords(CAFE, day(-4), day(-1)))!.filter((r) => r.kind === "sales").reduce((sum, r) => sum + r.amountKurus, 0);
     const peni = (await app.money.bankBalanceThrough(CAFE, day(-1)))! - transit;

@@ -326,7 +326,7 @@ export class ChatService {
           const result = {
             month: c.month,
             through: c.through,
-            note: "Only members who used Peni are counted. Never name anyone.",
+            note: "Only members who used Penny are counted. Never name anyone.",
             members: c.members,
             joinedThisMonth: c.joined,
             came: { now: c.visitors, sameDaysLastMonth: c.visitorsBefore },

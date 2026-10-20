@@ -113,7 +113,7 @@ describe("reports and moderation (plan piece 15)", () => {
     expect(await code(app.feed.resolveReport(leyla, { targetType: "comment", targetId: said.id, action: "keep", pauseAuthor: false }))).toBe("REPORT_NOT_FOUND");
   });
 
-  it("takes a member's event down and pauses them; a paused member reads but can't write, and keeps their peni", async () => {
+  it("takes a member's event down and pauses them; a paused member reads but can't write, and keeps their pennies", async () => {
     const { postId } = await app.openEvent(people.mehmet!, "moda", { ...saturday, title: "Kripto fırsatı, kaçırma" });
     await app.report(people.ayse!, "moda", { targetType: "post", targetId: postId, reason: "spam" });
     const before = (await app.cafeDetail("moda", people.mehmet!)).membership!.balancePeni;

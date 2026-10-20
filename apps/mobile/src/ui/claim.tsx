@@ -12,7 +12,7 @@ export function Taken({ claim }: { claim: ClaimDTO }) {
     <View style={{ gap: 22 }} accessibilityLiveRegion="polite">
       <CafeLine name={claim.cafeName} />
       <Amount peni={claim.peni} goods={claim.goods} caption={t("yours")} />
-      <Stat label={t("balance")} value={`${claim.balancePeni ?? 0} peni`} />
+      <Stat label={t("balance")} value={`${claim.balancePeni ?? 0} penny`} />
       {claim.joined ? <Txt>{t("joined")}</Txt> : null}
       <Txt muted>{t("spendHint")}</Txt>
       <Btn kind="secondary" size="md" onPress={() => router.push(`/harca?kafe=${encodeURIComponent(claim.cafeSlug)}`)}>

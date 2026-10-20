@@ -66,7 +66,7 @@ export default function SendTreat() {
   else if (!wallet) body = message ? null : <Loading />;
   else if (wallet.cafes.length === 0) body = <Txt size={18}>{t("treatNoCafe")}</Txt>;
   else if (!here)
-    body = <CafePicker title={t("treatWhichCafe")} cafes={wallet.cafes.map((c) => ({ slug: c.cafeSlug, name: c.cafeName, right: `${c.balancePeni} peni` }))} onPick={setCafe} />;
+    body = <CafePicker title={t("treatWhichCafe")} cafes={wallet.cafes.map((c) => ({ slug: c.cafeSlug, name: c.cafeName, right: `${c.balancePeni} penny` }))} onPick={setCafe} />;
   else if (sent && recipient) {
     body = (
       <View style={{ gap: 22 }} accessibilityLiveRegion="polite">
@@ -289,7 +289,7 @@ function HowMuch({ cafe, recipient, onChange, onSent, onError }: { cafe: WalletC
         </View>
         <AmountPicker amounts={[10, 20, 50]} value={peni} max={balance} onChange={setPeni} otherLabel={t("other")} label={t("howMuch")} />
         <Txt serif size={60} color={c.cafe}>
-          {peni} <Txt serif size={30} color={c.cafe}>peni</Txt>
+          {peni} <Txt serif size={30} color={c.cafe}>penny</Txt>
         </Txt>
         {asGoods ? <Txt muted>{`≈ ${asGoods}`}</Txt> : null}
       </View>

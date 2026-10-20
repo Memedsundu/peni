@@ -502,8 +502,8 @@ beforeEach(async () => {
   stores = inMemoryStores();
 });
 
-describe("Shelby → Peni (plan piece 33)", { timeout: 30_000 }, () => {
-  it("reads Shelby's units and weeks as Peni's", () => {
+describe("Shelby → Penny (plan piece 33)", { timeout: 30_000 }, () => {
+  it("reads Shelby's units and weeks as Penny's", () => {
     expect(unitOf("ml")).toEqual({ unit: "l", factor: 0.001 });
     expect(unitOf("slice").unit).toBe("adet");
     expect(milliOf(200, "ml")).toBe(200);
@@ -622,7 +622,7 @@ describe("Shelby → Peni (plan piece 33)", { timeout: 30_000 }, () => {
     ]);
   });
 
-  it("writes into Peni, where every total matches Shelby's and the team signs in as before", async () => {
+  it("writes into Penny, where every total matches Shelby's and the team signs in as before", async () => {
     await writeShelby(stores, mapped.records);
     const rows = await checkMove(snap, stores, "cafe_shelby");
     expect(rows.filter((x) => !x.ok)).toEqual([]);
