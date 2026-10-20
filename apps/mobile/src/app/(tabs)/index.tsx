@@ -7,7 +7,7 @@ import { Pressable, View } from "react-native";
 import { api } from "../../lib/api";
 import { when } from "../../lib/dates";
 import { useSession } from "../../lib/session";
-import { Btn, Hue, Label, Loading, Notice, Photo, Row, Screen, Title, Txt, useScreenColors } from "../../ui/kit";
+import { Btn, Coin, Hue, Label, Loading, Notice, Photo, Row, Screen, Title, Txt, useScreenColors } from "../../ui/kit";
 
 /** "Kafelerim" (design): the cafés the customer belongs to, each with its peni, then the others. */
 export default function MyCafes() {
@@ -111,9 +111,12 @@ function CafeCard({ cafe, onPress }: { cafe: CafeSummaryDTO; onPress: () => void
           {cafe.district ? <Txt muted>{cafe.district}</Txt> : null}
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <Txt serif size={44} color={c.cafe}>
-            {peni} <Txt serif size={22} color={c.cafe}>penny</Txt>
-          </Txt>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Coin size={36} />
+            <Txt serif size={44} color={c.cafe}>
+              {peni} <Txt serif size={22} color={c.cafe}>penny</Txt>
+            </Txt>
+          </View>
           {asGoods ? (
             <Txt size={14} muted>
               {asGoods}

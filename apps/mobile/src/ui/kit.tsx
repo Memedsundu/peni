@@ -273,14 +273,22 @@ export function CafeLine({ name }: { name: string }) {
   );
 }
 
-/** The big peni number in the café's colour, with what it means underneath. */
+/** The penny: the silver goat coin, beside a penny amount. Decorative; the number says it. */
+export function Coin({ size }: { size: number }) {
+  return <Image source={require("../../assets/coin.png")} style={{ width: size, height: size }} accessibilityElementsHidden importantForAccessibility="no" />;
+}
+
+/** The big penny number in the café's colour, with what it means underneath. */
 export function Amount({ peni, goods, caption }: { peni: number; goods: string | null; caption: string }) {
   const c = useScreenColors();
   return (
     <View style={{ gap: 6 }}>
-      <Txt serif size={72} color={c.cafe}>
-        {peni} <Txt serif size={36} color={c.cafe}>peni</Txt>
-      </Txt>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+        <Coin size={64} />
+        <Txt serif size={72} color={c.cafe}>
+          {peni} <Txt serif size={36} color={c.cafe}>penny</Txt>
+        </Txt>
+      </View>
       <Txt size={18}>
         {caption}
         {goods ? <Txt size={18} muted>{` · ${goods}`}</Txt> : null}

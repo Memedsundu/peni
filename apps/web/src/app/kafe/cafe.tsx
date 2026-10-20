@@ -4,7 +4,7 @@ import type { CafeDetailDTO, PostDTO, ReportInput } from "@peni/api";
 import { goods } from "@peni/brand/format";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../kasa/api";
-import { Button, Notice, Photo, Sheet } from "../kasa/ui";
+import { Button, Coin, Notice, Photo, Sheet } from "../kasa/ui";
 import { EmailSignIn, Shell, useLang, useSignedIn } from "../p/claim";
 import { errorText, fill, text, type Lang, type T } from "../p/text";
 
@@ -73,10 +73,13 @@ export function CafePage({ slug }: { slug: string }) {
 
       {member ? (
         <section className="flex flex-col gap-4 rounded-3xl bg-panel p-5">
-          <div className="flex items-baseline justify-between">
+          <div className="flex items-center justify-between">
             <span className="text-muted">{t("yourPeni")}</span>
-            <span className="tabular font-serif text-5xl leading-none text-[var(--cafe)]">
-              {cafe.membership!.balancePeni} <span className="text-2xl">penny</span>
+            <span className="tabular inline-flex items-center gap-3 font-serif text-5xl leading-none text-[var(--cafe)]">
+              <Coin size={44} />
+              <span>
+                {cafe.membership!.balancePeni} <span className="text-2xl">penny</span>
+              </span>
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">

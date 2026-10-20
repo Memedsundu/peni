@@ -36,7 +36,7 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-foreground.png",
         "monochromeImage": "./assets/adaptive-monochrome.png",
-        "backgroundColor": "#FFFFFF"
+        "backgroundColor": "#111111"
       },
       "permissions": [
         "android.permission.CAMERA"

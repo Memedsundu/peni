@@ -9,7 +9,7 @@ import { api, imageUri, newKey } from "../../lib/api";
 import { dayLabel, when } from "../../lib/dates";
 import { useSession } from "../../lib/session";
 import { FONTS } from "../../lib/theme";
-import { Btn, Field, Loading, Notice, Photo, Pills, Screen, Sheet, styles, Txt, useScreenColors } from "../../ui/kit";
+import { Btn, Coin, Field, Loading, Notice, Photo, Pills, Screen, Sheet, styles, Txt, useScreenColors } from "../../ui/kit";
 import { SignIn } from "../../ui/sign-in";
 
 type ReportTarget = Pick<ReportInput, "targetType" | "targetId">;
@@ -160,11 +160,14 @@ function Wallet({ cafe, onJoin }: { cafe: CafeDetailDTO; onJoin: () => void }) {
   const q = `?kafe=${encodeURIComponent(cafe.slug)}`;
   return (
     <View style={box}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <Txt muted>{t("yourPeni")}</Txt>
-        <Txt serif size={48} color={c.cafe}>
-          {cafe.membership.balancePeni} <Txt serif size={24} color={c.cafe}>peni</Txt>
-        </Txt>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+          <Coin size={42} />
+          <Txt serif size={48} color={c.cafe}>
+            {cafe.membership.balancePeni} <Txt serif size={24} color={c.cafe}>penny</Txt>
+          </Txt>
+        </View>
       </View>
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Btn kind="quiet" onPress={() => router.push(`/harca${q}`)} style={{ flex: 1, paddingHorizontal: 8 }}>
