@@ -2,6 +2,7 @@
  * Cafés, customers and their sessions: who is who. Staff live in staff.ts;
  * plan piece 3 (sign-in) grows this module.
  */
+import type { CafePlan } from "./plans";
 
 export interface Cafe {
   id: string;
@@ -15,6 +16,9 @@ export interface Cafe {
   referenceProductIds: string[];
   /** The café's own colour, once it picks one. */
   hue: string | null;
+  /** What it pays for (N11). While `trialEndsAt` is ahead it has everything: see `planOn`. */
+  plan: CafePlan;
+  trialEndsAt: Date | null;
 }
 
 export interface Customer {

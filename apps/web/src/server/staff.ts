@@ -22,8 +22,11 @@ import {
   overridesFrom,
   permissionsFor,
   pinProblem,
+  planAllows,
+  planOn,
   roleMatrix,
   type Cafe,
+  type CafePlan,
   type IdentityStore,
   type Permission,
   type Section,
@@ -81,6 +84,20 @@ export interface StaffContext {
   deviceId: string | null;
   /** What the role may do after a password sign-in. */
   rolePermissions: Set<Permission>;
+  /** What the café has today (N11): `permissions` and `rolePermissions` hold only what's in it. */
+  plan: CafePlan;
+}
+
+/**
+ * Every service's permission check: PLAN_NEEDED when the café's plan doesn't have it,
+ * FORBIDDEN when the role can't, NEEDS_PASSWORD when it can but not after a PIN sign-in.
+ */
+export function requirePermission(ctx: StaffContext, permission: Permission): void {
+  if (ctx.permissions.has(permission)) return;
+  if (!planAllows(ctx.plan, permission)) throw new AppError("PLAN_NEEDED", `This café's plan doesn't include this (${permission})`, 403);
+  throw ctx.rolePermissions.has(permission)
+    ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
+    : new AppError("FORBIDDEN", `Your role cannot do this (${permission})`, 403);
 }
 
 export interface StaffServiceOptions {
@@ -155,7 +172,8 @@ export class StaffService {
     const member = cafe ? await this.store.memberAt(account.id, cafe.id) : null;
     const inScope = !!cafe && (session.method === "password" || session.cafeId === cafe.id);
     if (!cafe || !member || member.removedAt || !inScope) throw new AppError("NOT_STAFF", "Not on this café's team", 403);
-    const rolePermissions = permissionsFor(member.role, await this.store.listOverrides(cafe.id));
+    const plan = planOn(cafe, this.now());
+    const rolePermissions = permissionsFor(member.role, await this.store.listOverrides(cafe.id), plan);
     const ctx: StaffContext = {
       account,
       member,
@@ -166,6 +184,7 @@ export class StaffService {
       tokenHash,
       method: session.method,
       deviceId: session.deviceId,
+      plan,
     };
     if (permission) this.require(ctx, permission);
     return ctx;
@@ -354,7 +373,7 @@ export class StaffService {
     const now = this.now();
     const staff: TillDTO["staff"] = [];
     for (const m of await this.store.listMembers(cafe.id)) {
-      if (!permissionsFor(m.role, overrides).has("till.use")) continue;
+      if (!permissionsFor(m.role, overrides, planOn(cafe, now)).has("till.use")) continue;
       const account = await this.store.getAccount(m.accountId);
       if (!account || account.disabledAt) continue;
       staff.push({
@@ -375,11 +394,12 @@ export class StaffService {
   async pinSignIn(deviceToken: string | null, memberId: string, pin: string): Promise<StaffSessionDTO> {
     const device = await this.device(deviceToken);
     const now = this.now();
+    const cafe = await this.identity.getCafe(device.cafeId);
     const member = await this.store.getMember(memberId);
     const account = member ? await this.store.getAccount(member.accountId) : null;
     const allowed =
-      member && account && !account.disabledAt && member.cafeId === device.cafeId && !member.removedAt &&
-      permissionsFor(member.role, await this.store.listOverrides(device.cafeId)).has("till.use");
+      cafe && member && account && !account.disabledAt && member.cafeId === device.cafeId && !member.removedAt &&
+      permissionsFor(member.role, await this.store.listOverrides(device.cafeId), planOn(cafe, now)).has("till.use");
     if (!member || !account || !allowed) throw new AppError("NOT_STAFF", "Not on this café's team", 403);
     if (!member.pinHash) throw new AppError("NO_PIN", "Set a PIN first", 409);
     if (member.pinLockedUntil && member.pinLockedUntil > now) {
@@ -418,7 +438,8 @@ export class StaffService {
     this.require(ctx, "team.view");
     const matrix = roleMatrix(await this.store.listOverrides(ctx.cafe.id));
     const bySection = new Map<Section, RolesDTO["sections"][number]>();
-    for (const key of ALL_PERMISSIONS) {
+    // Only what the café's plan has: the rest would be switches that do nothing.
+    for (const key of ALL_PERMISSIONS.filter((p) => planAllows(ctx.plan, p))) {
       const d = PERMISSIONS[key];
       let section = bySection.get(d.section);
       if (!section) {
@@ -437,7 +458,10 @@ export class StaffService {
 
   async saveRoles(ctx: StaffContext, roles: Record<string, Record<string, boolean>>): Promise<RolesDTO> {
     this.require(ctx, "roles.manage");
-    await this.store.replaceOverrides(ctx.cafe.id, overridesFrom(roles));
+    // The screen shows only the plan's switches; changes to the others stay for when the café moves up.
+    const kept = (await this.store.listOverrides(ctx.cafe.id)).filter((o) => !planAllows(ctx.plan, o.permission));
+    const changed = overridesFrom(roles).filter((o) => planAllows(ctx.plan, o.permission));
+    await this.store.replaceOverrides(ctx.cafe.id, [...changed, ...kept]);
     return this.roles(ctx);
   }
 
@@ -472,12 +496,8 @@ export class StaffService {
 
   // ─────────────────────────────────────────────── helpers
 
-  /** FORBIDDEN when the role can't; NEEDS_PASSWORD when it can, but not after a PIN sign-in. */
   private require(ctx: StaffContext, permission: Permission) {
-    if (ctx.permissions.has(permission)) return;
-    throw ctx.rolePermissions.has(permission)
-      ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
-      : new AppError("FORBIDDEN", `Your role cannot do this (${permission})`, 403);
+    requirePermission(ctx, permission);
   }
 
   /** Only an owner makes, changes or removes an owner. */
@@ -514,13 +534,15 @@ export class StaffService {
     for (const m of await this.store.membershipsOf(account.id)) {
       const cafe = await this.identity.getCafe(m.cafeId);
       if (!cafe) continue;
-      const permissions = this.scoped(permissionsFor(m.role, await this.store.listOverrides(cafe.id)), method);
+      const plan = planOn(cafe, this.now());
+      const permissions = this.scoped(permissionsFor(m.role, await this.store.listOverrides(cafe.id), plan), method);
       out.push({
         cafeId: cafe.id,
         slug: cafe.slug,
         name: cafe.name,
         role: m.role,
         permissions: ALL_PERMISSIONS.filter((p) => permissions.has(p)),
+        plan: { now: plan, paid: cafe.plan, trialEndsAt: cafe.trialEndsAt?.toISOString() ?? null },
       });
     }
     return out;

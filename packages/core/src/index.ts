@@ -17,6 +17,7 @@ export * from "./identity";
 export * from "./community";
 export * from "./images";
 export * from "./staff";
+export * from "./plans";
 export * from "./reports";
 export * from "./stock";
 export * from "./bills";

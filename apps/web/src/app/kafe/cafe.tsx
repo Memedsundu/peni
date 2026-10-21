@@ -82,14 +82,19 @@ export function CafePage({ slug }: { slug: string }) {
               </span>
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <a href={`/harca?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-center rounded-full border border-line bg-paper font-semibold">
-              {t("payWithPeni")}
-            </a>
-            <a href={`/ismarla?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-center rounded-full border border-line bg-paper font-semibold">
-              {t("treatSomeoneHere")}
-            </a>
-          </div>
+          {cafe.pennyOn ? (
+            <div className="grid grid-cols-2 gap-2">
+              <a href={`/harca?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-center rounded-full border border-line bg-paper font-semibold">
+                {t("payWithPeni")}
+              </a>
+              <a href={`/ismarla?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-center rounded-full border border-line bg-paper font-semibold">
+                {t("treatSomeoneHere")}
+              </a>
+            </div>
+          ) : (
+            // The plan has no pennies now: the balance stays, but can't be spent or given here.
+            <p className="text-sm leading-normal text-muted">{t("pennyOff")}</p>
+          )}
         </section>
       ) : (
         <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5">

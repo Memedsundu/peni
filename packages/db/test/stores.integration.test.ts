@@ -30,6 +30,8 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       coverImageUrl: null,
       referenceProductIds: ["cay"],
       hue: null,
+      plan: "penny",
+      trialEndsAt: new Date("2026-11-15T09:00:00Z"),
     });
     for (const [id, phone] of [
       [ayse, `+90532${run.length}${Date.now() % 1_000_000}1`],
@@ -63,7 +65,11 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.menu.deleteCategory(cafeId, sweet.id);
     expect(await stores.menu.getProduct(cafeId, "kek")).toMatchObject({ categoryId: null, category: "" });
     expect(await stores.menu.getProduct(cafeId, "yok")).toBeNull();
-    expect((await stores.identity.getCafeBySlug(`moda-${run}`))!.referenceProductIds).toEqual(["cay"]);
+    expect(await stores.identity.getCafeBySlug(`moda-${run}`)).toMatchObject({
+      referenceProductIds: ["cay"],
+      plan: "penny",
+      trialEndsAt: new Date("2026-11-15T09:00:00Z"),
+    });
   });
 
   it("keeps memberships, member codes, sessions and lookups", async () => {

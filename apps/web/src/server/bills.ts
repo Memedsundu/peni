@@ -36,7 +36,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { AppError } from "./errors";
 import type { MoneyService } from "./money";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const DAY_MS = 86_400_000;
 /** Bills a supplier page lists, and price points per item. */
@@ -844,9 +844,7 @@ export class BillService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }
 

@@ -30,7 +30,7 @@ import { AppError } from "./errors";
 import type { InsightsService } from "./insights";
 import type { MoneyService } from "./money";
 import type { SalesReportService } from "./sales-report";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 import type { StockService } from "./stock";
 
 const CHAT = "chat.answer";
@@ -52,7 +52,7 @@ const TOOL_NEEDS: Record<ChatTool, Permission> = {
   owed: "debts.view",
   stock: "stock.view",
   money: "cash.manage",
-  community: "reports.view",
+  community: "regulars.view",
 };
 
 const SECTION_ABOUT: Record<ReportSection, string> = {
@@ -526,9 +526,7 @@ export class ChatService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }
 

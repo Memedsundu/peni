@@ -746,6 +746,8 @@ export interface StaffPostDTO {
 
 export interface CafeDetailDTO extends CafeSummaryDTO {
   address: string | null;
+  /** False when the café doesn't take pennies now (its plan has none): balances stay, but can't be earned or spent here. */
+  pennyOn: boolean;
   earnRatePercent: number;
   maxRedeemSharePercent: number;
   menu: MenuItemDTO[];
@@ -1223,8 +1225,21 @@ export interface StaffCafeAccessDTO {
   slug: string;
   name: string;
   role: StaffRole;
-  /** Permission keys from @peni/core's PERMISSIONS, e.g. "till.use". */
+  /** Permission keys from @peni/core's PERMISSIONS, e.g. "till.use". Only what the café's plan has. */
   permissions: string[];
+  plan: StaffCafePlanDTO;
+}
+
+/** What a café pays for (N11). */
+export type CafePlanKey = "topluluk" | "penny" | "isletme";
+
+export interface StaffCafePlanDTO {
+  /** What it has today: everything during the trial. */
+  now: CafePlanKey;
+  /** What it pays for, and has once the trial is over. */
+  paid: CafePlanKey;
+  /** The trial's end; past or null when there's no trial running. */
+  trialEndsAt: string | null;
 }
 
 /** `GET /staff-session` */

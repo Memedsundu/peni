@@ -8,6 +8,7 @@ import {
   localDateKey,
   localHour,
   permissionsFor,
+  planOn,
   plusDays,
   priceChanges,
   validDay,
@@ -34,7 +35,7 @@ import type { EmailMessage, EmailSender } from "./customer-auth";
 import { AppError } from "./errors";
 import type { JobOutcome, JobRunner } from "./jobs";
 import type { SalesReportService } from "./sales-report";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 export const LETTER = "letter.write";
 /** How far back a bill can set the price a week started with. */
@@ -94,7 +95,7 @@ export class LetterService {
 
   /** The letter page: the week asked for, else the newest, and whether last week's is coming. */
   async get(ctx: StaffContext, week?: string | null): Promise<LettersDTO> {
-    if (!ctx.permissions.has("reports.view")) throw new AppError("FORBIDDEN", "Your role can't see reports", 403);
+    requirePermission(ctx, "reports.view");
     const cafeId = ctx.cafe.id;
     const today = await this.today(cafeId);
     const last = letterWeek(today);
@@ -128,8 +129,10 @@ export class LetterService {
   async startDue(): Promise<{ cafeId: string; weekStart: string; state: LettersDTO["state"] }[]> {
     const out: { cafeId: string; weekStart: string; state: LettersDTO["state"] }[] = [];
     for (const cafe of await this.d.cafes()) {
-      const { timeZone } = await this.d.directory.getSettings(cafe.id);
       const now = this.d.now();
+      // The letter reads the till, bills and stock: only cafés with İşletme get one.
+      if (planOn(cafe, now) !== "isletme") continue;
+      const { timeZone } = await this.d.directory.getSettings(cafe.id);
       const today = localDateKey(now, timeZone);
       const last = letterWeek(today);
       if (today === weekStartOf(today) && localHour(now, timeZone) < DIGEST_HOUR) continue;
@@ -357,7 +360,7 @@ export class LetterService {
     ]);
     let sent = 0;
     for (const m of members) {
-      if (m.removedAt || muted.includes(m.id) || !permissionsFor(m.role, overrides).has("reports.view")) continue;
+      if (m.removedAt || muted.includes(m.id) || !permissionsFor(m.role, overrides, planOn(cafe, this.d.now())).has("reports.view")) continue;
       const account = await this.d.staff.getAccount(m.accountId);
       if (!account?.email) continue;
       try {
@@ -385,8 +388,9 @@ export class LetterService {
     const owner = members.find((m) => m.role === "owner" && !m.removedAt);
     const account = owner ? await this.d.staff.getAccount(owner.accountId) : null;
     if (!owner || !account) return null;
-    const permissions = permissionsFor("owner", overrides);
-    return { account, member: owner, cafe, role: "owner", permissions, rolePermissions: permissions, tokenHash: "", method: "password", deviceId: null };
+    const plan = planOn(cafe, this.d.now());
+    const permissions = permissionsFor("owner", overrides, plan);
+    return { account, member: owner, cafe, role: "owner", permissions, rolePermissions: permissions, tokenHash: "", method: "password", deviceId: null, plan };
   }
 
   private async today(cafeId: string): Promise<string> {

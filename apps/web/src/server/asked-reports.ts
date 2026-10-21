@@ -27,7 +27,7 @@ import {
 } from "@peni/core";
 import { trLower } from "@peni/brand/format";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const ALL = 100_000;
 /** Products, categories and suppliers past this many are added together as "the rest". */
@@ -60,7 +60,7 @@ export class AskedReportService {
 
   /** Runs it for today: named periods ("bu ay") are this month now. Needs "reports.view". */
   async run(ctx: StaffContext, spec: AskedReport): Promise<AskedResultDTO> {
-    if (!ctx.permissions.has("reports.view")) throw new AppError("FORBIDDEN", "Your role can't see reports", 403);
+    requirePermission(ctx, "reports.view");
     const cafeId = ctx.cafe.id;
     const tz = (await this.directory.getSettings(cafeId)).timeZone;
     const today = localDateKey(this.now(), tz);

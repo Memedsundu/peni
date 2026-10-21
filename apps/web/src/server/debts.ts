@@ -21,7 +21,7 @@ import {
 import { AppError } from "./errors";
 import { keyHash, type BillService } from "./bills";
 import type { MoneyService } from "./money";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const DAY_MS = 86_400_000;
 /** Cashed checks stay on the page this long; card charges shown. */
@@ -589,9 +589,7 @@ export class DebtService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }
 

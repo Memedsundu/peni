@@ -42,6 +42,19 @@ DATABASE_URL=<staging pooled> PENI_DEMO=1 PENI_DEMO_STAFF_PASSWORD=<from .env.st
 
 The demo cafés are written from your Mac rather than on the site's first visit, because the full history takes minutes and a visit would run out of time.
 
+## Changing a café's plan
+
+Until there's online payment, plans are set by hand (decision N11), from `apps/web` with the database's pooled address:
+
+```sh
+DATABASE_URL=<pooled> pnpm --filter @peni/web set-plan                    # every café and its plan
+DATABASE_URL=<pooled> pnpm --filter @peni/web set-plan moda isletme       # moda pays for İşletme
+DATABASE_URL=<pooled> pnpm --filter @peni/web set-plan moda --trial       # two weeks of everything from now
+DATABASE_URL=<pooled> pnpm --filter @peni/web set-plan moda --end-trial   # ends a running trial
+```
+
+Plans are `topluluk` (free), `penny` (₺490 a month) and `isletme` (₺1,490 a month). Moving a café down hides pages and stops pennies for its customers; nothing is deleted, and moving it up brings everything back. The Plan page's "write to us" button emails `PENI_CONTACT_EMAIL`.
+
 ## The phone app
 
 The app is **Penny**, store id **`app.penny`** (iOS bundle id and Android package; it can't change after the first upload). Which server each build talks to is set in `apps/mobile/eas.json`, so a phone never falls back to `localhost`:

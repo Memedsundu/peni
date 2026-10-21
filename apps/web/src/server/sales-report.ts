@@ -28,7 +28,7 @@ import {
   type StockStore,
 } from "@peni/core";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const ALL = 100_000;
 const MONTHS = 12;
@@ -274,9 +274,7 @@ export class SalesReportService {
   }
 
   private require(ctx: StaffContext): void {
-    if (ctx.permissions.has("reports.view")) return;
-    if (ctx.rolePermissions.has("reports.view")) throw new AppError("NEEDS_PASSWORD", "Sign in with your password to see reports", 403);
-    throw new AppError("FORBIDDEN", "Your role can't see reports", 403);
+    requirePermission(ctx, "reports.view");
   }
 
   private async timeZone(cafeId: string): Promise<string> {

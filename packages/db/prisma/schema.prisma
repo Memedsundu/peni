@@ -126,6 +126,9 @@ model Cafe {
   referenceProductIds String[] @default([])
   /// The café's own colour, once it picks one.
   hue                 String?
+  /// What it pays for (N11). While trialEndsAt is ahead it has everything.
+  plan                CafePlan @default(topluluk)
+  trialEndsAt         DateTime?
   createdAt           DateTime @default(now())
 
   settings       CafeSettings?
@@ -182,6 +185,13 @@ model Cafe {
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
+}
+
+/// Mirrors CafePlan in @peni/core: free, pennies, everything.
+enum CafePlan {
+  topluluk
+  penny
+  isletme
 }
 
 /// Mirrors CafePeniSettings in @peni/core.

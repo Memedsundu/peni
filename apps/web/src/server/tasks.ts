@@ -20,7 +20,7 @@ import {
 } from "@peni/core";
 import { keyHash } from "./bills";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 export interface TaskListInput {
   name: string;
@@ -327,9 +327,6 @@ export class TaskService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    throw ctx.rolePermissions.has(permission)
-      ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
-      : new AppError("FORBIDDEN", "Not allowed", 403);
+    requirePermission(ctx, permission);
   }
 }

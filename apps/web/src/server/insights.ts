@@ -22,7 +22,7 @@ import {
   type PeniDirectory,
 } from "@peni/core";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const ALL = 100_000;
 /** Months a café can look back on. */
@@ -46,7 +46,7 @@ export class InsightsService {
   constructor(private readonly d: InsightsDeps) {}
 
   async get(ctx: StaffContext, month?: string): Promise<InsightsDTO> {
-    if (!ctx.permissions.has("reports.view")) throw new AppError("FORBIDDEN", "Your role can't see Müdavimler", 403);
+    requirePermission(ctx, "regulars.view");
     const cafeId = ctx.cafe.id;
     const tz = (await this.d.directory.getSettings(cafeId)).timeZone;
     const today = localDateKey(this.d.now(), tz);

@@ -37,7 +37,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { keyHash } from "./bills";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 /** Nakit ve banka shows this many days back. */
 const LINE_DAYS = 60;
@@ -821,8 +821,6 @@ export class MoneyService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }

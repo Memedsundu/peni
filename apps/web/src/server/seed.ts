@@ -79,6 +79,8 @@ export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boole
     referenceProductIds: ["cay", "turk"],
     // Moda chose its own colourway (G9); without a choice the hash would give mürekkep.
     hue: "lacivert",
+    plan: "isletme",
+    trialEndsAt: null,
   });
   await app.identity.saveCafe({
     id: "cafe_kuzguncuk",
@@ -90,6 +92,8 @@ export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boole
     coverImageUrl: null,
     referenceProductIds: [],
     hue: null,
+    plan: "isletme",
+    trialEndsAt: null,
   });
 
   await seedMenu(app, "cafe_moda", [

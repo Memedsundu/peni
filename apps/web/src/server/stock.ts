@@ -24,7 +24,7 @@ import {
 } from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const DAY_MS = 86_400_000;
 /** Moves the Stok page lists; sales are in each item's own history, or they'd bury the rest. */
@@ -362,9 +362,7 @@ export class StockService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }
 

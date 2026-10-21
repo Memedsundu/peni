@@ -182,6 +182,9 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     coverImageUrl: null,
     referenceProductIds: [],
     hue: null,
+    // A café moving from Shelby already runs on it: it keeps everything (N11).
+    plan: "isletme",
+    trialEndsAt: null,
   };
   const settings: CafePeniSettings = { ...defaultSettings(cafeId), timeZone: tz };
 

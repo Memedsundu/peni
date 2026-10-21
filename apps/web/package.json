@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "shelby-move": "tsx scripts/shelby-move.ts",
-    "shelby-freeze": "tsx scripts/shelby-freeze.ts"
+    "shelby-freeze": "tsx scripts/shelby-freeze.ts",
+    "set-plan": "tsx scripts/set-plan.ts"
   },
   "dependencies": {
     "@fontsource/instrument-serif": "5.3.0",

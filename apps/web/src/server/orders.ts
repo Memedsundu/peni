@@ -30,7 +30,7 @@ import { randomBytes, randomInt, randomUUID } from "node:crypto";
 import { AppError } from "./errors";
 import type { CashService } from "./cash";
 import type { PaymentActor, PaymentService } from "./payments";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 export const REASON_MAX = 200;
 
@@ -774,9 +774,7 @@ export class OrderService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }
 

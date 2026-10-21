@@ -75,7 +75,7 @@ import { outcomeDto, type ChecksService } from "./checks";
 import { AppError } from "./errors";
 import type { JobHandler, JobOutcome, JobRunner } from "./jobs";
 import { sheetRows } from "./sheet";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 /** Whether the assistant can read: with an OpenAI key, with the demo's stand-in, or not at all. */
 export type AiMode = "on" | "demo" | "off";
@@ -1022,10 +1022,7 @@ export class AssistantService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    throw ctx.rolePermissions.has(permission)
-      ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
-      : new AppError("FORBIDDEN", "Not allowed", 403);
+    requirePermission(ctx, permission);
   }
 }
 
