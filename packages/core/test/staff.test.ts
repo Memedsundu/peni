@@ -92,22 +92,22 @@ const NOT_CARRIED = ["api:alerts:run", "api:email:status", "api:email:test"];
 
 describe("roles", () => {
   it("gives the owner every permission, whatever the café changes", () => {
-    const owner = permissionsFor("owner", [{ role: "owner" as never, permission: "till.use", allowed: false }]);
+    const owner = permissionsFor("owner", [{ role: "owner" as never, permission: "till.use", allowed: false }], "isletme");
     expect(owner.size).toBe(ALL_PERMISSIONS.length);
   });
 
   it("starts each role with Shelby's access", () => {
-    const barista = permissionsFor("barista", []);
+    const barista = permissionsFor("barista", [], "isletme");
     expect(barista.has("till.use")).toBe(true);
     expect(barista.has("bills.add")).toBe(true);
     expect(barista.has("stock.view")).toBe(false);
     expect(barista.has("till.correct")).toBe(false);
-    const chef = permissionsFor("chef", []);
+    const chef = permissionsFor("chef", [], "isletme");
     expect(chef.has("stock.edit")).toBe(true);
     expect(chef.has("pay.payouts")).toBe(true);
     expect(chef.has("menu.edit")).toBe(false);
     expect(chef.has("reports.view")).toBe(false);
-    const manager = permissionsFor("manager", []);
+    const manager = permissionsFor("manager", [], "isletme");
     expect(manager.has("reports.view")).toBe(true);
     expect(manager.has("team.manage")).toBe(false);
   });

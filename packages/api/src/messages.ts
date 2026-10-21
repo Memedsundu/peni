@@ -69,6 +69,7 @@ export const errorMessagesTr: Record<string, string> = {
   OWNER_ONLY: "Bunu yalnız kafenin sahibi yapabilir.",
   PASSWORD_REQUIRED: "Yeni kişi için bir şifre belirle.",
   NEEDS_PASSWORD: "Bunun için şifrenle giriş yap.",
+  PLAN_NEEDED: "Bu, kafenin şu anki planında yok. Planı panelde Plan sayfasından görebilirsin.",
   PIN_FORMAT: "PIN 4-6 rakam olmalı.",
   PIN_TOO_EASY: "Daha zor tahmin edilecek bir PIN seç.",
   PIN_WRONG: "PIN yanlış.",

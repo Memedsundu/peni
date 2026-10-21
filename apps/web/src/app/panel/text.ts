@@ -752,6 +752,11 @@ const TEXT = {
   setupNotCountedHelp: { tr: "Arada bir sayım, Stok'taki rakamların doğru kalmasını sağlar.", en: "A count now and then keeps the numbers on Stock true." },
   setupCount: { tr: "Sayım yap", en: "Count now" },
   todayAllGoodBarista: { tr: "Bugün için senden beklenen görevler aşağıda.", en: "Today's tasks for you are below." },
+  todayCommunity: {
+    tr: "Kafenin sayfasında bugün neler oluyor? Bir haber, fotoğraf ya da etkinlik paylaş.",
+    en: "What's on at the café today? Share news, a photo or an event on its page.",
+  },
+  todayCommunityOpen: { tr: "Topluluk'a git", en: "Open Community" },
   urgent: { tr: "Acil", en: "Urgent" },
   todayTasks: { tr: "Bugünün görevleri", en: "Today's tasks" },
   todayNoTasks: { tr: "Bugün için görev yok.", en: "No tasks today." },
@@ -1339,6 +1344,51 @@ const TEXT = {
   wOpenShifts: { tr: "Vardiyalara git", en: "Open shifts" },
 
   navRegulars: { tr: "Müdavimler", en: "Regulars" },
+
+  // Plans and the trial (N11)
+  navPlan: { tr: "Plan", en: "Plan" },
+  planTitle: { tr: "Planın", en: "Your plan" },
+  planHelp: {
+    tr: "Yeni bir kafe iki hafta her şeyi ücretsiz kullanır. Sonra seçtiği planla devam eder; bir şey seçmezse ücretsiz Topluluk planına geçer. Planın dışında kalan sayfalar gizlenir ama hiçbir kayıt silinmez: üst plana geçince hepsi olduğu gibi geri gelir.",
+    en: "A new café uses everything free for two weeks. Then it carries on with the plan it picks; without one it moves to the free Community plan. Pages outside the plan are hidden, but nothing is deleted: moving up brings it all back as it was.",
+  },
+  planNow: { tr: "Şu an: {plan}", en: "Now: {plan}" },
+  planTrialLeft: { tr: "Deneme: {n} gün kaldı", en: "Trial: {n} days left" },
+  planTrialLastDay: { tr: "Deneme: bugün son gün", en: "Trial: last day today" },
+  planTrialThen: { tr: "Deneme bitince: {plan}", en: "After the trial: {plan}" },
+  planTrialOver: {
+    tr: "Deneme bitti. Kasa, stok ve raporlar gizlendi; verileriniz duruyor.",
+    en: "The trial is over. The till, stock and reports are hidden; your records are kept.",
+  },
+  planSee: { tr: "Planları gör", en: "See plans" },
+  planCurrent: { tr: "Şu anki planın", en: "Your current plan" },
+  planAfterTrial: { tr: "Deneme bitince", en: "After the trial" },
+  planFree: { tr: "Ücretsiz", en: "Free" },
+  planMonthly: { tr: "{price} / ay", en: "{price} a month" },
+  planYearly: { tr: "ya da yılda {price} (iki ay bedava)", en: "or {price} a year (two months free)" },
+  planVat: { tr: "Fiyatlara KDV eklenir.", en: "Prices are before KDV (VAT)." },
+  planAsk: { tr: "Bu plana geçmek için bize yazın", en: "Write to us to move to this plan" },
+  planAskSubject: { tr: "Penny: {cafe} için {plan} planı", en: "Penny: the {plan} plan for {cafe}" },
+  planAskNoEmail: {
+    tr: "Plan değiştirmek için Penny ekibiyle konuşun.",
+    en: "Talk to the Penny team to change plans.",
+  },
+  planToplulukHas: {
+    tr: "Kafenin sayfası, paylaşımlar, etkinlikler ve günün sorusu|Müşterilerin kafeye katılır, beğenir, yorum yazar|Ekip ve roller",
+    en: "The café's page, posts, events and the question of the day|Customers join, like and comment|The team and roles",
+  },
+  planPennyHas: {
+    tr: "Topluluk'taki her şey|Penny: müşteriler kendi kasanızdan ödedikten sonra penny kazanır ve harcar|Askıda kahve ve penny ısmarlama|Müdavimler: kim ne sıklıkla geliyor",
+    en: "Everything in Community|Pennies: customers earn and spend them after paying at your own till|Askıda coffee and treating with pennies|Regulars: who comes how often",
+  },
+  planIsletmeHas: {
+    tr: "Topluluk + Penny'deki her şey|Satış ekranı, kasa ve gün sonu|Faturalar, tedarikçiler, stok ve tarifler|Nakit, banka, borçlar ve ay kapanışı|Vardiyalar, puantaj, maaş ve görevler|Raporlar, Gözcü, haftalık mektup ve asistan",
+    en: "Everything in Community + Penny|The till, cash drawer and day's close|Bills, suppliers, stock and recipes|Cash, bank, debts and month close|Shifts, hours, pay and tasks|Reports, Gözcü, the weekly letter and the assistant",
+  },
+  planLockedPage: {
+    tr: "Bu sayfa İşletme planında. Kafenin şu anki planında yok.",
+    en: "This page is in the Business plan. The café's current plan doesn't have it.",
+  },
   ciHelp: {
     tr: "Penny kullanan komşular ne sıklıkla geliyor, kimler geri dönüyor, penny, ısmarlamalar, askı ve etkinlikler ne fark yaratıyor. Bir gelişi, üyenin penny kazandığı, harcadığı ya da askıdan aldığı gün sayıyoruz; uygulamasız müşteriler burada görünmez. Hiç kimsenin adı geçmez.",
     en: "How often the neighbours who use Penny come, who comes back, and what pennies, treats, the askı and events change. A visit is a day a member earned or spent pennies or took from the askı; customers without the app don't show here. Nobody is ever named.",

@@ -6,6 +6,7 @@ import {
   localDateKey,
   localHour,
   permissionsFor,
+  planOn,
   plusDays,
   SETUP_DAYS,
   setupChecklist,
@@ -296,7 +297,7 @@ export class AlertService {
       const letters: EmailMessage[] = [];
       for (const m of members) {
         if (m.removedAt || muted.includes(m.id)) continue;
-        const permissions = permissionsFor(m.role, overrides);
+        const permissions = permissionsFor(m.role, overrides, planOn(cafe, now));
         if (!this.mayEmail(permissions)) continue;
         const account = await this.d.staff.getAccount(m.accountId);
         if (!account?.email) continue;

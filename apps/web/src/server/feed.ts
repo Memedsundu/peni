@@ -19,7 +19,7 @@ import {
 } from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 /** Events start at least this far ahead, and at most this far. */
 const EVENT_LEAD_MS = 5 * 60_000;
@@ -360,9 +360,7 @@ export class FeedService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    if (ctx.rolePermissions.has(permission)) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't do this", 403);
+    requirePermission(ctx, permission);
   }
 }
 

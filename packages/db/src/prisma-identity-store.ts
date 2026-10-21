@@ -12,6 +12,8 @@ const CAFE = {
   coverImageUrl: true,
   referenceProductIds: true,
   hue: true,
+  plan: true,
+  trialEndsAt: true,
 } as const;
 const CUSTOMER = { id: true, phone: true, email: true, displayName: true, avatarUrl: true, profileVisible: true } as const;
 const LOGIN = { customerId: true, provider: true, subject: true, email: true } as const;

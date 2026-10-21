@@ -83,20 +83,32 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
               <span className="shrink-0 font-semibold underline underline-offset-4">{t("ltRead")}</span>
             </a>
           )}
-          <section className="flex flex-col gap-3" aria-labelledby="attention">
-            <h2 id="attention" className="text-sm text-muted">
-              {t("todayAttention")}
-            </h2>
-            {data.alerts.length === 0 ? (
-              <p className="rounded-3xl bg-panel px-5 py-6 leading-normal">{data.email.eligible ? t("todayAllGood") : t("todayAllGoodBarista")}</p>
-            ) : (
-              <ul className="flex flex-col gap-3">
-                {data.alerts.map((a) => (
-                  <AlertCard key={`${a.type}:${a.month ?? ""}`} alert={a} today={data.today} slug={cafe.slug} t={t} lang={lang} />
-                ))}
-              </ul>
-            )}
-          </section>
+          {cafe.plan.now !== "isletme" ? (
+            // Without the back office there's nothing to warn about: the café page is the day's work.
+            <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="leading-normal">{t("todayCommunity")}</p>
+              {(has(cafe, "posts.write") || has(cafe, "posts.moderate")) && (
+                <a href={withCafe("/panel/topluluk", cafe.slug)} className="inline-flex min-h-11 shrink-0 items-center self-start rounded-full bg-ink px-4 text-sm font-semibold text-paper sm:self-auto">
+                  {t("todayCommunityOpen")}
+                </a>
+              )}
+            </section>
+          ) : (
+            <section className="flex flex-col gap-3" aria-labelledby="attention">
+              <h2 id="attention" className="text-sm text-muted">
+                {t("todayAttention")}
+              </h2>
+              {data.alerts.length === 0 ? (
+                <p className="rounded-3xl bg-panel px-5 py-6 leading-normal">{data.email.eligible ? t("todayAllGood") : t("todayAllGoodBarista")}</p>
+              ) : (
+                <ul className="flex flex-col gap-3">
+                  {data.alerts.map((a) => (
+                    <AlertCard key={`${a.type}:${a.month ?? ""}`} alert={a} today={data.today} slug={cafe.slug} t={t} lang={lang} />
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
 
           {data.setup && <SetupList setup={data.setup} slug={cafe.slug} t={t} lang={lang} />}
 

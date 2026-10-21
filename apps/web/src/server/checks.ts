@@ -28,7 +28,7 @@ import { formatTL } from "@peni/brand/format";
 import { receiptPdf } from "./demo-receipt";
 import { AppError } from "./errors";
 import type { MoneyService } from "./money";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 /** Records this many days either side of a statement's own days can still match its lines. */
 const EDGE_DAYS = 7;
@@ -427,10 +427,7 @@ export class ChecksService {
   }
 
   private require(ctx: StaffContext): void {
-    if (ctx.permissions.has("cash.manage")) return;
-    throw ctx.rolePermissions.has("cash.manage")
-      ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
-      : new AppError("FORBIDDEN", "Not allowed", 403);
+    requirePermission(ctx, "cash.manage");
   }
 }
 

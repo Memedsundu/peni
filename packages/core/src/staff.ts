@@ -10,6 +10,8 @@
  * reads like the menu the staff member sees.
  */
 
+import { planAllows, type CafePlan } from "./plans";
+
 export const STAFF_ROLES = ["owner", "manager", "chef", "barista"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 /** The roles a café can adjust. The owner always has every permission. */
@@ -284,6 +286,13 @@ export const PERMISSIONS = {
     roles: MANAGER,
     locked: true,
   },
+  "regulars.view": {
+    section: "reports",
+    label: { tr: "Müdavimleri görür", en: "Sees regulars" },
+    hint: { tr: "Kimlerin ne sıklıkla geldiği, kimin uzun zamandır gelmediği.", en: "Who comes how often, and who hasn't been in for a while." },
+    roles: MANAGER,
+    locked: true,
+  },
   "assistant.use": {
     section: "assistant",
     label: { tr: "Asistanı kullanır", en: "Uses the assistant" },
@@ -370,9 +379,10 @@ export function roleMatrix(overrides: readonly RoleOverride[]): RoleMatrix {
   return matrix;
 }
 
-export function permissionsFor(role: StaffRole, overrides: readonly RoleOverride[]): Set<Permission> {
+/** What a role may do at a café: its defaults, the café's changes, and only what the café's plan has. */
+export function permissionsFor(role: StaffRole, overrides: readonly RoleOverride[], plan: CafePlan): Set<Permission> {
   const row = roleMatrix(overrides)[role];
-  return new Set(ALL_PERMISSIONS.filter((p) => row[p]));
+  return new Set(ALL_PERMISSIONS.filter((p) => row[p] && planAllows(plan, p)));
 }
 
 /**
@@ -454,7 +464,7 @@ export const FROM_SHELBY: Record<string, readonly Permission[]> = {
   "api:tasks:templates:write": ["tasks.edit"],
   "page:/admin/reports": ["reports.view"],
   "api:reports:read": ["reports.view"],
-  "api:reports:analytics:read": ["reports.view"],
+  "api:reports:analytics:read": ["reports.view", "regulars.view"],
   "page:/admin/assistant": ["assistant.use"],
   "api:ai:use": ["assistant.use"],
   "api:orders:correct": ["till.correct"],

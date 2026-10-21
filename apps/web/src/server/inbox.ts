@@ -18,7 +18,7 @@ import type { AssistantService } from "./assistant";
 import { ambalajBill } from "./demo-receipt";
 import { eventId } from "./assistant";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 /** A café takes at most this many files a day by email; past it, the rest are listed but not read. */
 export const EMAIL_DOCUMENTS_PER_DAY = 60;
@@ -224,10 +224,7 @@ export class InboxService {
   }
 
   private require(ctx: StaffContext, permission: Permission): void {
-    if (ctx.permissions.has(permission)) return;
-    throw ctx.rolePermissions.has(permission)
-      ? new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403)
-      : new AppError("FORBIDDEN", "Not allowed", 403);
+    requirePermission(ctx, permission);
   }
 }
 

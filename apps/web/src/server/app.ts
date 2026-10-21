@@ -71,6 +71,7 @@ import {
   Ledger,
   PeniError,
   PeniService,
+  PlanAwareDirectory,
   memberCode,
   normalizeMemberCode,
   startOfLocalDay,
@@ -317,7 +318,8 @@ export class PeniApp {
     private readonly options: PeniAppOptions,
     stores: PeniStores = inMemoryStores(),
   ) {
-    this.directory = stores.directory;
+    // A café whose plan has no pennies reads as having them off, everywhere (N11).
+    this.directory = new PlanAwareDirectory(stores.directory, stores.identity, () => this.now());
     this.ledger = new Ledger(stores.ledger);
     this.identity = stores.identity;
     this.community = stores.community;
@@ -590,6 +592,7 @@ export class PeniApp {
     return {
       ...(await this.cafeSummary(cafe, customer)),
       address: cafe.address,
+      pennyOn: settings.peniEnabled,
       earnRatePercent: settings.earnRateBps / 100,
       maxRedeemSharePercent: settings.maxRedeemShareBps / 100,
       menu: menu.map((m) => toMenuDTO(m, settings)),

@@ -1,41 +1,59 @@
 "use client";
 
-import { type StaffCafeAccessDTO, type StaffMeDTO } from "@peni/api";
+import { type CafePlanKey, type StaffCafeAccessDTO, type StaffMeDTO } from "@peni/api";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../kasa/api";
 import { Button, Notice } from "../kasa/ui";
 import { AskButton, AssistantProvider } from "./assistant";
-import { errorText, text, type Lang, type T, type TextKey } from "./text";
+import { errorText, fill, text, type Lang, type T, type TextKey } from "./text";
 
 export const field = "w-full rounded-2xl border border-line bg-paper px-4 py-3 text-base text-ink outline-none focus:border-ink";
 
-/** The panel's pages, in the order the nav shows them, and who may open each. */
+const PLAN_ORDER: readonly CafePlanKey[] = ["topluluk", "penny", "isletme"];
+
+/** The panel's pages, in the order the nav shows them, the lowest plan that has each (N11), and who may open each. */
 const PAGES = [
   // Everyone has a Bugün: alerts as far as their role sees, and today's tasks.
-  { key: "bugun", href: "/panel/bugun", label: "navToday", can: () => true },
-  { key: "taslaklar", href: "/panel/taslaklar", label: "navDrafts", can: (c: StaffCafeAccessDTO) => has(c, "assistant.use") },
-  { key: "raporlar", href: "/panel/raporlar", label: "navReports", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
-  { key: "mektup", href: "/panel/mektup", label: "navLetter", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
-  { key: "gozcu", href: "/panel/gozcu", label: "navWatch", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
-  { key: "mudavimler", href: "/panel/mudavimler", label: "navRegulars", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
-  { key: "menu", href: "/panel/menu", label: "menu", can: (c: StaffCafeAccessDTO) => has(c, "menu.edit") || has(c, "menu.recipes") },
-  { key: "faturalar", href: "/panel/faturalar", label: "bills", can: (c: StaffCafeAccessDTO) => has(c, "bills.view") },
-  { key: "borclar", href: "/panel/borclar", label: "debts", can: (c: StaffCafeAccessDTO) => has(c, "debts.view") },
-  { key: "nakit", href: "/panel/nakit", label: "money", can: (c: StaffCafeAccessDTO) => has(c, "cash.manage") },
-  { key: "kapanis", href: "/panel/kapanis", label: "months", can: (c: StaffCafeAccessDTO) => has(c, "cash.manage") },
-  { key: "tedarikciler", href: "/panel/tedarikciler", label: "suppliers", can: (c: StaffCafeAccessDTO) => has(c, "suppliers.view") },
-  { key: "stok", href: "/panel/stok", label: "stock", can: (c: StaffCafeAccessDTO) => has(c, "stock.view") },
-  { key: "vardiyalar", href: "/panel/vardiyalar", label: "shifts", can: (c: StaffCafeAccessDTO) => has(c, "shifts.view") },
+  { key: "bugun", href: "/panel/bugun", label: "navToday", plan: "topluluk", can: () => true },
+  { key: "taslaklar", href: "/panel/taslaklar", label: "navDrafts", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "assistant.use") },
+  { key: "raporlar", href: "/panel/raporlar", label: "navReports", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
+  { key: "mektup", href: "/panel/mektup", label: "navLetter", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
+  { key: "gozcu", href: "/panel/gozcu", label: "navWatch", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "reports.view") },
+  { key: "mudavimler", href: "/panel/mudavimler", label: "navRegulars", plan: "penny", can: (c: StaffCafeAccessDTO) => has(c, "regulars.view") },
+  { key: "menu", href: "/panel/menu", label: "menu", plan: "penny", can: (c: StaffCafeAccessDTO) => has(c, "menu.edit") || has(c, "menu.recipes") },
+  { key: "faturalar", href: "/panel/faturalar", label: "bills", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "bills.view") },
+  { key: "borclar", href: "/panel/borclar", label: "debts", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "debts.view") },
+  { key: "nakit", href: "/panel/nakit", label: "money", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "cash.manage") },
+  { key: "kapanis", href: "/panel/kapanis", label: "months", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "cash.manage") },
+  { key: "tedarikciler", href: "/panel/tedarikciler", label: "suppliers", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "suppliers.view") },
+  { key: "stok", href: "/panel/stok", label: "stock", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "stock.view") },
+  { key: "vardiyalar", href: "/panel/vardiyalar", label: "shifts", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "shifts.view") },
   // Everyone sees their own hours and pay; some see everyone's.
-  { key: "puantaj", href: "/panel/puantaj", label: "pay", can: () => true },
-  { key: "gorevler", href: "/panel/gorevler", label: "navTasks", can: (c: StaffCafeAccessDTO) => has(c, "tasks.view") },
-  { key: "topluluk", href: "/panel/topluluk", label: "community", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },
-] as const satisfies readonly { key: string; href: string; label: TextKey; can: (c: StaffCafeAccessDTO) => boolean }[];
+  { key: "puantaj", href: "/panel/puantaj", label: "pay", plan: "isletme", can: () => true },
+  { key: "gorevler", href: "/panel/gorevler", label: "navTasks", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "tasks.view") },
+  { key: "topluluk", href: "/panel/topluluk", label: "community", plan: "topluluk", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },
+  { key: "plan", href: "/panel/plan", label: "navPlan", plan: "topluluk", can: (c: StaffCafeAccessDTO) => c.role === "owner" },
+] as const satisfies readonly { key: string; href: string; label: TextKey; plan: CafePlanKey; can: (c: StaffCafeAccessDTO) => boolean }[];
+
+/** Whether this person may open the page at this café: in its plan, and allowed for their role. */
+function opens(page: (typeof PAGES)[number], cafe: StaffCafeAccessDTO): boolean {
+  return inPlan(page, cafe) && page.can(cafe);
+}
+
+function inPlan(page: (typeof PAGES)[number], cafe: StaffCafeAccessDTO): boolean {
+  return PLAN_ORDER.indexOf(cafe.plan.now) >= PLAN_ORDER.indexOf(page.plan);
+}
 
 export type PanelPage = (typeof PAGES)[number]["key"];
 
 export function has(cafe: StaffCafeAccessDTO, permission: string): boolean {
   return cafe.permissions.includes(permission);
+}
+
+/** Whole days left in the café's trial, counting today; 0 when there's none running. */
+export function trialDaysLeft(cafe: StaffCafeAccessDTO, now = new Date()): number {
+  const end = cafe.plan.trialEndsAt ? new Date(cafe.plan.trialEndsAt).getTime() : 0;
+  return end > now.getTime() ? Math.ceil((end - now.getTime()) / 86_400_000) : 0;
 }
 
 export function useLang(): [Lang, () => void] {
@@ -83,8 +101,12 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
   useEffect(() => {
     api.staff.me().then(setMe, () => setMe("signed-out"));
   }, []);
-  const can = PAGES.find((p) => p.key === page)!.can;
-  const cafes = me && me !== "signed-out" ? me.cafes.filter(can) : [];
+  const here = PAGES.find((p) => p.key === page)!;
+  const cafes = me && me !== "signed-out" ? me.cafes.filter((c) => opens(here, c)) : [];
+  // The page isn't in the plan of the café asked for (or of the only cafés there are): say so (N11).
+  const asked = me && me !== "signed-out" && slug ? me.cafes.find((c) => c.slug === slug) : undefined;
+  const locked =
+    asked && !inPlan(here, asked) ? asked : !cafes.length && me && me !== "signed-out" ? me.cafes.find((c) => !inPlan(here, c)) : undefined;
   useEffect(() => {
     if (cafes.length === 1 && !slug) setSlug(cafes[0]!.slug);
   }, [cafes, slug]);
@@ -98,7 +120,20 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
   let body;
   if (me === null) body = <p className="text-muted">{t("loading")}</p>;
   else if (me === "signed-out") body = <SignIn t={t} lang={lang} onDone={setMe} />;
-  else if (cafes.length === 0) body = <Notice>{t(page === "topluluk" ? "noAccess" : "noAccessPage")}</Notice>;
+  else if (locked || cafes.length === 0) {
+    body = locked ? (
+      <section className="flex flex-col gap-4">
+        <Notice>{t("planLockedPage")}</Notice>
+        {locked.role === "owner" && (
+          <a href={`/panel/plan?kafe=${encodeURIComponent(locked.slug)}`} className="inline-flex min-h-12 items-center self-start rounded-full border border-line px-5 font-semibold">
+            {t("planSee")}
+          </a>
+        )}
+      </section>
+    ) : (
+      <Notice>{t(page === "topluluk" ? "noAccess" : "noAccessPage")}</Notice>
+    );
+  }
   else if (!cafe) {
     body = (
       <section className="flex flex-col gap-3">
@@ -121,7 +156,7 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
     );
   } else body = children({ cafe, t, lang, signedOut: () => setMe("signed-out") });
 
-  const nav = cafe ? PAGES.filter((p) => p.can(cafe)) : [];
+  const nav = cafe ? PAGES.filter((p) => opens(p, cafe)) : [];
   // On a phone the nav scrolls; keep this page's tab in view.
   useEffect(() => {
     document.querySelector<HTMLElement>('nav a[aria-current="page"]')?.scrollIntoView({ block: "nearest", inline: "center" });
@@ -151,8 +186,10 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
               </Button>
             </span>
           </div>
+          {cafe && cafe.role === "owner" && page !== "plan" && <TrialLine cafe={cafe} t={t} />}
           {nav.length > 1 && (
-            <nav aria-label={t("panel")} className="-mx-1 flex gap-1 overflow-x-auto">
+            // relative: the till link's hidden label scrolls with the nav instead of widening the page.
+            <nav aria-label={t("panel")} className="relative -mx-1 flex gap-1 overflow-x-auto">
               {nav.map((p) => (
                 <a
                   key={p.key}
@@ -182,6 +219,22 @@ export function PanelShell({ cafeSlug, page, wide = false, children }: { cafeSlu
         {body}
       </main>
     </AssistantProvider>
+  );
+}
+
+/** The owner's reminder while a trial runs, and once it has ended without a paid plan. */
+function TrialLine({ cafe, t }: { cafe: StaffCafeAccessDTO; t: T }) {
+  const left = trialDaysLeft(cafe);
+  const ended = !left && !!cafe.plan.trialEndsAt && cafe.plan.paid === "topluluk";
+  if (!left && !ended) return null;
+  const words = ended ? t("planTrialOver") : left === 1 ? t("planTrialLastDay") : fill(t("planTrialLeft"), { n: left });
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-2 rounded-2xl bg-panel px-4 py-2.5 text-sm">
+      <span>{words}</span>
+      <a href={`/panel/plan?kafe=${encodeURIComponent(cafe.slug)}`} className="font-semibold underline underline-offset-4">
+        {t("planSee")}
+      </a>
+    </p>
   );
 }
 

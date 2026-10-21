@@ -57,7 +57,7 @@ import {
 import type { DebtService } from "./debts";
 import { AppError } from "./errors";
 import type { MoneyService } from "./money";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 const ALL = 100_000;
 /** Bills of these kinds come once a month; the forecast expects them again a month on. */
@@ -107,7 +107,7 @@ export class WatchService {
   constructor(private readonly d: WatchDeps) {}
 
   async get(ctx: StaffContext): Promise<WatchDTO> {
-    if (!ctx.permissions.has("reports.view")) throw new AppError("FORBIDDEN", "Your role can't see Gözcü", 403);
+    requirePermission(ctx, "reports.view");
     const p = ctx.permissions;
     const cafeId = ctx.cafe.id;
     const [today, seen] = await Promise.all([this.today(cafeId), this.d.store.listDismissed(cafeId)]);
@@ -131,7 +131,7 @@ export class WatchService {
 
   /** "Gördüm": a price or an unusual finding is let go for everyone, and remembered by kind and by whom it was about. */
   async dismiss(ctx: StaffContext, input: { key: string; note?: string | null }): Promise<WatchDTO> {
-    if (!ctx.permissions.has("reports.view")) throw new AppError("FORBIDDEN", "Your role can't see Gözcü", 403);
+    requirePermission(ctx, "reports.view");
     const today = await this.today(ctx.cafe.id);
     const found = await this.findings(ctx.cafe.id, today, await this.d.store.listDismissed(ctx.cafe.id));
     const it = [...found.prices, ...found.unusual].find((x) => x.dto.key === input.key);

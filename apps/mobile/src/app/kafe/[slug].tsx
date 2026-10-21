@@ -169,14 +169,21 @@ function Wallet({ cafe, onJoin }: { cafe: CafeDetailDTO; onJoin: () => void }) {
           </Txt>
         </View>
       </View>
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <Btn kind="quiet" onPress={() => router.push(`/harca${q}`)} style={{ flex: 1, paddingHorizontal: 8 }}>
-          {t("payWithPeni")}
-        </Btn>
-        <Btn kind="quiet" onPress={() => router.push(`/ismarla${q}`)} style={{ flex: 1, paddingHorizontal: 8 }}>
-          {t("treatSomeoneHere")}
-        </Btn>
-      </View>
+      {cafe.pennyOn ? (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Btn kind="quiet" onPress={() => router.push(`/harca${q}`)} style={{ flex: 1, paddingHorizontal: 8 }}>
+            {t("payWithPeni")}
+          </Btn>
+          <Btn kind="quiet" onPress={() => router.push(`/ismarla${q}`)} style={{ flex: 1, paddingHorizontal: 8 }}>
+            {t("treatSomeoneHere")}
+          </Btn>
+        </View>
+      ) : (
+        // The plan has no pennies now: the balance stays, but can't be spent or given here.
+        <Txt muted size={14}>
+          {t("pennyOff")}
+        </Txt>
+      )}
     </View>
   );
 }

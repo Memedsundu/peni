@@ -10,7 +10,7 @@ import {
 } from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors";
-import type { StaffContext } from "./staff";
+import { requirePermission, type StaffContext } from "./staff";
 
 /**
  * The café panel's Menü (plan piece 5): categories, products, prices, on or off.
@@ -199,8 +199,6 @@ export class MenuService {
   }
 
   private require(ctx: StaffContext): void {
-    if (ctx.permissions.has("menu.edit")) return;
-    if (ctx.rolePermissions.has("menu.edit")) throw new AppError("NEEDS_PASSWORD", "Sign in with your password for this", 403);
-    throw new AppError("FORBIDDEN", "Your role can't edit the menu", 403);
+    requirePermission(ctx, "menu.edit");
   }
 }

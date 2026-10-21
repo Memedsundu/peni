@@ -170,6 +170,10 @@ const TEXT = {
   // The café's page and its feed (piece 14)
   yourPeni: { tr: "Bu kafedeki penny'n", en: "Your pennies here" },
   payWithPeni: { tr: "Ödeme kodum", en: "My payment code" },
+  pennyOff: {
+    tr: "Bu kafe şu an penny kabul etmiyor; bakiyen duruyor.",
+    en: "This café isn't taking pennies right now; your balance stays.",
+  },
   treatSomeoneHere: { tr: "Ismarla", en: "Treat someone" },
   joinCafe: { tr: "Kafeye katıl", en: "Join the café" },
   joinHelp: {
