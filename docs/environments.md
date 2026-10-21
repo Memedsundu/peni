@@ -44,10 +44,10 @@ The demo cafés are written from your Mac rather than on the site's first visit,
 
 ## The phone app
 
-In EAS, the build service for the app (see [launch.md](launch.md)), set `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_PUBLIC_URL`:
+The app is **Penny**, store id **`app.penny`** (iOS bundle id and Android package; it can't change after the first upload). Which server each build talks to is set in `apps/mobile/eas.json`, so a phone never falls back to `localhost`:
 
-- **preview** builds: `https://peni-staging.vercel.app`
-- **production** builds: production's address
+- **preview** builds (for testing on phones): `https://peni-staging.vercel.app`
+- **production** builds (the stores): `https://peni-taupe.vercel.app`, to be changed to the custom domain once there is one (both addresses in the production profile).
 
 ## Still to add (only Mehmet has these)
 

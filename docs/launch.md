@@ -25,8 +25,8 @@ Plan piece 34. What is built, and what only the owner can do before Peni opens t
 Owner's steps:
 
 1. Apple Developer Program and Google Play Console accounts in the company's name.
-2. `npx eas login`, then in `apps/mobile`: `npx eas init` (links the project), and set `EXPO_PUBLIC_API_URL` and `EXPO_PUBLIC_PUBLIC_URL` (the site's address) as EAS environment variables for preview and production.
-3. Google and Apple sign-in: the iOS, Android and web client ids into `GOOGLE_CLIENT_IDS` and `APPLE_CLIENT_IDS` on the server, and the app's Google config.
+2. `npx eas login`, then in `apps/mobile`: `npx eas init` (creates and links the Expo project `penny`). The server addresses for preview and production builds are already in `apps/mobile/eas.json`; update production's when the custom domain arrives.
+3. Google and Apple sign-in, for the store id `app.penny`: the iOS, Android (with the app's signing fingerprint from EAS) and web client ids into `GOOGLE_CLIENT_IDS` on the server and the `EXPO_PUBLIC_GOOGLE_*` values for the app; `APPLE_CLIENT_IDS=app.penny` on the server. Then try Google sign-in on a real phone: returning from Google to the app may need one more setting once the real ids exist.
 4. `npx eas build --profile production --platform all`, then `npx eas submit`.
 5. In App Store Connect and Play Console: the listing below, the screenshots, the privacy answers below, the privacy URL `/gizlilik`, the deletion URL `/hesap`, and a demo account for the reviewers (an email they can receive codes at, or a test café).
 
