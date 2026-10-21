@@ -1150,7 +1150,11 @@ model ContentReport {
 model PeniClaim {
   id                    String    @id
   cafeId                String
-  orderId               String    @unique
+  /// Null for a code from the penny screen (N11): the café took the money on its own till.
+  orderId               String?   @unique
+  /// Penny screen codes: what the customer paid on the café's own till, and who gave it.
+  paidKurus             Int?
+  staffMemberId         String?
   /// The café's local date, YYYY-MM-DD; codes are unique per café and day.
   businessDay           String
   code                  String
@@ -1163,7 +1167,7 @@ model PeniClaim {
   cancelledAt           DateTime?
 
   cafe  Cafe  @relation(fields: [cafeId], references: [id], onDelete: Cascade)
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@unique([cafeId, businessDay, code])
 }

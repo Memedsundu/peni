@@ -294,9 +294,14 @@ export class OrderService {
   /** The askı as the till sees it (plan piece 13): the pool and how many of each askı item it pays for. */
   async tillAskida(ctx: StaffContext): Promise<TillAskidaDTO> {
     this.require(ctx, "till.use");
-    const settings = await this.directory.getSettings(ctx.cafe.id);
-    const balancePeni = await this.peni.askidaBalance(ctx.cafe.id);
-    const menu = await this.menu.listMenu(ctx.cafe.id);
+    return this.askidaAt(ctx.cafe.id);
+  }
+
+  /** The askı's pool and items at a café, for the till and the penny screen. */
+  async askidaAt(cafeId: string): Promise<TillAskidaDTO> {
+    const settings = await this.directory.getSettings(cafeId);
+    const balancePeni = await this.peni.askidaBalance(cafeId);
+    const menu = await this.menu.listMenu(cafeId);
     const items = menu
       .filter((p) => p.available && settings.askidaProductIds.includes(p.productId))
       .sort((a, b) => a.priceKurus - b.priceKurus)
@@ -511,20 +516,26 @@ export class OrderService {
     const paid = await this.payments.list(order.cafeId, [order.id]);
     const peni = calculateEarn(order.totalKurus - peniKurusOf(paid) - askidaKurusOf(paid), settings);
     if (peni === 0) return null;
+    return this.openClaim({ id: `clm_${randomUUID()}`, cafeId: order.cafeId, orderId: order.id, peni, paidKurus: null, staffMemberId: null });
+  }
+
+  /**
+   * A new penny code with a free 4-digit code for the café's day, open until the day ends:
+   * for a paid till order, or from the penny screen.
+   */
+  async openClaim(input: Pick<PeniClaim, "id" | "cafeId" | "orderId" | "peni" | "paidKurus" | "staffMemberId">): Promise<PeniClaim> {
+    const settings = await this.directory.getSettings(input.cafeId);
     const now = this.now();
     const businessDay = localDateKey(now, settings.timeZone);
-    const used = await this.claims.codesUsed(order.cafeId, businessDay);
+    const used = await this.claims.codesUsed(input.cafeId, businessDay);
     for (let attempt = 0; attempt < 50; attempt++) {
       const code = randomClaimCode(() => randomInt(10_000) / 10_000);
       if (used.has(code)) continue;
       const claim: PeniClaim = {
-        id: `clm_${randomUUID()}`,
-        cafeId: order.cafeId,
-        orderId: order.id,
+        ...input,
         businessDay,
         code,
         token: randomBytes(16).toString("base64url"),
-        peni,
         createdAt: now,
         expiresAt: startOfNextLocalDay(now, settings.timeZone),
         claimedAt: null,

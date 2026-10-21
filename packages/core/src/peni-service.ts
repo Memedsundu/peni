@@ -210,7 +210,8 @@ export class PeniService {
           { account: account.issuance(claim.cafeId), delta: -claim.peni },
           { account: account.member(membership.id), delta: claim.peni },
         ],
-        idempotencyKey: `earn:${claim.orderId}`,
+        // A penny screen code has no order: its own id keeps a retry from paying twice.
+        idempotencyKey: `earn:${claim.orderId ?? `claim_${claim.id}`}`,
         meta: { orderId: claim.orderId, claimId: claim.id },
         createdAt: now,
       });
@@ -253,7 +254,7 @@ export class PeniService {
    * Takes peni from the wallet for an order at the till: as many as asked, up to the
    * order's cap and the balance. `key` is the till's payment key, so a retry takes them once.
    */
-  async spendAtTill(input: { membershipId: string; orderId: string; key: string; requestedPeni: Peni; capPeni: Peni }): Promise<Peni> {
+  async spendAtTill(input: { membershipId: string; orderId: string | null; key: string; requestedPeni: Peni; capPeni: Peni }): Promise<Peni> {
     const membership = await this.requireActiveMembership(input.membershipId);
     assertWholeNumber(input.requestedPeni, "peni");
     return this.ledger.atomically(async () => {
@@ -603,7 +604,7 @@ export class PeniService {
    * anyone who asks, with no limit and no account: it runs on trust. The caller works out
    * the price; the pool must cover it. The same `key` again pays once.
    */
-  async giveFromAskidaAtTill(input: { cafeId: string; orderId: string; key: string; peni: Peni; productId: string; quantity: number }): Promise<Peni> {
+  async giveFromAskidaAtTill(input: { cafeId: string; orderId: string | null; key: string; peni: Peni; productId: string; quantity: number }): Promise<Peni> {
     assertPositivePeni(input.peni);
     const settings = await this.requireAskida(input.cafeId);
     if (!settings.askidaProductIds.includes(input.productId)) {

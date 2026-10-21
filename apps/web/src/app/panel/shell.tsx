@@ -31,6 +31,7 @@ const PAGES = [
   // Everyone sees their own hours and pay; some see everyone's.
   { key: "puantaj", href: "/panel/puantaj", label: "pay", plan: "isletme", can: () => true },
   { key: "gorevler", href: "/panel/gorevler", label: "navTasks", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "tasks.view") },
+  { key: "penny", href: "/panel/penny", label: "navPenny", plan: "penny", can: (c: StaffCafeAccessDTO) => has(c, "peni.till") },
   { key: "topluluk", href: "/panel/topluluk", label: "community", plan: "topluluk", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },
   { key: "plan", href: "/panel/plan", label: "navPlan", plan: "topluluk", can: (c: StaffCafeAccessDTO) => c.role === "owner" },
 ] as const satisfies readonly { key: string; href: string; label: TextKey; plan: CafePlanKey; can: (c: StaffCafeAccessDTO) => boolean }[];

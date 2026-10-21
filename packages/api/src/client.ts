@@ -3,6 +3,9 @@ import type {
   ClaimDTO,
   PeniCheckDTO,
   TillAskidaDTO,
+  PennyCounterDTO,
+  PennyGiveDTO,
+  PennySpendDTO,
   SpendCodeDTO,
   CafeDetailDTO,
   CafeMembersDTO,
@@ -142,6 +145,10 @@ import type {
   SetHoursInput,
   SetRateInput,
   UpdateShiftInput,
+  PennyAskidaInput,
+  PennyCheckInput,
+  PennyGiveInput,
+  PennySpendInput,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -645,6 +652,16 @@ export function createPeniClient(options: PeniClientOptions) {
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>
         call<{ balancePeni: number }>("POST", `/staff/${slug(cafeSlug)}/askida/till`, input, true),
+      /** The penny screen (N11), for a café on its own till. Needs "peni.till". */
+      penny: {
+        get: (cafeSlug: string) => call<PennyCounterDTO>("GET", `/staff/${slug(cafeSlug)}/penny`, undefined, true),
+        give: (cafeSlug: string, input: PennyGiveInput) => call<PennyGiveDTO>("POST", `/staff/${slug(cafeSlug)}/penny/give`, input, true),
+        cancel: (cafeSlug: string, claimId: string) =>
+          call<PennyCounterDTO>("POST", `/staff/${slug(cafeSlug)}/penny/codes/${slug(claimId)}/cancel`, {}, true),
+        check: (cafeSlug: string, input: PennyCheckInput) => call<PeniCheckDTO>("POST", `/staff/${slug(cafeSlug)}/penny/check`, input, true),
+        spend: (cafeSlug: string, input: PennySpendInput) => call<PennySpendDTO>("POST", `/staff/${slug(cafeSlug)}/penny/spend`, input, true),
+        askida: (cafeSlug: string, input: PennyAskidaInput) => call<PennyCounterDTO>("POST", `/staff/${slug(cafeSlug)}/penny/askida`, input, true),
+      },
     },
   };
 }

@@ -10,7 +10,12 @@ import type { Peni } from "./money";
 export interface PeniClaim {
   id: string;
   cafeId: string;
-  orderId: string;
+  /** The till order it's for. Null for a code from the penny screen (N11), where the café took the money on its own till. */
+  orderId: string | null;
+  /** Penny screen codes: what the customer paid on the café's own till. Null for a till order. */
+  paidKurus: number | null;
+  /** Penny screen codes: who gave it. Null for a till order. */
+  staffMemberId: string | null;
   /** The café's local day it was made; codes are unique per café and day. */
   businessDay: string;
   /** Four digits, "0427". */
@@ -68,6 +73,8 @@ export interface ClaimStore {
   getClaimByCode(cafeId: string, businessDay: string, code: string): Promise<PeniClaim | null>;
   /** Codes already handed out at the café that day. */
   codesUsed(cafeId: string, businessDay: string): Promise<Set<string>>;
+  /** The penny screen's codes that day (the ones with no order), newest first. */
+  listCounterClaims(cafeId: string, businessDay: string): Promise<PeniClaim[]>;
   /** A wrong code typed by `who` (a customer id), counted to stop guessing. */
   recordMiss(who: string, at: Date): Promise<void>;
   countMisses(who: string, since: Date): Promise<number>;
@@ -105,6 +112,13 @@ export class InMemoryClaimStore implements ClaimStore {
 
   async codesUsed(cafeId: string, businessDay: string) {
     return new Set([...this.claims.values()].filter((c) => c.cafeId === cafeId && c.businessDay === businessDay).map((c) => c.code));
+  }
+
+  async listCounterClaims(cafeId: string, businessDay: string) {
+    return [...this.claims.values()]
+      .filter((c) => c.cafeId === cafeId && c.businessDay === businessDay && c.orderId === null)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .map((c) => ({ ...c }));
   }
 
   async recordMiss(who: string, at: Date) {
