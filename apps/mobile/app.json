@@ -1,14 +1,14 @@
 {
   "expo": {
     "name": "Penny",
-    "slug": "peni",
-    "scheme": "peni",
+    "slug": "penny",
+    "scheme": "penny",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
     "ios": {
-      "bundleIdentifier": "app.peni",
+      "bundleIdentifier": "app.penny",
       "supportsTablet": false,
       "icon": {
         "light": "./assets/icon.png",
@@ -31,8 +31,7 @@
       }
     },
     "android": {
-      "package": "app.peni",
-      "edgeToEdgeEnabled": true,
+      "package": "app.penny",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-foreground.png",
         "monochromeImage": "./assets/adaptive-monochrome.png",

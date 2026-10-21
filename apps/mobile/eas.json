@@ -6,11 +6,19 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "environment": "preview"
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://peni-staging.vercel.app",
+        "EXPO_PUBLIC_PUBLIC_URL": "https://peni-staging.vercel.app"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "environment": "production"
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://peni-taupe.vercel.app",
+        "EXPO_PUBLIC_PUBLIC_URL": "https://peni-taupe.vercel.app"
+      }
     }
   },
   "submit": {
