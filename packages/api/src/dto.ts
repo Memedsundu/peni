@@ -793,6 +793,50 @@ export interface TillAskidaDTO {
   items: { productId: string; name: string; priceKurus: number; peni: number; available: number }[];
 }
 
+/**
+ * `GET /staff/:slug/penny`: the penny screen (N11), for a café that takes the money on its
+ * own till: give a penny code for what was paid, take pennies off a bill, the askı.
+ */
+export interface PennyCounterDTO {
+  /** Pennies are on at this café now: false when its plan has none. */
+  on: boolean;
+  earnRatePercent: number;
+  /** The most of a bill pennies may pay, in percent. */
+  maxSpendPercent: number;
+  /** Today's codes from this screen, newest first. */
+  codes: PennyCounterCodeDTO[];
+  askida: TillAskidaDTO;
+}
+
+export interface PennyCounterCodeDTO {
+  id: string;
+  /** Four digits, for the customer to type. */
+  code: string;
+  /** What the QR carries: the customer opens /p/<token>. */
+  token: string;
+  peni: number;
+  paidKurus: number;
+  /** Who gave it: "Ece". */
+  givenBy: string;
+  state: "open" | "claimed" | "expired" | "cancelled";
+  createdAt: string;
+  expiresAt: string;
+}
+
+/** `POST /staff/:slug/penny/give`: the screen, and the code just given, to turn toward the customer. */
+export interface PennyGiveDTO extends PennyCounterDTO {
+  given: PennyCounterCodeDTO;
+}
+
+/** `POST /staff/:slug/penny/spend`: what came off the customer's balance. */
+export interface PennySpendDTO {
+  /** "Ayşe Y.", to check against the customer. */
+  name: string;
+  peni: number;
+  /** Their balance here afterwards. */
+  balancePeni: number;
+}
+
 /** `POST /me/spend-code`: the ödeme kodu to show at the till, for one café. */
 export interface SpendCodeDTO {
   cafeSlug: string;

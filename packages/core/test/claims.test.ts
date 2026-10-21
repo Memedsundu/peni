@@ -3,7 +3,7 @@ import { claimIsOpen, defaultSettings, InMemoryClaimStore, InMemoryDirectory, In
 
 const at = new Date("2026-10-16T09:00:00Z");
 const claim = (id: string, code: string, over: Partial<PeniClaim> = {}): PeniClaim => ({
-  id, cafeId: "c1", orderId: `o_${id}`, businessDay: "2026-10-16", code, token: `t_${id}`, peni: 5,
+  id, cafeId: "c1", orderId: `o_${id}`, paidKurus: null, staffMemberId: null, businessDay: "2026-10-16", code, token: `t_${id}`, peni: 5,
   createdAt: at, expiresAt: new Date("2026-10-16T21:00:00Z"), claimedAt: null, claimedByMembershipId: null, cancelledAt: null, ...over,
 });
 

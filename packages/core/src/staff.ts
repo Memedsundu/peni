@@ -262,8 +262,11 @@ export const PERMISSIONS = {
   },
   "peni.till": {
     section: "peni",
-    label: { tr: "Askıya nakit ekler", en: "Adds cash to the askı" },
-    hint: { tr: "Bir misafir askı için nakit bıraktığında kaydeder.", en: "Records it when a guest leaves cash for the askı." },
+    label: { tr: "Penny verir, alır ve askıyı kullanır", en: "Gives and takes pennies, uses the askı" },
+    hint: {
+      tr: "Penny ekranında: kendi kasanızdan ödenen satışa penny kodu verir, hesaptan penny düşer, askıdan verir, askıya bırakılan nakdi kaydeder.",
+      en: "On the penny screen: gives a penny code for a sale paid on your own till, takes pennies off a bill, gives from the askı, records cash left for the askı.",
+    },
     roles: ALL,
     atTill: true,
   },

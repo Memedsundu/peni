@@ -37,6 +37,10 @@ export class PrismaClaimStore implements ClaimStore {
     return new Set(rows.map((r) => r.code));
   }
 
+  async listCounterClaims(cafeId: string, businessDay: string): Promise<PeniClaim[]> {
+    return this.db().peniClaim.findMany({ where: { cafeId, businessDay, orderId: null }, orderBy: { createdAt: "desc" } });
+  }
+
   async recordMiss(who: string, at: Date): Promise<void> {
     await this.db().claimCodeMiss.create({ data: { customerId: who, at } });
   }

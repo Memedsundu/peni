@@ -205,6 +205,21 @@ export const usePeniSchema = z.object({ code: spendCode, peni: z.number().int().
 /** "Askıdan ver": the askı pays for `quantity` of an askı item on the order. */
 export const giveAskidaSchema = z.object({ productId: z.string().min(1).max(100), quantity: z.number().int().min(1).max(20), payKey: actionKey });
 
+/** The penny screen (N11): a sale paid on the café's own till, in kuruş. At most ₺5,000, so a typo can't give away a fortune. */
+const counterAmount = z.number().int().min(100, "En az ₺1").max(500_000, "Bir satış en çok ₺5.000 olabilir");
+
+/** A penny code for what the customer just paid. The same `key` again gives the same code. */
+export const pennyGiveSchema = z.object({ amountKurus: counterAmount, key: actionKey });
+
+/** Whose wallet the ödeme kodu opens, and how much of this bill pennies can pay. */
+export const pennyCheckSchema = z.object({ code: spendCode, amountKurus: counterAmount });
+
+/** Takes `peni` off that wallet for the bill; the café gives that much off on its own till. */
+export const pennySpendSchema = z.object({ code: spendCode, amountKurus: counterAmount, peni: z.number().int().min(1).max(500_000), key: actionKey });
+
+/** "Askıdan ver" without an order: one askı item for whoever asks. */
+export const pennyAskidaSchema = z.object({ productId: z.string().min(1).max(100), key: actionKey });
+
 /** `POST /me/spend-code` */
 export const spendCodeSchema = z.object({ cafeSlug: z.string().min(1).max(100) });
 
@@ -729,6 +744,10 @@ export type GoogleSignInInput = z.input<typeof googleSignInSchema>;
 export type AppleSignInInput = z.input<typeof appleSignInSchema>;
 export type TakeClaimInput = z.input<typeof takeClaimSchema>;
 export type CheckPeniInput = z.input<typeof checkPeniSchema>;
+export type PennyGiveInput = z.input<typeof pennyGiveSchema>;
+export type PennyCheckInput = z.input<typeof pennyCheckSchema>;
+export type PennySpendInput = z.input<typeof pennySpendSchema>;
+export type PennyAskidaInput = z.input<typeof pennyAskidaSchema>;
 export type UsePeniInput = z.input<typeof usePeniSchema>;
 export type GiveAskidaInput = z.input<typeof giveAskidaSchema>;
 export type CreatePostInput = z.input<typeof createPostSchema>;

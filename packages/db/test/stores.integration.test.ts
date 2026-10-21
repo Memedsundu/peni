@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { Ledger, NO_PIN, PeniService, defaultSettings } from "@peni/core";
+import { Ledger, NO_PIN, PeniService, defaultSettings, type PeniClaim } from "@peni/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPrismaClient, createPrismaStores, type PrismaClient } from "../src";
 
@@ -329,8 +329,8 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     };
     await stores.orders.saveOrder(order);
     await stores.orders.saveOrder({ ...order, id: `${orderId}_2`, number: 2, createKey: `ckc2_${run}` });
-    const claim = {
-      id: `clm_${run}`, cafeId, orderId, businessDay: day, code: "0427", token: `tok_${run}`, peni: 5, createdAt: at,
+    const claim: PeniClaim = {
+      id: `clm_${run}`, cafeId, orderId, paidKurus: null, staffMemberId: null, businessDay: day, code: "0427", token: `tok_${run}`, peni: 5, createdAt: at,
       expiresAt: new Date("2026-10-20T21:00:00Z"), claimedAt: null, claimedByMembershipId: null, cancelledAt: null,
     };
     expect(await stores.claims.saveClaim(claim)).toBe(true);
@@ -356,6 +356,16 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.claims.recordMiss(ayse, at);
     expect(await stores.claims.countMisses(ayse, at)).toBe(2);
     expect(await stores.claims.countMisses(mehmet, at)).toBe(0);
+
+    // N11: the penny screen's codes have no order, and are listed for the day without the till's.
+    const counter: PeniClaim = { ...claim, id: `clm4_${run}`, orderId: null, paidKurus: 18_000, staffMemberId: "sm_x", code: "5555", token: `tok4_${run}`, peni: 9 };
+    const counter2: PeniClaim = { ...counter, id: `clm5_${run}`, code: "5556", token: `tok5_${run}`, createdAt: new Date(at.getTime() + 60_000) };
+    expect(await stores.claims.saveClaim(counter)).toBe(true);
+    expect(await stores.claims.saveClaim(counter2)).toBe(true);
+    expect((await stores.claims.listCounterClaims(cafeId, day)).map((c) => c.id)).toEqual([counter2.id, counter.id]);
+    await service.takeClaim(counter.id, `m_ayse_${run}`);
+    await service.takeClaim(counter2.id, `m_ayse_${run}`);
+    expect(await service.walletBalance(`m_ayse_${run}`)).toBe(before + 27);
   });
 
   it("keeps one ödeme kodu per member, unique at the café, and spends through the ledger", async () => {

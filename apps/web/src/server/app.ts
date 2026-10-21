@@ -118,6 +118,7 @@ import { InsightsService } from "./insights";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
+import { PennyCounterService } from "./counter";
 import type { AiModel, Transcriber } from "@peni/ai";
 import { shiftEmail } from "./shift-email";
 import { ShiftService } from "./shifts";
@@ -249,6 +250,8 @@ export class PeniApp {
   readonly menuEditor: MenuService;
   /** Satış ekranı's orders (plan piece 6). */
   readonly till: OrderService;
+  /** The penny screen, for cafés on their own till (N11). */
+  readonly counter: PennyCounterService;
   /** Every payment and refund, through the till's terminal (plan piece 8). */
   readonly payments: PaymentService;
   /** Kasa: the drawer's sessions, counts and cash moves (plan piece 9). */
@@ -458,6 +461,15 @@ export class PeniApp {
     });
     this.recipeDrafts = new RecipeDraftService(stores.recipeDrafts, stores.stock, this.stock, this.menu, stores.assistant, this.directory, ai, () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
+    this.counter = new PennyCounterService({
+      claims: stores.claims,
+      staff: stores.staff,
+      directory: this.directory,
+      peni: this.peni,
+      till: this.till,
+      memberName: (membershipId) => this.till.peniMemberName(membershipId),
+      now: () => this.now(),
+    });
   }
 
   /** The app's clock. Everything time-based (ledger, gifts, events) reads it. */
