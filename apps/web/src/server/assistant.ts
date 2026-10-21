@@ -368,29 +368,22 @@ export class AssistantService {
     const draft = await this.draft(ctx, draftId);
     if (draft.kind !== "bill") throw new AppError("DRAFT_KIND", "This draft isn't a bill", 409);
     if (draft.status === "dismissed") throw new AppError("DRAFT_DECIDED", "This draft was dismissed", 409);
-    // A new supplier named like one the café has is that one.
-    const named = !input.supplierId && input.newSupplier ? await this.supplierNamed(ctx.cafe.id, input.newSupplier.name) : null;
     if (draft.status === "open" && !input.allowDuplicate) {
       const total = input.lines.reduce((s, l) => s + l.totalKurus, 0);
       const earlier = await this.duplicateBill(
         ctx.cafe.id,
-        { supplierId: input.supplierId ?? named?.id ?? null, number: input.number ?? null, date: input.date, totalKurus: total },
+        { supplierId: input.supplierId ?? (input.newSupplier ? ((await this.supplierNamed(ctx.cafe.id, input.newSupplier.name))?.id ?? null) : null), number: input.number ?? null, date: input.date, totalKurus: total },
         draft.id,
       );
       if (earlier) throw new AppError("BILL_DUPLICATE", "This bill looks already entered", 409);
     }
-    // The supplier comes first, through Tedarikçiler's own rules; the draft's id makes it once however often this is tapped.
-    let supplierId = input.supplierId ?? named?.id ?? null;
-    if (!supplierId && input.newSupplier) {
-      const { name, taxNo, phone, iban, note } = input.newSupplier;
-      supplierId = (await this.bills.addSupplier(ctx, { key: `draft:${draft.id}`, name, taxNo, phone, iban, note })).supplier.id;
-    }
     // The draft's id is the bill's key: a second confirm finds the same bill.
     // Paid as the draft is confirmed: on the bill's own day unless said (a quick entry's "dün nakit ödedim").
-    const { allowDuplicate, paid, newSupplier: _newSupplier, ...fields } = input;
+    // A new supplier is added by the bill itself, only once the bill passes its checks.
+    const { allowDuplicate, paid, newSupplier, ...fields } = input;
     const bill = await this.bills.add(ctx, {
       ...fields,
-      supplierId,
+      ...(newSupplier && !input.supplierId ? { newSupplier } : {}),
       lines: fields.lines.map(({ from: _from, ...l }) => l),
       key: draft.id,
       documentId: draft.documentId,
@@ -398,9 +391,9 @@ export class AssistantService {
       allowDuplicate: allowDuplicate || draft.status !== "open",
     });
     if (draft.status === "open") {
-      await this.learnSupplier(ctx.cafe.id, draft.proposal, supplierId);
+      await this.learnSupplier(ctx.cafe.id, draft.proposal, bill.supplierId);
       // A line that started a stock item is learned as that item, by the id the bill gave it.
-      await this.learn(ctx.cafe.id, draft.proposal, { supplierId, lines: input.lines.map((l, i) => ({ ...l, itemId: bill.lines[i]?.itemId ?? l.itemId })) });
+      await this.learn(ctx.cafe.id, draft.proposal, { supplierId: bill.supplierId, lines: input.lines.map((l, i) => ({ ...l, itemId: bill.lines[i]?.itemId ?? l.itemId })) });
       const changed = changedFields(draft.proposal, input, input.paid?.method ?? null);
       Object.assign(draft, { status: "confirmed", decidedById: ctx.member.id, decidedAt: this.now(), resultId: bill.id, changed });
       await this.store.saveDraft(draft);

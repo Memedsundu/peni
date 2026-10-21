@@ -174,6 +174,11 @@ describe("recipe drafts in Menü (D21)", () => {
     expect(draft!.lines[2]).toEqual({ itemId: null, newItem: 0, qtyMilli: 20 });
     expect(draft!.unpriced).toEqual(["Karamel şurubu"]);
 
+    // A recipe that can't be saved (an amount of nothing) adds nothing to Stok.
+    const zero = draft!.lines.map((l) => (l.itemId === "stk_sut" ? { ...l, qtyMilli: 0 } : l));
+    expect(await code(app.recipeDrafts.confirm(leyla, draft!.id, { mode: "recipe", lines: zero, newItems: draft!.newItems }))).toBe("QTY_INVALID");
+    expect((await app.stockStore.listItems("cafe_moda")).map((i) => i.name)).not.toContain("Karamel şurubu");
+
     // Leyla pours 200 ml of milk, not 220.
     const lines = draft!.lines.map((l) => (l.itemId === "stk_sut" ? { ...l, qtyMilli: 200 } : l));
     await app.recipeDrafts.confirm(leyla, draft!.id, { mode: "recipe", lines, newItems: draft!.newItems });

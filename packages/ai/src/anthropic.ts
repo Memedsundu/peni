@@ -2,6 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { AiError, parseAnswer, type AiModel, type AiPart, type AiRequest, type AiResult } from "./model";
 
+/** Room for the model to think and answer; a 50-line bill or a month of statement lines fits. */
+const MAX_TOKENS = 32_000;
+
 export interface AnthropicOptions {
   apiKey: string;
   /** Default "claude-haiku-5-5": reads photos and PDFs, and costs least. */
@@ -42,13 +45,17 @@ export class AnthropicModel implements AiModel {
     const { type, schema } = zodOutputFormat(request.schema);
     let message: Anthropic.Message;
     try {
-      message = await this.client.messages.create({
-        model: this.name,
-        max_tokens: 16_000,
-        system: request.instructions,
-        messages: [{ role: "user", content: request.parts.map(contentOf) }],
-        output_config: { effort: "medium", format: { type, schema } },
-      });
+      // Streamed, so a long bill or statement (thinking counts towards the limit) has room to
+      // finish without the request itself timing out; only the whole message is used.
+      message = await this.client.messages
+        .stream({
+          model: this.name,
+          max_tokens: MAX_TOKENS,
+          system: request.instructions,
+          messages: [{ role: "user", content: request.parts.map(contentOf) }],
+          output_config: { effort: "medium", format: { type, schema } },
+        })
+        .finalMessage();
     } catch (error) {
       throw failure(error);
     }

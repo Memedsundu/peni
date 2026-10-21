@@ -586,6 +586,9 @@ describe("Bills find their supplier: new ones, unsure ones, remembered ones", ()
     expect((await app.bills.suppliers(leyla)).suppliers.map((s) => s.name)).not.toContain("Bostancı Fırın");
 
     const newSupplier = { name: "Bostancı Fırın", taxNo: "4410223344", phone: "0216 555 44 33", iban: "TR330006100519786457841326", note: "Adres: Bağdat Cd. No: 12, Kadıköy" };
+    // A bill that can't be added (here, dated tomorrow) leaves no supplier behind.
+    expect(await code(app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), date: "2099-01-01", newSupplier }))).toBe("BILL_DATE_INVALID");
+    expect((await app.bills.suppliers(leyla)).suppliers.map((s) => s.name)).not.toContain("Bostancı Fırın");
     const done = await app.assistant.confirm(leyla, draft!.id, { ...asInput(draft!), newSupplier });
     const bill = await app.bills.get(leyla, done.resultId!);
     expect(bill.supplierName).toBe("Bostancı Fırın");

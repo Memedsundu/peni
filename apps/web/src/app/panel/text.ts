@@ -1,4 +1,5 @@
 import { PeniApiError } from "@peni/api";
+import { onePenny } from "@peni/api/customer-text";
 
 /** The café panel's words in Turkish and English. Turkish is the default. */
 export type Lang = "tr" | "en";
@@ -1430,7 +1431,7 @@ export function text(lang: Lang) {
 export type T = ReturnType<typeof text>;
 
 export function fill(template: string, values: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? ""));
+  return onePenny(template.replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? "")));
 }
 
 export function errorText(error: unknown, lang: Lang): string {

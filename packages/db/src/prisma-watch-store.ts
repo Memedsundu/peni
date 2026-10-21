@@ -25,13 +25,12 @@ export class PrismaWatchStore implements WatchStore {
   }
 
   async noteSuggestions(cafeId: string, day: string, lines: readonly { itemId: string; orderMilli: number }[]): Promise<void> {
-    // The day's latest stands.
-    for (const l of lines)
-      await this.db().watchSuggestion.upsert({
-        where: { cafeId_itemId_day: { cafeId, itemId: l.itemId, day } },
-        create: { cafeId, itemId: l.itemId, day, orderMilli: l.orderMilli },
-        update: { orderMilli: l.orderMilli },
-      });
+    // The day's first stands (see InMemoryWatchStore), all in one statement.
+    if (!lines.length) return;
+    await this.db().watchSuggestion.createMany({
+      data: lines.map((l) => ({ cafeId, itemId: l.itemId, day, orderMilli: l.orderMilli })),
+      skipDuplicates: true,
+    });
   }
 
   async listSuggestions(cafeId: string, since: string): Promise<WatchSuggestion[]> {

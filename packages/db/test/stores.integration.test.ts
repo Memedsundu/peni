@@ -891,14 +891,14 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.watch.listDismissed(cafeId))[0]).toMatchObject({ kind: "voids", subject: "stf_c" });
   });
 
-  it("keeps the day's latest order suggestion per item", async () => {
+  it("keeps the day's first order suggestion per item", async () => {
     await stores.watch.noteSuggestions(cafeId, "2026-10-15", [{ itemId: `stk_${run}`, orderMilli: 11_000 }]);
     await stores.watch.noteSuggestions(cafeId, "2026-10-16", [{ itemId: `stk_${run}`, orderMilli: 11_000 }]);
     await stores.watch.noteSuggestions(cafeId, "2026-10-16", [{ itemId: `stk_${run}`, orderMilli: 13_000 }]);
     const mine = (await stores.watch.listSuggestions(cafeId, "2026-10-01")).filter((x) => x.itemId === `stk_${run}`);
     expect(mine.map((x) => [x.day, x.orderMilli])).toEqual([
       ["2026-10-15", 11_000],
-      ["2026-10-16", 13_000],
+      ["2026-10-16", 11_000],
     ]);
     expect(await stores.watch.listSuggestions("other", "2026-10-01")).toEqual([]);
   });

@@ -176,13 +176,13 @@ describe("What was seen (plan piece 31)", () => {
 });
 
 describe("Suggestions as shown (plan piece 31, C15)", () => {
-  it("keeps the day's latest per item, per café", async () => {
+  it("keeps the day's first per item, per café", async () => {
     const store = new InMemoryWatchStore();
     await store.noteSuggestions("c", "2026-10-15", [{ itemId: "sut", orderMilli: 11_000 }]);
     await store.noteSuggestions("c", "2026-10-16", [{ itemId: "sut", orderMilli: 11_000 }]);
     await store.noteSuggestions("c", "2026-10-16", [{ itemId: "sut", orderMilli: 13_000 }]);
     await store.noteSuggestions("d", "2026-10-16", [{ itemId: "sut", orderMilli: 1_000 }]);
-    expect(await store.listSuggestions("c", "2026-10-16")).toEqual([{ cafeId: "c", itemId: "sut", day: "2026-10-16", orderMilli: 13_000 }]);
+    expect(await store.listSuggestions("c", "2026-10-16")).toEqual([{ cafeId: "c", itemId: "sut", day: "2026-10-16", orderMilli: 11_000 }]);
     expect(await store.listSuggestions("c", "2026-10-01")).toHaveLength(2);
   });
 });
@@ -334,6 +334,14 @@ describe("Ordering as the café does (plan piece 31, C15)", () => {
     // 11 L as this café takes it: 18 L.
     expect(learnedOrder(11_000, habits.get("sut"))).toBe(18_000);
     expect(learnedOrder(11_000, undefined)).toBe(11_000);
+  });
+
+  it("doesn't take a bill as the answer to a suggestion made the same day", () => {
+    // In the morning 11 L; the 18 L bill comes in at noon; reopened, Gözcü would now say 4 L.
+    // Only suggestions from days before a bill count, so these bills answer nothing.
+    const suggested = [s("2026-09-23", 4_000), s("2026-10-02", 4_000), s("2026-10-10", 4_000)];
+    const bought = [b("2026-09-23", 18_000), b("2026-10-02", 18_000), b("2026-10-10", 18_000)];
+    expect(orderHabits(suggested, bought, today).size).toBe(0);
   });
 
   it("learns that a quiet café orders less, within limits, and leaves alone what is close enough", () => {

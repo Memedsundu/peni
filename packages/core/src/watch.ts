@@ -122,7 +122,7 @@ export interface WatchStore {
   /** Marks it seen; a second time keeps the first. */
   dismiss(d: WatchDismissal): Promise<void>;
   undismiss(cafeId: string, key: string): Promise<void>;
-  /** Keeps the day's latest suggestion per item. */
+  /** Keeps the day's first suggestion per item. */
   noteSuggestions(cafeId: string, day: string, lines: readonly { itemId: string; orderMilli: number }[]): Promise<void>;
   listSuggestions(cafeId: string, since: string): Promise<WatchSuggestion[]>;
 }
@@ -142,7 +142,12 @@ export class InMemoryWatchStore implements WatchStore {
     this.seen.delete(`${cafeId}:${key}`);
   }
   async noteSuggestions(cafeId: string, day: string, lines: readonly { itemId: string; orderMilli: number }[]) {
-    for (const l of lines) this.suggested.set(`${cafeId}:${l.itemId}:${day}`, { cafeId, itemId: l.itemId, day, orderMilli: l.orderMilli });
+    // The day's first stands: later in the day the bill it asked for may already be in, and the
+    // smaller amount left to order would make that bill look like more than was suggested.
+    for (const l of lines) {
+      const key = `${cafeId}:${l.itemId}:${day}`;
+      if (!this.suggested.has(key)) this.suggested.set(key, { cafeId, itemId: l.itemId, day, orderMilli: l.orderMilli });
+    }
   }
   async listSuggestions(cafeId: string, since: string) {
     return [...this.suggested.values()]
@@ -473,7 +478,8 @@ export function orderHabits(
     const ratios: number[] = [];
     let after = "";
     for (const [date, qty] of [...b].sort(([x], [y]) => x.localeCompare(y))) {
-      const answered = s.filter((x) => x.day > after && x.day <= date && x.day >= plusDays(date, -ORDER_LEARN_WITHIN)).at(-1);
+      // Only a suggestion from a day before the bill: one noted the same day may come after it.
+      const answered = s.filter((x) => x.day > after && x.day < date && x.day >= plusDays(date, -ORDER_LEARN_WITHIN)).at(-1);
       if (answered) ratios.push(qty / answered.orderMilli);
       after = date;
     }
