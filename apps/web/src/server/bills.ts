@@ -175,6 +175,13 @@ export class BillService {
       allowDuplicate?: boolean;
       /** The scan it was confirmed from; only the assistant sets it. */
       documentId?: string | null;
+      /**
+       * With no `supplierId`: a supplier to add for this bill ("Yeni tedarikçi"), as the bill
+       * showed it or the person corrected it. Needs "suppliers.edit". It's checked with the bill
+       * and written with it, so a bill that can't be added leaves no supplier behind; a live
+       * supplier with the same name is used instead.
+       */
+      newSupplier?: SupplierInput & { name: string };
     },
   ): Promise<BillDTO> {
     this.require(ctx, "bills.add");
@@ -186,8 +193,10 @@ export class BillService {
     const existing = await this.store.findBillByKey(cafeId, input.key);
     if (existing) return this.dto(ctx, existing);
     const today = await this.today(cafeId);
+    const supplier = await this.newSupplier(ctx, input.key, input.supplierId, input.newSupplier);
+    const supplierId = supplier ? supplier.id : input.supplierId;
     const { lines, created } = await this.newItems(ctx, input.key, input.lines);
-    const fields = await this.fields(ctx, { ...input, lines }, today, null, created);
+    const fields = await this.fields(ctx, { ...input, supplierId, lines }, today, null, created, supplier?.fresh ?? null);
     await this.money.assertOpen(cafeId, fields.date);
     const paidOn = input.paid?.paidOn ?? today;
     if (input.paid) {
@@ -226,7 +235,8 @@ export class BillService {
       if (payment) {
         await this.money.post(ctx, { source: `bill_payment:${payment.id}`, account, amountKurus: -payment.amountKurus, kind: "bill", day: paidOn, label: await this.label(bill) });
       }
-      // New stock items start at nothing; the bill's own move below adds what came.
+      // A new supplier, and new stock items at nothing (the bill's own move below adds what came).
+      if (supplier?.fresh && !(await this.store.getSupplier(cafeId, supplier.id))) await this.store.saveSupplier(supplier.fresh);
       for (const item of created) if (!(await this.stock.getItem(cafeId, item.id))) await this.stock.saveItem(item);
       await this.store.saveBill(bill);
       if (payment) await this.store.addPayment(payment);
@@ -459,6 +469,41 @@ export class BillService {
   // ─────────────────────────────────────────────── helpers
 
   /**
+   * The supplier a new bill adds ("Yeni tedarikçi"), checked but not yet written: `fresh` is
+   * set when it has to be created. Its id comes from the bill's key, so adding the same bill
+   * again finds the same supplier; a live supplier of the same name is used instead.
+   */
+  private async newSupplier(
+    ctx: StaffContext,
+    key: string,
+    supplierId: string | null,
+    input: (SupplierInput & { name: string }) | undefined,
+  ): Promise<{ id: string; fresh: Supplier | null } | null> {
+    if (supplierId || !input) return null;
+    const cafeId = ctx.cafe.id;
+    const id = `sup_${keyHash(cafeId, `draft:${key}`)}`;
+    if (await this.store.getSupplier(cafeId, id)) return { id, fresh: null };
+    const same = (await this.store.listSuppliers(cafeId)).find((s) => sameMenuName(s.name, input.name));
+    if (same) return { id: same.id, fresh: null };
+    this.require(ctx, "suppliers.edit");
+    const s: Supplier = {
+      id,
+      cafeId,
+      name: "",
+      phone: null,
+      email: null,
+      taxNo: null,
+      iban: null,
+      note: null,
+      archivedAt: null,
+      createdAt: this.now(),
+      ...cleanSupplier(input),
+    };
+    this.checkSupplier(s);
+    return { id, fresh: s };
+  }
+
+  /**
    * The stock items a new bill's lines start (piece 25's "Yeni stok kalemi"), checked, and the
    * lines pointing at them. An item is named once: a live item of the same name is used, and
    * its id comes from the bill's key, so adding the same bill again finds the same item.
@@ -502,12 +547,12 @@ export class BillService {
    * Checks and tidies what a bill says. `before` is the bill being corrected, whose removed
    * items and supplier may stay; `created` are stock items this bill is about to add.
    */
-  private async fields(ctx: StaffContext, input: BillInput, today: string, before: Bill | null, created: StockItem[] = []) {
+  private async fields(ctx: StaffContext, input: BillInput, today: string, before: Bill | null, created: StockItem[] = [], pending: Supplier | null = null) {
     const cafeId = ctx.cafe.id;
     if (!validDate(input.date) || input.date > today) throw new AppError("BILL_DATE_INVALID", "Check the date", 400);
     const dueDate = input.dueDate || null;
     if (dueDate && (!validDate(dueDate) || dueDate < input.date)) throw new AppError("BILL_DUE_INVALID", "The due date is before the bill's date", 400);
-    if (input.supplierId) {
+    if (input.supplierId && input.supplierId !== pending?.id) {
       const s = await this.store.getSupplier(cafeId, input.supplierId);
       if (!s || (s.archivedAt && before?.supplierId !== s.id)) throw new AppError("SUPPLIER_NOT_FOUND", "No such supplier", 404);
     }

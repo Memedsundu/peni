@@ -1,5 +1,12 @@
 {
-  "regions": ["fra1"],
-  "buildCommand": "pnpm --filter @peni/db migrate:deploy && next build",
-  "crons": [{ "path": "/api/v1/cron/daily", "schedule": "0 5 * * *" }]
+  "regions": [
+    "fra1"
+  ],
+  "buildCommand": "if [ \"$VERCEL_ENV\" = production ] || [ \"$VERCEL_GIT_COMMIT_REF\" = main ]; then pnpm --filter @peni/db migrate:deploy; fi && next build",
+  "crons": [
+    {
+      "path": "/api/v1/cron/daily",
+      "schedule": "0 5 * * *"
+    }
+  ]
 }

@@ -23,7 +23,8 @@ jobs:
 
     services:
       postgres:
-        image: postgres:17
+        # The same major version as Neon's project Penny.
+        image: postgres:18
         env:
           POSTGRES_USER: peni
           POSTGRES_PASSWORD: peni
@@ -46,6 +47,19 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+
+      # A migration that is already in main has been applied to staging (and maybe production);
+      # changing it there does nothing, so a changed or deleted one has to be a new migration instead.
+      - name: Merged migrations stay as they are
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          changed=$(git diff --name-only --diff-filter=MDR FETCH_HEAD HEAD -- packages/db/prisma/migrations)
+          if [ -n "$changed" ]; then
+            echo "These migrations are already in ${{ github.base_ref }} and were changed; add a new migration instead:"
+            echo "$changed"
+            exit 1
+          fi
 
       - run: pnpm install --frozen-lockfile
 

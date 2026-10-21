@@ -18,18 +18,31 @@ const request = {
 const json = (status: number, body: object, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
 
-const answer = (text: string, extra: object = {}) =>
-  json(200, {
-    id: "msg_1",
-    type: "message",
-    role: "assistant",
-    model: "claude-haiku-5-5",
-    content: [{ type: "text", text }],
-    stop_reason: "end_turn",
-    stop_sequence: null,
-    usage: { input_tokens: 120, output_tokens: 8 },
-    ...extra,
-  });
+/**
+ * A streamed answer, as Messages sends one: the message, its text in two pieces, then why it
+ * stopped. `extra` may set `content` (an empty list for a refusal) and `stop_reason`.
+ */
+const answer = (text: string, extra: { content?: unknown[]; stop_reason?: string } = {}) => {
+  const event = (type: string, data: object) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+  const blocks = extra.content ?? [{ type: "text", text }];
+  const half = Math.ceil(text.length / 2);
+  const body = [
+    event("message_start", {
+      message: { id: "msg_1", type: "message", role: "assistant", model: "claude-haiku-5-5", content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 120, output_tokens: 1 } },
+    }),
+    ...(blocks.length
+      ? [
+          event("content_block_start", { index: 0, content_block: { type: "text", text: "" } }),
+          event("content_block_delta", { index: 0, delta: { type: "text_delta", text: text.slice(0, half) } }),
+          event("content_block_delta", { index: 0, delta: { type: "text_delta", text: text.slice(half) } }),
+          event("content_block_stop", { index: 0 }),
+        ]
+      : []),
+    event("message_delta", { delta: { stop_reason: extra.stop_reason ?? "end_turn", stop_sequence: null }, usage: { output_tokens: 8 } }),
+    event("message_stop", {}),
+  ].join("");
+  return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+};
 
 // The SDK waits as long as `retry-after-ms` says, so tests don't sit through its real backoff.
 const soon = { "retry-after-ms": "1" };
@@ -45,7 +58,7 @@ describe("AnthropicModel (D23, Claude)", () => {
     expect(r).toMatchObject({ output: { n: 3, note: null }, model: "claude-haiku-5-5", inputTokens: 120, outputTokens: 8 });
     expect(sent[0]!.url).toBe("https://api.anthropic.com/v1/messages");
     expect(sent[0]!.key).toBe("sk-ant-test");
-    expect(sent[0]!.body).toMatchObject({ model: "claude-haiku-5-5", system: "Answer.", output_config: { effort: "medium", format: { type: "json_schema" } } });
+    expect(sent[0]!.body).toMatchObject({ model: "claude-haiku-5-5", stream: true, max_tokens: 32_000, system: "Answer.", output_config: { effort: "medium", format: { type: "json_schema" } } });
     expect(sent[0]!.body.thinking).toBeUndefined();
     const schema = (sent[0]!.body.output_config as { format: { schema: Record<string, unknown>; parse?: unknown } }).format;
     expect(schema.parse).toBeUndefined();

@@ -376,9 +376,17 @@ export function text(lang: Lang) {
 
 export type T = ReturnType<typeof text>;
 
-/** "{name} {n} peni ısmarla" with its blanks filled. */
+/**
+ * English counts its pennies: "1 pennies" reads "1 penny" (and "11 pennies" stays). Turkish
+ * never says "pennies", so any text can go through it.
+ */
+export function onePenny(text: string): string {
+  return text.replace(/(^|[^\d.,])1 pennies\b/g, "$11 penny");
+}
+
+/** "{name} {n} penny ısmarla" with its blanks filled. */
 export function fill(template: string, values: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? String(values[key]) : all));
+  return onePenny(template.replace(/\{(\w+)\}/g, (all, key: string) => (key in values ? String(values[key]) : all)));
 }
 
 /** What to show for a failed call: the Turkish copy, or the server's English message. */

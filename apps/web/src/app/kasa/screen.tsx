@@ -1,6 +1,7 @@
 "use client";
 
 import type { CafeDetailDTO, TillDTO } from "@peni/api";
+import { onePenny } from "@peni/api/customer-text";
 import { formatLongDate, formatTL, formatTime } from "@peni/brand/format";
 import { useEffect, useState } from "react";
 import { api } from "./api";
@@ -12,7 +13,7 @@ import { Photo } from "./ui";
 const SLIDE_MS = 8_000;
 
 const earnText = (lang: Lang, peni: number) =>
-  lang === "tr" ? `Bu siparişten ${peni} penny kazanırsın.` : `You earn ${peni} pennies with this order.`;
+  lang === "tr" ? `Bu siparişten ${peni} penny kazanırsın.` : onePenny(`You earn ${peni} pennies with this order.`);
 
 /**
  * Müşteri ekranı: the order as the barista enters it, then thanks and the peni QR and
@@ -79,7 +80,7 @@ export function CustomerScreen() {
             {state.peni || state.askidaKurus ? (
               <>
                 {state.askidaKurus ? <span className="text-xl text-green">{t("askidaUsed").replace("{tl}", formatTL(state.askidaKurus))}</span> : null}
-                {state.peni ? <span className="text-xl text-green">{t("peniUsed").replace("{n}", String(state.peni))}</span> : null}
+                {state.peni ? <span className="text-xl text-green">{onePenny(t("peniUsed").replace("{n}", String(state.peni)))}</span> : null}
                 <span className="text-xl text-muted">{t("left")}</span>
                 <span className="tabular font-serif text-[120px] leading-none">{formatTL(state.dueKurus ?? state.totalKurus)}</span>
               </>
@@ -115,7 +116,7 @@ export function CustomerScreen() {
                         ? t("paidByAskida")
                         : t("paidByCard")}
                 </span>
-                {state.peni && state.method !== "peni" ? <span className="text-base text-muted">{t("peniUsed").replace("{n}", String(state.peni))}</span> : null}
+                {state.peni && state.method !== "peni" ? <span className="text-base text-muted">{onePenny(t("peniUsed").replace("{n}", String(state.peni)))}</span> : null}
                 {state.askidaKurus && state.method !== "askida" ? (
                   <span className="text-base text-muted">{t("askidaUsed").replace("{tl}", formatTL(state.askidaKurus))}</span>
                 ) : null}

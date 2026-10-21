@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, type CSSProperties, type ReactNode } from "react";
+import { cloneElement, isValidElement, useId, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Legend, ResponsiveContainer, Tooltip } from "recharts";
 
 /**
@@ -23,7 +23,9 @@ export function ChartContainer({ config, height, label, children }: { config: Ch
       className="w-full min-w-0 text-xs [&_.recharts-cartesian-axis-tick_text]:fill-[var(--muted)] [&_.recharts-cartesian-grid_line]:stroke-[var(--line)] [&_.recharts-surface]:outline-none [&_.recharts-wrapper]:outline-none"
     >
       <ResponsiveContainer width="100%" height="100%">
-        {children as React.ReactElement}
+        {/* The box says what the chart shows; Recharts' own keyboard layer would add a focus stop
+            inside an image that screen readers can't explain. */}
+        {isValidElement(children) ? cloneElement(children as ReactElement<{ accessibilityLayer?: boolean }>, { accessibilityLayer: false }) : children}
       </ResponsiveContainer>
     </div>
   );

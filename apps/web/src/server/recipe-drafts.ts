@@ -4,7 +4,9 @@ import {
   RECIPE_DRAFTS_PER_DAY,
   recipeCost,
   sameMenuName,
+  STOCK_UNITS,
   startOfLocalDay,
+  stockItemProblem,
   type AiEvent,
   type AssistantStore,
   type MenuStore,
@@ -192,6 +194,18 @@ export class RecipeDraftService {
     if (input.mode === "recipe" && lines.length === 0) throw new AppError("RECIPE_EMPTY", "Add at least one item", 400);
     if (input.mode === "counted" && (lines.length !== 1 || unitOf(lines[0]!) !== "adet")) {
       throw new AppError("RECIPE_COUNTED_ONE", "A counted product is one item counted in pieces", 400);
+    }
+
+    // Everything saveRecipe would refuse, and every new item's name and unit, is checked
+    // before an item is added: a recipe that can't be saved leaves nothing in Stok.
+    if (lines.some((l) => !Number.isInteger(l.qtyMilli) || l.qtyMilli <= 0)) throw new AppError("QTY_INVALID", "Check the amount", 400);
+    const product = await this.menu.getProduct(cafeId, draft.productId);
+    if (!product || product.archivedAt) throw new AppError("PRODUCT_NOT_FOUND", "No such product", 404);
+    for (const n of toAdd) {
+      const item = input.newItems[n]!;
+      const problem = stockItemProblem({ name: item.name.trim(), minMilli: 0, costKurus: null });
+      if (!STOCK_UNITS.includes(item.unit) || (item.kind !== "ingredient" && item.kind !== "supply")) throw new AppError("VALIDATION", "Check the new stock item", 400);
+      if (problem) throw new AppError(problem === "NAME_TOO_LONG" ? "NAME_TOO_LONG" : "NAME_REQUIRED", "Check the new stock item's name", 400);
     }
 
     const ids = new Map<number, string>();
