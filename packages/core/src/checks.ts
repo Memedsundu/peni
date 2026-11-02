@@ -211,6 +211,8 @@ export interface ZReportProposal {
   /** Returns, when printed. */
   refundsKurus: Kurus | null;
   kdv: BillKdv[];
+  /** Sent by the yazarkasa itself (N12), not read from a photo. */
+  fromTerminal?: boolean;
 }
 
 /** What the till took on a day, by how it was paid, refunds taken off. */

@@ -279,6 +279,7 @@ function AddProduct({
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [categoryId, setCategoryId] = useState(menu.categories[0]?.id ?? "");
+  const [kdv, setKdv] = useState<SaleKdv>(10);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const priceKurus = parseTL(price);
@@ -296,6 +297,7 @@ function AddProduct({
           ))}
         </select>
       </label>
+      <KdvSelect t={t} value={kdv} onChange={setKdv} />
       <p className="text-sm text-muted">{t("addProductHelp")}</p>
       {error && <Notice tone="red">{error}</Notice>}
       <Button
@@ -310,6 +312,7 @@ function AddProduct({
               name: name.trim(),
               priceKurus: priceKurus!,
               categoryId,
+              kdvPercent: kdv,
             })
             .then(onDone, (e: unknown) => {
               setError(errorText(e, lang));
@@ -320,6 +323,27 @@ function AddProduct({
         {t("addProduct")}
       </Button>
     </Sheet>
+  );
+}
+
+/** KDV a product is sold at (N12): what the fiscal receipt files it under. */
+type SaleKdv = 10 | 1 | 20 | 0;
+const SALE_KDV: SaleKdv[] = [10, 1, 20, 0];
+const asKdv = (n: number | undefined): SaleKdv => (SALE_KDV as number[]).includes(n ?? -1) ? (n as SaleKdv) : 10;
+
+function KdvSelect({ t, value, onChange }: { t: T; value: SaleKdv; onChange: (k: SaleKdv) => void }) {
+  return (
+    <label className="flex flex-col gap-2 text-sm text-muted">
+      {t("productKdv")}
+      <select className={`${field} min-h-12`} value={value} onChange={(e) => onChange(asKdv(Number(e.target.value)))}>
+        {SALE_KDV.map((k) => (
+          <option key={k} value={k}>
+            {k === 10 ? t("productKdvUsual") : `%${k}`}
+          </option>
+        ))}
+      </select>
+      <span className="text-xs leading-normal">{t("productKdvHelp")}</span>
+    </label>
   );
 }
 
@@ -347,6 +371,7 @@ function ProductSheet({
   const [price, setPrice] = useState(tlInput(product.priceKurus));
   const [categoryId, setCategoryId] = useState(full?.categoryId ?? "");
   const [available, setAvailable] = useState(product.available);
+  const [kdv, setKdv] = useState<SaleKdv>(asKdv(full?.kdvPercent));
   const [mode, setMode] = useState<StockModeDTO>(product.mode ?? "none");
   const unitOf = (id: string) => items?.find((i) => i.id === id)?.unit ?? "adet";
   const [lines, setLines] = useState<Line[]>(() =>
@@ -376,7 +401,12 @@ function ProductSheet({
   const shownPrice = priceKurus ?? product.priceKurus;
 
   const productChanged =
-    !!menu && (name.trim() !== product.name || priceKurus !== product.priceKurus || categoryId !== (full?.categoryId ?? "") || available !== product.available);
+    !!menu &&
+    (name.trim() !== product.name ||
+      priceKurus !== product.priceKurus ||
+      categoryId !== (full?.categoryId ?? "") ||
+      available !== product.available ||
+      kdv !== asKdv(full?.kdvPercent));
   const recipeChanged =
     !!items &&
     (mode !== (product.mode ?? "none") ||
@@ -398,6 +428,7 @@ function ProductSheet({
           priceKurus: priceKurus!,
           categoryId,
           available,
+          kdvPercent: kdv,
         });
       if (recipeChanged) {
         await api.staff.menu.saveRecipe(slug, product.productId, {
@@ -456,6 +487,7 @@ function ProductSheet({
               { value: "off", label: t("onTillNo") },
             ]}
           />
+          <KdvSelect t={t} value={kdv} onChange={setKdv} />
         </section>
       ) : (
         <p className="text-lg tabular">{formatTL(product.priceKurus)}</p>

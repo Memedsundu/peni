@@ -1,4 +1,16 @@
-import { askidaTerminal, peniTerminal, type Payment, type PaymentConfirmation, type PaymentKind, type PaymentMethod, type PaymentStore, type PaymentTerminal, type PaymentTerminals, type TerminalOutcome } from "@peni/core";
+import {
+  askidaTerminal,
+  manualTerminal,
+  peniTerminal,
+  type Payment,
+  type PaymentConfirmation,
+  type PaymentKind,
+  type PaymentMethod,
+  type PaymentStore,
+  type PaymentTerminal,
+  type PaymentTerminals,
+  type TerminalOutcome,
+} from "@peni/core";
 import { randomUUID } from "node:crypto";
 import { AppError } from "./errors";
 
@@ -27,8 +39,8 @@ export interface PaymentRequest {
 /**
  * The one way into payments (plan piece 8, D24). It keeps the payment records and talks
  * to the till's terminal; it knows nothing about orders. When a payment is approved,
- * by the barista or by the terminal through the till bridge, `onApproved` moves its
- * order on. The till bridge will call `settle`; nothing else changes when it arrives.
+ * by the barista or by the yazarkasa through the till bridge (N12), `onApproved` moves
+ * its order on. The yazarkasa's answers come in through `settle`.
  */
 export class PaymentService {
   /** Set by the order service. */
@@ -47,7 +59,7 @@ export class PaymentService {
   async start(by: PaymentActor, request: PaymentRequest): Promise<Payment> {
     const existing = await this.store.findPaymentByKey(by.cafeId, request.key);
     if (existing) return existing;
-    const terminal = await this.terminal(by.cafeId, by.deviceId, request.method);
+    const terminal = await this.terminalForNew(by.cafeId, by.deviceId, request);
     const now = this.now();
     const payment: Payment = {
       id: `pay_${randomUUID()}`,
@@ -75,7 +87,8 @@ export class PaymentService {
     if (confirmation === "terminal") {
       try {
         await terminal.send(payment);
-      } catch {
+      } catch (error) {
+        console.error("payments: the terminal didn't take", payment.id, error);
         return this.finish(payment, { status: "declined", failure: "TERMINAL_UNREACHABLE" });
       }
     }
@@ -91,45 +104,62 @@ export class PaymentService {
     return this.finish(payment, { status: "approved", settledByMemberId: by.memberId });
   }
 
-  /** The barista backs out of a payment still waiting, or records that the terminal said no. */
+  /**
+   * The barista backs out of a payment still waiting, or records that the terminal said no.
+   * A payment the yazarkasa is already working on stays pending: the device is asked to
+   * stop, and its answer settles it (it may have gone through).
+   */
   async cancel(by: PaymentActor, paymentId: string, input: { declined?: boolean } = {}): Promise<Payment> {
     const payment = await this.get(by.cafeId, paymentId);
     if (payment.status === "declined" || payment.status === "cancelled") return payment;
     if (payment.status === "approved") throw new AppError("PAYMENT_APPROVED", "This payment went through; refund the order instead", 409);
-    if ((await this.confirmation(payment)) === "terminal") {
-      await (await this.terminal(payment.cafeId, payment.deviceId, payment.method)).cancel(payment);
-    }
+    if ((await this.confirmation(payment)) === "terminal" && (await this.terminalOf(payment).cancel(payment)) === "requested") return payment;
     return this.finish(payment, { status: input.declined ? "declined" : "cancelled", settledByMemberId: by.memberId });
   }
 
   /**
-   * The terminal's answer, through the till bridge. Only a payment still pending is
-   * settled; what to do with an approval that arrives after the barista backed out is
-   * the bridge's to decide once the Ingenico's protocol is known.
+   * The yazarkasa's answer, through the till bridge, or a person's word when the device
+   * couldn't give one (`by`). Only a payment still pending is settled: the bridge keeps an
+   * answer that comes too late beside its job, for someone to look at.
    */
-  async settle(cafeId: string, paymentId: string, outcome: TerminalOutcome): Promise<Payment> {
+  async settle(cafeId: string, paymentId: string, outcome: TerminalOutcome, by: string | null = null): Promise<Payment> {
     const payment = await this.get(cafeId, paymentId);
     if (payment.status !== "pending") throw new AppError("PAYMENT_NOT_PENDING", "This payment is already settled", 409);
     return outcome.approved
-      ? this.finish(payment, { status: "approved", reference: outcome.reference ?? null, receiptNo: outcome.receiptNo ?? null })
-      : this.finish(payment, { status: "declined", failure: outcome.reason });
+      ? this.finish(payment, {
+          status: "approved",
+          reference: outcome.reference ?? null,
+          receiptNo: outcome.receiptNo ?? null,
+          terminalData: outcome.data ?? null,
+          settledByMemberId: by,
+        })
+      : this.finish(payment, { status: outcome.cancelled ? "cancelled" : "declined", failure: outcome.reason, settledByMemberId: by });
+  }
+
+  /** What the yazarkasa printed, on a payment a person already said went through. Changes nothing else. */
+  async attach(cafeId: string, paymentId: string, change: Pick<Payment, "receiptNo" | "reference" | "terminalData">): Promise<void> {
+    const payment = await this.get(cafeId, paymentId);
+    await this.store.savePayment({ ...payment, ...change });
   }
 
   /**
    * Before an order is changed, voided or paid another way: payments still waiting on it
-   * are cancelled. One a terminal is working on can't be cut off from here, so that stops.
+   * are cancelled. One the yazarkasa hasn't picked up yet is taken back; one it's working
+   * on can't be cut off from here (it's asked to stop), so that stops.
    */
   async clearPending(by: PaymentActor, orderId: string): Promise<void> {
     const pending = (await this.store.listPayments(by.cafeId, [orderId])).filter((p) => p.status === "pending");
     for (const p of pending) {
-      if ((await this.confirmation(p)) === "terminal") throw new AppError("PAYMENT_IN_PROGRESS", "The terminal is taking a payment on this order", 409);
+      if ((await this.confirmation(p)) === "terminal" && (await this.terminalOf(p).cancel(p)) === "requested") {
+        throw new AppError("PAYMENT_IN_PROGRESS", "The terminal is taking a payment on this order", 409);
+      }
     }
     for (const p of pending) await this.finish(p, { status: "cancelled", settledByMemberId: by.memberId });
   }
 
-  /** How a pending payment gets settled, from the terminal of the computer it was taken on. */
+  /** How a pending payment gets settled, from the terminal it went through. */
   async confirmation(payment: Payment): Promise<PaymentConfirmation> {
-    return (await this.terminal(payment.cafeId, payment.deviceId, payment.method)).confirmation(payment);
+    return this.terminalOf(payment).confirmation(payment);
   }
 
   async get(cafeId: string, paymentId: string): Promise<Payment> {
@@ -148,10 +178,17 @@ export class PaymentService {
   }
 
   /** Peni and the askı never go near the card terminal: the wallet or the pool is their terminal. */
-  private terminal(cafeId: string, deviceId: string | null, method: PaymentMethod): Promise<PaymentTerminal> {
-    if (method === "peni") return Promise.resolve(peniTerminal);
-    if (method === "askida") return Promise.resolve(askidaTerminal);
-    return this.terminals.terminalFor(cafeId, deviceId);
+  private terminalForNew(cafeId: string, deviceId: string | null, p: Pick<Payment, "kind" | "method">): Promise<PaymentTerminal> {
+    if (p.method === "peni") return Promise.resolve(peniTerminal);
+    if (p.method === "askida") return Promise.resolve(askidaTerminal);
+    return this.terminals.terminalFor(cafeId, deviceId, p);
+  }
+
+  /** The terminal a payment went through, whatever that computer uses now. */
+  private terminalOf(payment: Payment): PaymentTerminal {
+    if (payment.method === "peni") return peniTerminal;
+    if (payment.method === "askida") return askidaTerminal;
+    return this.terminals.byKind(payment.terminal) ?? manualTerminal;
   }
 
   private async finish(payment: Payment, change: Partial<Payment>): Promise<Payment> {

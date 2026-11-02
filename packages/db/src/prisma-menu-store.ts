@@ -1,4 +1,4 @@
-import type { MenuCategory, MenuItem, MenuStore } from "@peni/core";
+import { saleKdv, type MenuCategory, type MenuItem, type MenuStore } from "@peni/core";
 import type { Db } from "./db";
 
 const PRODUCT = {
@@ -11,6 +11,7 @@ const PRODUCT = {
   imageUrl: true,
   sortOrder: true,
   archivedAt: true,
+  kdvPercent: true,
   category: { select: { name: true } },
 } as const;
 
@@ -24,6 +25,7 @@ type ProductRow = {
   imageUrl: string | null;
   sortOrder: number;
   archivedAt: Date | null;
+  kdvPercent: number;
   category: { name: string } | null;
 };
 
@@ -80,6 +82,7 @@ export class PrismaMenuStore implements MenuStore {
       imageUrl: item.imageUrl ?? null,
       sortOrder: item.sortOrder ?? 0,
       archivedAt: item.archivedAt ?? null,
+      kdvPercent: saleKdv(item),
     };
     await this.db().menuItem.upsert({
       where: { cafeId_productId: { cafeId, productId: item.productId } },

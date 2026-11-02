@@ -140,6 +140,9 @@ const imageUrl = z.string().trim().url().startsWith("https://").max(2000).nullab
 
 export const menuCategorySchema = z.object({ name: menuName });
 
+/** KDV a product is sold at (N12): today's rates. */
+const saleKdv = z.union([z.literal(10), z.literal(1), z.literal(20), z.literal(0)]);
+
 export const addProductSchema = z.object({
   name: menuName,
   categoryId: z.string().min(1),
@@ -147,6 +150,7 @@ export const addProductSchema = z.object({
   available: z.boolean().optional(),
   description: menuDescription.optional(),
   imageUrl: imageUrl.optional(),
+  kdvPercent: saleKdv.optional(),
 });
 
 /** Send only what changes. `removed: true` takes it off the menu; `false` brings it back. */
@@ -157,6 +161,7 @@ export const updateProductSchema = z.object({
   available: z.boolean().optional(),
   description: menuDescription.optional(),
   imageUrl: imageUrl.optional(),
+  kdvPercent: saleKdv.optional(),
   removed: z.boolean().optional(),
 });
 
@@ -219,6 +224,92 @@ export const pennySpendSchema = z.object({ code: spendCode, amountKurus: counter
 
 /** "Askıdan ver" without an order: one askı item for whoever asks. */
 export const pennyAskidaSchema = z.object({ productId: z.string().min(1).max(100), key: actionKey });
+
+// The yazarkasa (N12)
+
+const departments = z.record(z.string().regex(/^\d{1,2}$/), z.number().int().min(1).max(99));
+const treatment = z.enum(["discount", "payment"]);
+
+/** The Cihazlar page: a till computer's yazarkasa settings. */
+export const terminalSettingsSchema = z.object({
+  enabled: z.boolean(),
+  departments,
+  peni: treatment,
+  askida: treatment,
+});
+
+/** A test slip, or an X or Z report. */
+export const terminalTaskSchema = z.object({ kind: z.enum(["test", "x", "z"]) });
+
+/** The till's X or Z report, at the end of the day. */
+export const tillReportSchema = z.object({ kind: z.enum(["x", "z"]) });
+
+/** The device couldn't say what happened to a payment: what it printed says. */
+export const decidePaymentSchema = z.object({ approved: z.boolean() });
+
+const shortText = z.string().max(300).nullable().optional();
+const money = z.number().int().min(-100_000_000).max(100_000_000).nullable();
+
+export const bridgeStatusSchema = z.object({
+  version: z.string().min(1).max(40),
+  driver: z.string().min(1).max(40),
+  ready: z.boolean(),
+  message: z.string().max(300).nullable(),
+  model: z.string().max(100).nullable(),
+  serial: z.string().max(100).nullable(),
+  capabilities: z.object({ sale: z.boolean(), refund: z.boolean(), reports: z.boolean(), cancel: z.boolean() }),
+});
+
+/** `POST /bridge/pair`: the code from the Cihazlar page. */
+export const bridgePairSchema = z.object({
+  code: z.string().trim().min(6).max(20),
+  /** The computer's own name. */
+  name: z.string().trim().min(1).max(80),
+});
+
+export const bridgePollSchema = z.object({ status: bridgeStatusSchema });
+
+export const bridgeProgressSchema = z.object({
+  stage: z.enum(["waiting_card", "pin", "authorising", "printing", "cancelling"]).nullable(),
+  message: shortText,
+});
+
+const receiptInfo = z.object({
+  number: z.string().max(40).nullable(),
+  zNumber: z.string().max(40).nullable(),
+  ekuNumber: z.string().max(40).nullable(),
+  serial: z.string().max(60).nullable(),
+  printedAt: z.string().max(40).nullable(),
+});
+const cardInfo = z.object({
+  scheme: z.string().max(40).nullable(),
+  last4: z.string().regex(/^\d{4}$/).nullable(),
+  bank: z.string().max(60).nullable(),
+  authCode: z.string().max(20).nullable(),
+  rrn: z.string().max(40).nullable(),
+});
+const zData = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  zNumber: z.string().max(40).nullable(),
+  totalKurus: money,
+  cashKurus: money,
+  cardKurus: money,
+  otherKurus: money,
+  receipts: z.number().int().min(0).max(1_000_000).nullable(),
+  refundsKurus: money,
+  kdv: z.array(z.object({ ratePct: z.number().min(0).max(100), amountKurus: z.number().int() })).max(10),
+});
+
+/** `POST /bridge/jobs/:id/result`: what the device did. */
+export const bridgeResultSchema = z.object({
+  result: z.discriminatedUnion("outcome", [
+    z.object({ outcome: z.literal("approved"), receipt: receiptInfo.nullable().optional(), card: cardInfo.nullable().optional(), z: zData.nullable().optional(), message: shortText }),
+    z.object({ outcome: z.literal("declined"), code: z.string().max(40).nullable().optional(), message: z.string().max(300) }),
+    z.object({ outcome: z.literal("failed"), code: z.string().max(40).nullable().optional(), message: z.string().max(300) }),
+    z.object({ outcome: z.literal("cancelled"), message: shortText }),
+    z.object({ outcome: z.literal("unknown"), message: z.string().max(300) }),
+  ]),
+});
 
 /** `POST /me/spend-code` */
 export const spendCodeSchema = z.object({ cafeSlug: z.string().min(1).max(100) });
@@ -743,6 +834,14 @@ export type EmailVerifyInput = z.input<typeof emailVerifySchema>;
 export type GoogleSignInInput = z.input<typeof googleSignInSchema>;
 export type AppleSignInInput = z.input<typeof appleSignInSchema>;
 export type TakeClaimInput = z.input<typeof takeClaimSchema>;
+export type TerminalSettingsInput = z.input<typeof terminalSettingsSchema>;
+export type TerminalTaskInput = z.input<typeof terminalTaskSchema>;
+export type TillReportInput = z.input<typeof tillReportSchema>;
+export type DecidePaymentInput = z.input<typeof decidePaymentSchema>;
+export type BridgeStatusInput = z.input<typeof bridgeStatusSchema>;
+export type BridgePairInput = z.input<typeof bridgePairSchema>;
+export type BridgeProgressInput = z.input<typeof bridgeProgressSchema>;
+export type BridgeResultInput = z.input<typeof bridgeResultSchema>;
 export type CheckPeniInput = z.input<typeof checkPeniSchema>;
 export type PennyGiveInput = z.input<typeof pennyGiveSchema>;
 export type PennyCheckInput = z.input<typeof pennyCheckSchema>;

@@ -43,6 +43,8 @@ import {
   type WatchStore,
   InMemoryRecipeDraftStore,
   type RecipeDraftStore,
+  InMemoryTerminalStore,
+  type TerminalStore,
   type LetterStore,
   type AssistantStore,
   type ChatStore,
@@ -65,7 +67,6 @@ import {
   localDateKey,
   InMemoryPaymentStore,
   InMemoryCashStore,
-  manualTerminals,
   InMemoryOrderStore,
   InMemoryStaffStore,
   Ledger,
@@ -118,6 +119,7 @@ import { InsightsService } from "./insights";
 import { ChecksService } from "./checks";
 import { InboxService } from "./inbox";
 import { JobRunner } from "./jobs";
+import { TerminalService } from "./terminal";
 import { PennyCounterService } from "./counter";
 import type { AiModel, Transcriber } from "@peni/ai";
 import { shiftEmail } from "./shift-email";
@@ -174,6 +176,7 @@ export interface PeniStores {
   letters: LetterStore;
   watch: WatchStore;
   recipeDrafts: RecipeDraftStore;
+  terminals: TerminalStore;
 }
 
 export function inMemoryStores(): PeniStores {
@@ -202,6 +205,7 @@ export function inMemoryStores(): PeniStores {
     letters: new InMemoryLetterStore(),
     watch: new InMemoryWatchStore(),
     recipeDrafts: new InMemoryRecipeDraftStore(),
+    terminals: new InMemoryTerminalStore(),
   };
 }
 
@@ -213,8 +217,10 @@ export interface PeniAppOptions {
   auth?: { verifier?: IdTokenVerifier; email?: EmailSender | null };
   /** Defaults to the system clock. Tests move it to check day boundaries. */
   clock?: () => Date;
-  /** Which terminal each till pays with. Manual everywhere until the till bridge (D24). */
+  /** Which terminal each till pays with: by default each till computer's yazarkasa once its bridge is connected (N12), else manual. Tests put in their own. */
   terminals?: PaymentTerminals;
+  /** How long a bridge's poll waits for work. Tests make it 0. */
+  bridgePollWaitMs?: number;
   /** The site's own address ("https://peni.app"), for links in emails. Without it no gift email goes out. */
   publicUrl?: string;
   /** The assistant's model (piece 24): OpenAI with a key, the demo's stand-in, or none (off). */
@@ -254,6 +260,8 @@ export class PeniApp {
   readonly counter: PennyCounterService;
   /** Every payment and refund, through the till's terminal (plan piece 8). */
   readonly payments: PaymentService;
+  /** Each till computer's yazarkasa, through its bridge (N12). */
+  readonly yazarkasa: TerminalService;
   /** Kasa: the drawer's sessions, counts and cash moves (plan piece 9). */
   readonly cash: CashService;
   /** Stok and each product's recipe (plan piece 17). */
@@ -348,7 +356,22 @@ export class PeniApp {
       () => this.now(),
     );
     this.menuEditor = new MenuService(this.menu, this.directory, () => this.now());
-    this.payments = new PaymentService(stores.payments, options.terminals ?? manualTerminals, () => this.now());
+    // The yazarkasa decides per till computer; it's made just below, as it needs the payments too.
+    const terminals: PaymentTerminals = options.terminals ?? {
+      terminalFor: (...a) => this.yazarkasa.terminals.terminalFor(...a),
+      byKind: (kind) => this.yazarkasa.terminals.byKind(kind),
+    };
+    this.payments = new PaymentService(stores.payments, terminals, () => this.now());
+    this.yazarkasa = new TerminalService({
+      store: stores.terminals,
+      staff: stores.staff,
+      identity: stores.identity,
+      payments: this.payments,
+      paymentStore: stores.payments,
+      directory: this.directory,
+      now: () => this.now(),
+      pollWaitMs: options.bridgePollWaitMs,
+    });
     this.cash = new CashService(stores.cash, stores.payments, stores.staff, () => this.now());
     this.till = new OrderService(stores.orders, stores.claims, this.menu, stores.staff, this.directory, this.payments, this.cash, this.peni, () => this.now());
     // A newcomer may have no name yet; the barista then checks the balance instead.
@@ -461,6 +484,17 @@ export class PeniApp {
     });
     this.recipeDrafts = new RecipeDraftService(stores.recipeDrafts, stores.stock, this.stock, this.menu, stores.assistant, this.directory, ai, () => this.now());
     this.till.peniMemberName = async (membershipId) => firstNameAndInitial(await this.nameForMembership(membershipId)) || "İsimsiz üye";
+    // The yazarkasa (N12): receipts come from the orders, Z reports go to the checks, and the till asks it about its payments.
+    this.yazarkasa.saleFor = (payment, settings) => this.till.fiscalSale(payment, settings);
+    this.yazarkasa.refundFor = (payment, settings) => this.till.fiscalRefund(payment, settings);
+    this.yazarkasa.onZReport = async (cafeId, z) => {
+      await this.assistant.zFromTerminal(cafeId, z);
+    };
+    this.till.device = {
+      state: (payment) => this.yazarkasa.paymentState(payment),
+      decide: (ctx, payment, approved) => this.yazarkasa.decide(ctx, payment, approved),
+    };
+    this.staff.onDeviceRevoked = (deviceId) => this.yazarkasa.deviceRevoked(deviceId);
     this.counter = new PennyCounterService({
       claims: stores.claims,
       staff: stores.staff,

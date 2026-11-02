@@ -11,6 +11,7 @@ export * from "./menu";
 export * from "./orders";
 export * from "./claims";
 export * from "./payments";
+export * from "./terminal";
 export * from "./cash";
 export * from "./spend";
 export * from "./identity";

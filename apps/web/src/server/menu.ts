@@ -2,6 +2,8 @@ import type { StaffMenuDTO, StaffMenuProductDTO } from "@peni/api";
 import {
   categoryProblem,
   productProblem,
+  saleKdv,
+  DEFAULT_SALE_KDV,
   sameMenuName,
   type MenuItem,
   type MenuProblem,
@@ -43,6 +45,7 @@ export class MenuService {
       description: p.description ?? null,
       imageUrl: p.imageUrl ?? null,
       askida: askida.has(p.productId),
+      kdvPercent: saleKdv(p),
     });
     const live = products.filter((p) => !p.archivedAt);
     return {
@@ -89,7 +92,15 @@ export class MenuService {
 
   async addProduct(
     ctx: StaffContext,
-    input: { name: string; categoryId: string; priceKurus: number; available?: boolean; description?: string | null; imageUrl?: string | null },
+    input: {
+      name: string;
+      categoryId: string;
+      priceKurus: number;
+      available?: boolean;
+      description?: string | null;
+      imageUrl?: string | null;
+      kdvPercent?: number;
+    },
   ): Promise<StaffMenuDTO> {
     this.require(ctx);
     await this.requireCategory(ctx, input.categoryId);
@@ -104,6 +115,7 @@ export class MenuService {
       imageUrl: input.imageUrl || null,
       sortOrder: await this.nextProductOrder(ctx, input.categoryId),
       archivedAt: null,
+      kdvPercent: input.kdvPercent ?? DEFAULT_SALE_KDV,
     };
     this.check(productProblem(product));
     await this.store.saveProduct(ctx.cafe.id, product);
@@ -121,6 +133,7 @@ export class MenuService {
       available?: boolean;
       description?: string | null;
       imageUrl?: string | null;
+      kdvPercent?: number;
       removed?: boolean;
     },
   ): Promise<StaffMenuDTO> {
@@ -133,6 +146,7 @@ export class MenuService {
     if (input.available !== undefined) next.available = input.available;
     if (input.description !== undefined) next.description = input.description?.trim() || null;
     if (input.imageUrl !== undefined) next.imageUrl = input.imageUrl || null;
+    if (input.kdvPercent !== undefined) next.kdvPercent = input.kdvPercent;
     if (input.categoryId !== undefined && input.categoryId !== current.categoryId) {
       await this.requireCategory(ctx, input.categoryId);
       next.categoryId = input.categoryId;

@@ -4,6 +4,10 @@ import type {
   PeniCheckDTO,
   TillAskidaDTO,
   PennyCounterDTO,
+  BridgeCodeDTO,
+  TerminalJobDTO,
+  TerminalsPageDTO,
+  TillTerminalDTO,
   PennyGiveDTO,
   PennySpendDTO,
   SpendCodeDTO,
@@ -149,6 +153,10 @@ import type {
   PennyCheckInput,
   PennyGiveInput,
   PennySpendInput,
+  DecidePaymentInput,
+  TerminalSettingsInput,
+  TerminalTaskInput,
+  TillReportInput,
 } from "./schemas";
 
 export class PeniApiError extends Error {
@@ -597,6 +605,15 @@ export function createPeniClient(options: PeniClientOptions) {
         /** Backs out of a waiting payment; `declined` records that the terminal said no. */
         cancelPayment: (cafeSlug: string, orderId: string, paymentId: string, input: CancelPaymentInput = {}) =>
           call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/payments/${slug(paymentId)}/cancel`, input, true),
+        /** The yazarkasa stopped answering (`device.needsDecision`): what it printed says whether it went through. */
+        decidePayment: (cafeSlug: string, orderId: string, paymentId: string, input: DecidePaymentInput) =>
+          call<PaymentAnswerDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/payments/${slug(paymentId)}/decide`, input, true),
+        /** This till computer's yazarkasa (N12). */
+        terminal: (cafeSlug: string) => call<TillTerminalDTO>("GET", `/staff/${slug(cafeSlug)}/till-terminal`, undefined, true),
+        /** An X or Z report on it. Needs "cash.drawer". */
+        terminalReport: (cafeSlug: string, input: TillReportInput) =>
+          call<TerminalJobDTO>("POST", `/staff/${slug(cafeSlug)}/till-terminal/report`, input, true),
+        terminalJob: (cafeSlug: string, jobId: string) => call<TerminalJobDTO>("GET", `/staff/${slug(cafeSlug)}/till-terminal/jobs/${slug(jobId)}`, undefined, true),
         /** "Peni": whose wallet the customer's ödeme kodu opens, and how much can go on the order. */
         checkPeni: (cafeSlug: string, orderId: string, input: CheckPeniInput) =>
           call<PeniCheckDTO>("POST", `/staff/${slug(cafeSlug)}/orders/${slug(orderId)}/peni/check`, input, true),
@@ -650,6 +667,22 @@ export function createPeniClient(options: PeniClientOptions) {
           call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/members/${slug(customerId)}`, { paused }, true),
       },
       dashboard: (cafeSlug: string) => call<StaffDashboardDTO>("GET", `/staff/${slug(cafeSlug)}`, undefined, true),
+      /** Cihazlar: till computers and their yazarkasa (N12). Needs "devices.manage". */
+      terminals: {
+        get: (cafeSlug: string) => call<TerminalsPageDTO>("GET", `/staff/${slug(cafeSlug)}/terminals`, undefined, true),
+        connect: (cafeSlug: string, deviceId: string) =>
+          call<BridgeCodeDTO>("POST", `/staff/${slug(cafeSlug)}/terminals/${slug(deviceId)}/connect`, {}, true),
+        disconnect: (cafeSlug: string, deviceId: string) =>
+          call<TerminalsPageDTO>("POST", `/staff/${slug(cafeSlug)}/terminals/${slug(deviceId)}/disconnect`, {}, true),
+        saveSettings: (cafeSlug: string, deviceId: string, input: TerminalSettingsInput) =>
+          call<TerminalsPageDTO>("POST", `/staff/${slug(cafeSlug)}/terminals/${slug(deviceId)}/settings`, input, true),
+        task: (cafeSlug: string, deviceId: string, input: TerminalTaskInput) =>
+          call<TerminalJobDTO>("POST", `/staff/${slug(cafeSlug)}/terminals/${slug(deviceId)}/tasks`, input, true),
+        job: (cafeSlug: string, jobId: string) => call<TerminalJobDTO>("GET", `/staff/${slug(cafeSlug)}/terminals/jobs/${slug(jobId)}`, undefined, true),
+        /** Removes a till computer; its yazarkasa connection goes with it. */
+        revokeDevice: (cafeSlug: string, deviceId: string) =>
+          call<{ devices: TillDeviceDTO[] }>("POST", `/staff/${slug(cafeSlug)}/devices/${slug(deviceId)}/revoke`, {}, true),
+      },
       tillDonation: (cafeSlug: string, input: TillDonationInput) =>
         call<{ balancePeni: number }>("POST", `/staff/${slug(cafeSlug)}/askida/till`, input, true),
       /** The penny screen (N11), for a café on its own till. Needs "peni.till". */

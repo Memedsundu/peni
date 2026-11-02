@@ -32,6 +32,8 @@ export interface MenuItem {
   sortOrder?: number;
   /** "Menüden kaldır": gone from the menu, kept for past sales and reports; can be brought back. */
   archivedAt?: Date | null;
+  /** KDV on its sale, in percent: the fiscal receipt files it under this (N12). Missing means 10, a café's usual rate. */
+  kdvPercent?: number;
 }
 
 export interface MenuStore {
@@ -48,6 +50,15 @@ export interface MenuStore {
   saveProduct(cafeId: string, item: MenuItem): Promise<void>;
 }
 
+/** KDV a product can be sold at, today's rates (since July 2023). Food and drink served at a café is 10. */
+export const SALE_KDV_RATES = [10, 1, 20, 0] as const;
+export const DEFAULT_SALE_KDV = 10;
+
+/** A product's KDV, 10 when it was never set. */
+export function saleKdv(p: { kdvPercent?: number | null }): number {
+  return p.kdvPercent ?? DEFAULT_SALE_KDV;
+}
+
 /** Highest price a product can have: 100.000 TL. */
 export const MAX_PRICE_KURUS = 10_000_000;
 export const MENU_NAME_MAX = 60;
@@ -58,15 +69,23 @@ export type MenuProblem =
   | "NAME_TOO_LONG"
   | "PRICE_INVALID"
   | "DESCRIPTION_TOO_LONG"
-  | "IMAGE_URL_INVALID";
+  | "IMAGE_URL_INVALID"
+  | "SALE_KDV_INVALID";
 
 /** What's wrong with a product as entered, or null. Pure; the service turns it into an error. */
-export function productProblem(p: { name: string; priceKurus: number; description?: string | null; imageUrl?: string | null }): MenuProblem | null {
+export function productProblem(p: {
+  name: string;
+  priceKurus: number;
+  description?: string | null;
+  imageUrl?: string | null;
+  kdvPercent?: number | null;
+}): MenuProblem | null {
   if (!p.name.trim()) return "NAME_EMPTY";
   if (p.name.trim().length > MENU_NAME_MAX) return "NAME_TOO_LONG";
   if (!Number.isInteger(p.priceKurus) || p.priceKurus < 0 || p.priceKurus > MAX_PRICE_KURUS) return "PRICE_INVALID";
   if ((p.description?.trim().length ?? 0) > MENU_DESCRIPTION_MAX) return "DESCRIPTION_TOO_LONG";
   if (p.imageUrl && !/^https:\/\/\S+$/.test(p.imageUrl)) return "IMAGE_URL_INVALID";
+  if (p.kdvPercent != null && !(SALE_KDV_RATES as readonly number[]).includes(p.kdvPercent)) return "SALE_KDV_INVALID";
   return null;
 }
 

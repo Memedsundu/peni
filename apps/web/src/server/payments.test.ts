@@ -17,6 +17,8 @@ class FakeTerminal implements PaymentTerminal {
   sent: Payment[] = [];
   cancelled: string[] = [];
   reachable = true;
+  /** Busy with what it was sent, as a device reading a card is: backing out only asks it to stop. */
+  working = false;
   confirmation() {
     return "terminal" as const;
   }
@@ -26,13 +28,17 @@ class FakeTerminal implements PaymentTerminal {
   }
   async cancel(payment: Payment) {
     this.cancelled.push(payment.id);
+    return this.working ? ("requested" as const) : ("cancelled" as const);
   }
 }
 
 let fake: FakeTerminal;
 /** Which till computer has the fake terminal; every other one pays manually. */
 let fakeOn: string | null;
-const terminals: PaymentTerminals = { terminalFor: async (_cafeId, deviceId) => (deviceId && deviceId === fakeOn ? fake : manualTerminal) };
+const terminals: PaymentTerminals = {
+  terminalFor: async (_cafeId, deviceId) => (deviceId && deviceId === fakeOn ? fake : manualTerminal),
+  byKind: (kind) => (kind === "fake" ? fake : kind === "manual" ? manualTerminal : null),
+};
 
 const at = async (who: keyof typeof DEMO_STAFF, slug = "moda") =>
   app.staff.at((await app.staff.signIn(DEMO_STAFF[who].email, DEMO_STAFF_PASSWORD)).token, slug);
@@ -165,6 +171,7 @@ describe("payments through one interface (plan piece 8)", () => {
     it("sends card and cash to the terminal and waits for its answer, with no change to the till's calls", async () => {
       const o = await order(atBridge, [{ productId: "latte", quantity: 1 }]);
       const started = await app.till.pay(atBridge, o.id, { method: "card", payKey: key() });
+      fake.working = true;
       expect(started.payment).toMatchObject({ status: "pending", confirmBy: "terminal", terminal: "fake" });
       expect(fake.sent.map((p) => [p.id, p.amountKurus])).toEqual([[started.payment.id, 12_000]]);
       expect(await code(app.till.confirmPayment(atBridge, o.id, started.payment.id))).toBe("CONFIRMED_BY_TERMINAL");
@@ -177,6 +184,15 @@ describe("payments through one interface (plan piece 8)", () => {
       expect(checked.payment).toMatchObject({ status: "approved", settledBy: null, reference: "A1B2C3", receiptNo: "0042" });
       expect(checked.order.status).toBe("paid");
       expect(checked.order.claim).not.toBeNull();
+
+      // Backing out of one the device is on only asks it to stop; its answer settles it.
+      fake.working = false;
+      const backedOut = await order(atBridge, [{ productId: "cay", quantity: 1 }]);
+      const card = await app.till.pay(atBridge, backedOut.id, { method: "card", payKey: key() });
+      fake.working = true;
+      expect((await app.till.cancelPayment(atBridge, backedOut.id, card.payment.id)).payment.status).toBe("pending");
+      await app.payments.settle("cafe_moda", card.payment.id, { approved: false, reason: "İptal edildi", cancelled: true });
+      expect((await app.till.payment(atBridge, backedOut.id, card.payment.id)).payment.status).toBe("cancelled");
 
       // Cash goes to the terminal too, for its fiscal receipt.
       const cashOrder = await order(atBridge, [{ productId: "cay", quantity: 1 }]);
@@ -208,6 +224,7 @@ describe("payments through one interface (plan piece 8)", () => {
       // The manager refunds at the same till computer.
       const managerAtBridge: StaffContext = { ...murat, deviceId: atBridge.deviceId };
       const waiting = await app.till.refund(managerAtBridge, o.id, { reason: "Yanlış ürün" });
+      fake.working = true;
       expect(waiting).toMatchObject({ status: "paid", canRefund: false });
       expect(waiting.payments[1]).toMatchObject({ kind: "refund", status: "pending", confirmBy: "terminal" });
       expect(await code(app.till.refund(managerAtBridge, o.id, { reason: "Yanlış ürün" }))).toBe("PAYMENT_IN_PROGRESS");
