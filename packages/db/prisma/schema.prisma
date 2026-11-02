@@ -135,6 +135,7 @@ model Cafe {
   staff          StaffMember[]
   roleChanges    RolePermission[]
   tillDevices    TillDevice[]
+  tillBridges    TillBridge[]
   staffSessions  StaffSession[]
   menu           MenuItem[]
   menuCategories MenuCategory[]
@@ -306,8 +307,71 @@ model TillDevice {
   cafe      Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   createdBy StaffMember    @relation(fields: [createdByMemberId], references: [id], onDelete: Cascade)
   sessions  StaffSession[]
+  bridge    TillBridge?
 
   @@index([cafeId])
+}
+
+/// The program on a till computer that drives its yazarkasa (N12). One per computer; connecting it again keeps the row.
+model TillBridge {
+  id                String    @id
+  cafeId            String
+  deviceId          String    @unique
+  /// SHA-256 of the one-time code it's connected with, until it is.
+  pairCodeHash      String?   @unique
+  pairExpiresAt     DateTime?
+  /// SHA-256 of the bridge's token. The token itself is never stored.
+  tokenHash         String?   @unique
+  /// The computer's own name, as the bridge reported it.
+  name              String?
+  pairedAt          DateTime?
+  lastSeenAt        DateTime?
+  /// What the bridge last said about itself and the device (BridgeStatus).
+  status            Json?
+  /// Off: the till takes payments by hand even while the bridge is connected.
+  enabled           Boolean   @default(true)
+  /// The device's departments per KDV, and how pennies and the askı go on the receipt (TerminalSettings).
+  settings          Json
+  createdAt         DateTime
+  createdByMemberId String
+  revokedAt         DateTime?
+
+  cafe   Cafe          @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  device TillDevice    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  jobs   TerminalJob[]
+
+  @@index([cafeId])
+}
+
+/// One thing the yazarkasa is asked to do: a sale, a refund, a report, a test slip (N12).
+model TerminalJob {
+  id                String    @id
+  cafeId            String
+  bridgeId          String
+  /// sale | refund | report | test
+  kind              String
+  /// The TerminalTask: what the device is to print and take.
+  task              Json
+  paymentId         String?   @unique
+  orderId           String?
+  /// queued | sent | done | cancelled
+  state             String
+  stage             String?
+  message           String?
+  cancelRequestedAt DateTime?
+  /// What the device did (TerminalResult).
+  result            Json?
+  /// A second answer that disagrees with the first, for someone to look at.
+  conflict          Json?
+  createdAt         DateTime
+  createdByMemberId String?
+  sentAt            DateTime?
+  touchedAt         DateTime?
+  finishedAt        DateTime?
+
+  bridge TillBridge @relation(fields: [bridgeId], references: [id], onDelete: Cascade)
+
+  @@index([bridgeId, state, createdAt])
 }
 
 /// Failed staff sign-ins, for the per-email limit.
@@ -363,6 +427,8 @@ model MenuItem {
   sortOrder   Int       @default(0)
   /// "Menüden kaldır": kept for past sales and reports.
   archivedAt  DateTime?
+  /// KDV on its sale, in percent (N12).
+  kdvPercent  Int       @default(10)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -441,6 +507,8 @@ model OrderLine {
   unitPriceKurus  Int
   quantity        Int
   discountPercent Int    @default(0)
+  /// The product's KDV when it was added (N12); 10 for lines from before.
+  kdvPercent      Int    @default(10)
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
@@ -483,7 +551,7 @@ model Payment {
   amountKurus       Int
   tenderedKurus     Int?
   changeKurus       Int?
-  /// "manual" until the till bridge drives the Ingenico.
+  /// "manual", "bridge" (the yazarkasa, N12), "peni" or "askida".
   terminal          String
   deviceId          String?
   /// The drawer session it was taken in, when one was open.
@@ -498,6 +566,8 @@ model Payment {
   reference         String?
   receiptNo         String?
   failure           String?
+  /// What the yazarkasa printed and the card it read (TerminalData, N12).
+  terminalData      Json?
 
   cafe        Cafe         @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)

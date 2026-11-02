@@ -1,6 +1,6 @@
 "use client";
 
-import { PeniApiError, type CashStateDTO, type StaffMeDTO, type TaskDayDTO, type TillDTO } from "@peni/api";
+import { PeniApiError, type CashStateDTO, type StaffMeDTO, type TaskDayDTO, type TillDTO, type TillTerminalDTO } from "@peni/api";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { Cash } from "./cash";
@@ -124,6 +124,16 @@ export function Till() {
     api.staff.tasks.day(slug).then(countTasks, () => setTasksLeft(null));
   }, [slug, canTasks, countTasks]);
 
+  /** This computer's yazarkasa (N12): the header says when it isn't answering. */
+  const [terminal, setTerminal] = useState<TillTerminalDTO | null>(null);
+  useEffect(() => {
+    if (!slug) return setTerminal(null);
+    const look = () => api.staff.till.terminal(slug).then(setTerminal, () => setTerminal(null));
+    void look();
+    const timer = setInterval(look, TERMINAL_LOOK_MS);
+    return () => clearInterval(timer);
+  }, [slug]);
+
   /** "Fatura" shows when the barista adds bills and the assistant is on. */
   const canBills = !!access?.permissions.includes("bills.add");
   const [canScan, setCanScan] = useState(false);
@@ -161,6 +171,7 @@ export function Till() {
         <div className="flex shrink-0 items-center gap-2 text-sm text-muted">
           {stage.kind === "open" && access && (
             <>
+              {terminal?.connected && <TerminalBadge t={t} terminal={terminal} />}
               <span className="mr-2 hidden sm:inline">
                 {t(`role_${access.role}`)}: <span className="text-ink">{stage.me.account.name.split(" ")[0]}</span>
               </span>
@@ -244,6 +255,7 @@ export function Till() {
               onError={onError}
               lang={lang}
               deviceId={stage.till.device.id}
+              terminal={terminal?.connected ? terminal : null}
               drawerClosed={cash !== null && cash.open === null}
               onOpenDrawer={() => setView("cash")}
               onDrawerChanged={() => void loadCash()}
@@ -253,9 +265,26 @@ export function Till() {
         {stage.kind === "open" && view === "sales" && <Sales t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
         {stage.kind === "open" && view === "tasks" && <TillTasks t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} onChanged={countTasks} />}
         {stage.kind === "open" && view === "scan" && <TillScan t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} />}
-        {stage.kind === "open" && view === "cash" && <Cash t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} state={cash} onChanged={setCash} />}
+        {stage.kind === "open" && view === "cash" && (
+          <Cash t={t} slug={stage.till.cafe.slug} onError={onError} lang={lang} state={cash} onChanged={setCash} terminal={terminal?.connected ? terminal : null} />
+        )}
       </main>
     </div>
+  );
+}
+
+/** How often the till looks at its yazarkasa. */
+const TERMINAL_LOOK_MS = 20_000;
+
+/** "Yazarkasa bağlı", or why sales have to be rung up on the device by hand. */
+function TerminalBadge({ t, terminal }: { t: T; terminal: TillTerminalDTO }) {
+  const ok = terminal.online && terminal.ready && terminal.enabled;
+  const words = ok ? t("ykOnline") : !terminal.enabled ? t("ykOff") : !terminal.online ? t("ykOffline") : `${t("ykNotReady")}${terminal.message ? `: ${terminal.message}` : ""}`;
+  return (
+    <span role="status" className={`mr-1 flex max-w-80 items-center gap-2 truncate rounded-full px-3 py-1 text-sm ${ok ? "text-muted" : "bg-red-soft font-semibold text-red"}`}>
+      <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${ok ? "bg-green" : "bg-red"}`} />
+      <span className="truncate">{words}</span>
+    </span>
   );
 }
 

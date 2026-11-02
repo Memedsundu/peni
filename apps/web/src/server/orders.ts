@@ -1,9 +1,15 @@
-import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDTO, PeniCheckDTO, TillAskidaDTO, TillMenuDTO } from "@peni/api";
+import type { OrderDTO, OrderListDTO, PaymentAnswerDTO, PaymentDeviceDTO, PaymentDTO, PeniCheckDTO, TillAskidaDTO, TillMenuDTO } from "@peni/api";
 import { goodsName } from "@peni/brand/format";
 import {
   amountPaid,
   calculateEarn,
   claimIsOpen,
+  fiscalRefund,
+  fiscalSale,
+  saleKdv,
+  type FiscalRefund,
+  type FiscalSale,
+  type TerminalSettings,
   kurusToPeniCeil,
   localDateKey,
   randomClaimCode,
@@ -63,6 +69,12 @@ export class OrderService {
 
   /** "Ayşe Y." for a wallet's membership, shown to the barista. Set by the app. */
   peniMemberName: (membershipId: string) => Promise<string> = async () => "Üye";
+
+  /** The yazarkasa (N12): what it's doing with a payment, and a person's word when it can't say. Set by the app. */
+  device: {
+    state(payment: Payment): Promise<PaymentDeviceDTO | null>;
+    decide(ctx: StaffContext, payment: Payment, approved: boolean): Promise<Payment>;
+  } | null = null;
 
   /** The till's tabs and tiles: categories in order, with what can be sold right now. */
   async tillMenu(ctx: StaffContext): Promise<TillMenuDTO> {
@@ -193,6 +205,39 @@ export class OrderService {
   async payment(ctx: StaffContext, orderId: string, paymentId: string): Promise<PaymentAnswerDTO> {
     this.require(ctx, "till.use");
     return this.answer(ctx, await this.paymentOf(ctx, orderId, paymentId));
+  }
+
+  /**
+   * The yazarkasa stopped answering mid-way (N12): the barista looks at what it printed and
+   * says whether the payment went through.
+   */
+  async decidePayment(ctx: StaffContext, orderId: string, paymentId: string, input: { approved: boolean }): Promise<PaymentAnswerDTO> {
+    this.require(ctx, "till.use");
+    const payment = await this.paymentOf(ctx, orderId, paymentId);
+    if (!this.device) throw new AppError("PAYMENT_NOT_PENDING", "This payment is already settled", 409);
+    return this.answer(ctx, await this.device.decide(ctx, payment, input.approved));
+  }
+
+  /** The fiscal receipt for a cash or card sale the yazarkasa takes: the order's lines and what was paid before (N12). */
+  async fiscalSale(payment: Payment, settings: TerminalSettings): Promise<FiscalSale> {
+    const order = await this.orders.getOrder(payment.cafeId, payment.orderId);
+    if (!order) throw new AppError("ORDER_NOT_FOUND", "No such order", 404);
+    const payments = await this.payments.list(payment.cafeId, [order.id]);
+    return fiscalSale({ payment, order, payments, settings, cashier: await this.firstName(payment.startedByMemberId) });
+  }
+
+  /** The same for money going back: the sale it gives back, as the device recorded it. */
+  async fiscalRefund(payment: Payment, settings: TerminalSettings): Promise<FiscalRefund> {
+    const order = await this.orders.getOrder(payment.cafeId, payment.orderId);
+    if (!order) throw new AppError("ORDER_NOT_FOUND", "No such order", 404);
+    const sale = (await this.payments.list(payment.cafeId, [order.id])).find((p) => p.kind === "sale" && p.status === "approved" && p.method === payment.method) ?? null;
+    return fiscalRefund({ refund: payment, order, sale, settings, cashier: await this.firstName(payment.startedByMemberId) });
+  }
+
+  private async firstName(memberId: string): Promise<string> {
+    const member = await this.staff.getMember(memberId);
+    const account = member ? await this.staff.getAccount(member.accountId) : null;
+    return account?.name.split(" ")[0] ?? "";
   }
 
   /** "Onaylandı": the barista saw the terminal approve the card. */
@@ -665,7 +710,14 @@ export class OrderService {
       }
       // "Askıya bırak": the same price, a line of its own, named for what it is.
       const name = productId === l.productId ? product.name : `Askıya ${goodsName(product.name)}`;
-      return { productId: l.productId, name, unitPriceKurus: product.priceKurus, quantity: l.quantity, discountPercent: l.discountPercent ?? 0 };
+      return {
+        productId: l.productId,
+        name,
+        unitPriceKurus: product.priceKurus,
+        quantity: l.quantity,
+        discountPercent: l.discountPercent ?? 0,
+        kdvPercent: saleKdv(product),
+      };
     });
   }
 
@@ -689,15 +741,18 @@ export class OrderService {
     const payments = await this.payments.list(ctx.cafe.id, orders.map((o) => o.id));
     const names = await this.names(orders, payments);
     const confirmBy = new Map<string, PaymentDTO["confirmBy"]>();
+    const devices = new Map<string, PaymentDeviceDTO>();
     for (const p of payments.filter((x) => x.status === "pending")) {
       const how = await this.payments.confirmation(p);
       confirmBy.set(p.id, how === "terminal" ? "terminal" : "staff");
+      const device = await this.device?.state(p);
+      if (device) devices.set(p.id, device);
     }
     const wallets = new Map<string, string>();
     for (const id of new Set(payments.filter((p) => p.method === "peni" && p.reference).map((p) => p.reference!))) {
       wallets.set(id, await this.peniMemberName(id));
     }
-    return orders.map((o) => this.toDTO(ctx, o, payments.filter((p) => p.orderId === o.id), names, confirmBy, wallets));
+    return orders.map((o) => this.toDTO(ctx, o, payments.filter((p) => p.orderId === o.id), names, confirmBy, wallets, devices));
   }
 
   private toDTO(
@@ -707,6 +762,7 @@ export class OrderService {
     names: Map<string, string>,
     confirmBy: Map<string, PaymentDTO["confirmBy"]>,
     wallets: Map<string, string>,
+    devices: Map<string, PaymentDeviceDTO>,
   ): OrderDTO {
     const peniKurus = peniKurusOf(payments);
     const wallet = walletOf(payments);
@@ -757,6 +813,8 @@ export class OrderService {
         receiptNo: p.receiptNo,
         failure: p.failure,
         reason: p.reason,
+        device: devices.get(p.id) ?? null,
+        fiscal: fiscalOf(p),
       })),
       claim: null,
     };
@@ -787,6 +845,14 @@ export class OrderService {
   private require(ctx: StaffContext, permission: Permission): void {
     requirePermission(ctx, permission);
   }
+}
+
+/** What the yazarkasa printed for a payment, as the till lists it. */
+function fiscalOf(p: Payment): PaymentDTO["fiscal"] {
+  const d = p.terminalData;
+  if (!d) return null;
+  const card = d.card?.last4 ? [d.card.scheme, `•••• ${d.card.last4}`].filter(Boolean).join(" ") : null;
+  return { receiptNo: d.receipt?.number ?? p.receiptNo, zNumber: d.receipt?.zNumber ?? null, card, decidedByStaff: !!d.decidedByMemberId };
 }
 
 /** Peni on an order: approved peni payments less peni given back, in kuruş. */

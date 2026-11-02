@@ -1,0 +1,24 @@
+{
+  "name": "@peni/till-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Penny Köprü: the program on a café's till computer that drives its yazarkasa for Penny (N12).",
+  "bin": {
+    "penny-kopru": "./dist/penny-kopru.mjs"
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/penny-kopru.mjs --banner:js=\"#!/usr/bin/env node\"",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@peni/api": "workspace:*",
+    "@types/node": "22.20.5",
+    "esbuild": "0.27.7",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

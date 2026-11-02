@@ -33,7 +33,7 @@ Shelby Cafe is the pilot. Other cafés join later, so every record belongs to on
 |---|---|
 | `apps/web` | One Next.js app with four areas: **customer** pages, **café panel** (back office), **kasa** (till screen) and **ekran** (customer display), plus the `/api/v1` API that every client uses. One deploy. |
 | `apps/mobile` | Expo app for iOS and Android. Customers use it for everything on their side. Owners get a **café mode**: scan receipts with the camera, confirm AI drafts, see reports and the weekly letter. The till itself stays on the PC. |
-| `apps/till-bridge` *(new, later: waits for the Ingenico protocol documents, D24)* | A small program on the café's Windows PC that talks to the Ingenico terminal and keeps an outbound connection to Peni. It replaces running the whole app locally, which is what `shelby-local` does today. |
+| `apps/till-bridge` *(Penny Köprü, N12: built with a practice yazarkasa; the Ingenico driver waits for the protocol documents, D24)* | A small program on the café's Windows PC that talks to the Ingenico terminal and keeps an outbound connection to Peni. It replaces running the whole app locally, which is what `shelby-local` does today. |
 
 ### Packages
 | Package | Responsibility |
@@ -103,7 +103,7 @@ Each piece is one PR that ends with something you can try. Order follows D19: bu
 32. **Community insights** (D17).
 
 ### Later · when the Ingenico protocol documents arrive
-- **Till bridge + Ingenico:** the till sends card and cash sales to the terminal for fiscal receipts. This piece doesn't block the switch.
+- **Till bridge + Ingenico:** the till sends card and cash sales to the terminal for fiscal receipts. This piece doesn't block the switch. **Built except the Ingenico driver (N12):** Penny Köprü with a practice yazarkasa, the Cihazlar page, KDV on products, Z reports into the Z check; what's left and what to ask Ingenico is in [ingenico.md](ingenico.md).
 
 ### Phase 5 · Switch
 33. **Shelby → Peni data move:** a script that copies Shelby Cafe's data (D18), rehearsed on a copy of the database until the numbers match.

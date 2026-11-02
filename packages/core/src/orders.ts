@@ -18,6 +18,8 @@ export interface OrderLine {
   quantity: number;
   /** 0–100, whole percent. */
   discountPercent: number;
+  /** The product's KDV when it was added, for the fiscal receipt (N12). Missing on lines from before then: 10. */
+  kdvPercent?: number;
 }
 
 export interface Order {

@@ -33,6 +33,7 @@ const PAGES = [
   { key: "gorevler", href: "/panel/gorevler", label: "navTasks", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "tasks.view") },
   { key: "penny", href: "/panel/penny", label: "navPenny", plan: "penny", can: (c: StaffCafeAccessDTO) => has(c, "peni.till") },
   { key: "topluluk", href: "/panel/topluluk", label: "community", plan: "topluluk", can: (c: StaffCafeAccessDTO) => has(c, "posts.write") || has(c, "posts.moderate") },
+  { key: "cihazlar", href: "/panel/cihazlar", label: "navDevices", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "devices.manage") },
   { key: "plan", href: "/panel/plan", label: "navPlan", plan: "topluluk", can: (c: StaffCafeAccessDTO) => c.role === "owner" },
 ] as const satisfies readonly { key: string; href: string; label: TextKey; plan: CafePlanKey; can: (c: StaffCafeAccessDTO) => boolean }[];
 

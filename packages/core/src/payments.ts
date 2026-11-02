@@ -1,12 +1,14 @@
 import type { Kurus } from "./money";
 import type { PaymentMethod } from "./orders";
+import type { TerminalData } from "./terminal";
 
 /**
  * Payments (plan piece 8). Every sale and every refund at the till goes through one
- * interface, `PaymentTerminal`, and leaves one `Payment` record. Today the only terminal
- * is the manual one: the barista runs the Ingenico on its own and taps on the till once
- * it approves (D24). The till bridge adds a terminal that drives the Ingenico itself; the
- * till and the records stay as they are, only who says "approved" changes.
+ * interface, `PaymentTerminal`, and leaves one `Payment` record. Without a yazarkasa
+ * connected, the terminal is the manual one: the barista runs the Ingenico on its own and
+ * taps on the till once it approves (D24). A till computer whose bridge is connected
+ * pays through the yazarkasa itself (N12, `terminal.ts`); the till and the records stay
+ * as they are, only who says "approved" changes.
  */
 
 export type PaymentKind = "sale" | "refund";
@@ -37,7 +39,7 @@ export interface Payment {
   tenderedKurus: Kurus | null;
   changeKurus: Kurus | null;
   status: PaymentStatus;
-  /** Which terminal took it: "manual" for now. */
+  /** Which terminal took it: "manual", "bridge" (the yazarkasa, N12), "peni", "askida". */
   terminal: string;
   /** The till computer it was taken on, when it was a till. */
   deviceId: string | null;
@@ -57,12 +59,14 @@ export interface Payment {
   receiptNo: string | null;
   /** Why it was declined or cancelled, in the terminal's or the barista's words. */
   failure: string | null;
+  /** What the yazarkasa printed and the card it read, for one that went through it. */
+  terminalData?: TerminalData | null;
 }
 
-/** A terminal's answer to a payment it was sent. */
+/** A terminal's answer to a payment it was sent. `cancelled`: it stopped because the barista asked. */
 export type TerminalOutcome =
-  | { approved: true; reference?: string | null; receiptNo?: string | null }
-  | { approved: false; reason: string };
+  | { approved: true; reference?: string | null; receiptNo?: string | null; data?: TerminalData | null }
+  | { approved: false; reason: string; cancelled?: boolean };
 
 /**
  * The one way money is taken or given back. A terminal receives each payment once,
@@ -75,8 +79,12 @@ export interface PaymentTerminal {
   confirmation(payment: Pick<Payment, "kind" | "method">): PaymentConfirmation;
   /** Hands the payment over. Throws when the terminal can't be reached; the payment is then declined. */
   send(payment: Payment): Promise<void>;
-  /** The barista backed out of a payment still waiting. */
-  cancel(payment: Payment): Promise<void>;
+  /**
+   * The barista backed out of a payment still waiting. "cancelled": nothing reached the
+   * device, it's over. "requested": the device is on it and was asked to stop; its answer
+   * settles the payment, which may still go through.
+   */
+  cancel(payment: Payment): Promise<"cancelled" | "requested">;
 }
 
 /**
@@ -89,7 +97,7 @@ export const manualTerminal: PaymentTerminal = {
   kind: "manual",
   confirmation: (p) => (p.kind === "sale" && p.method === "card" ? "staff" : "now"),
   send: async () => {},
-  cancel: async () => {},
+  cancel: async () => "cancelled",
 };
 
 /**
@@ -101,7 +109,7 @@ export const peniTerminal: PaymentTerminal = {
   kind: "peni",
   confirmation: () => "now",
   send: async () => {},
-  cancel: async () => {},
+  cancel: async () => "cancelled",
 };
 
 /**
@@ -112,16 +120,19 @@ export const askidaTerminal: PaymentTerminal = {
   kind: "askida",
   confirmation: () => "now",
   send: async () => {},
-  cancel: async () => {},
+  cancel: async () => "cancelled",
 };
 
 /** Which terminal a till computer pays with. */
 export interface PaymentTerminals {
-  terminalFor(cafeId: string, deviceId: string | null): Promise<PaymentTerminal>;
+  /** For a new payment on this till computer: its yazarkasa when that's connected and can take it, else manual. */
+  terminalFor(cafeId: string, deviceId: string | null, payment: Pick<Payment, "kind" | "method">): Promise<PaymentTerminal>;
+  /** For a payment already taken: the terminal it went through, by the kind stored on it. */
+  byKind(kind: string): PaymentTerminal | null;
 }
 
-/** Every till pays manually until the till bridge registers a terminal for its computer. */
-export const manualTerminals: PaymentTerminals = { terminalFor: async () => manualTerminal };
+/** Every till pays manually: no till computer has its yazarkasa connected. */
+export const manualTerminals: PaymentTerminals = { terminalFor: async () => manualTerminal, byKind: () => manualTerminal };
 
 /** Approved sales minus approved refunds. */
 export function amountPaid(payments: Pick<Payment, "kind" | "status" | "amountKurus">[]): Kurus {

@@ -1,8 +1,8 @@
 "use client";
 
-import { newIdempotencyKey, type CashSessionDTO, type CashStateDTO } from "@peni/api";
+import { newIdempotencyKey, type CashSessionDTO, type CashStateDTO, type TerminalJobDTO, type TillTerminalDTO } from "@peni/api";
 import { formatTL, formatTime } from "@peni/brand/format";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { TillProps } from "./till";
 import { Button, Keypad, Notice, Sheet } from "./ui";
@@ -14,7 +14,14 @@ type Panel = null | { kind: "count"; closing: boolean } | { kind: "move"; direct
  * three things a barista does with it: count it open, put cash in or take it out with a
  * reason, and count it closed.
  */
-export function Cash({ t, slug, onError, state, onChanged }: TillProps & { state: CashStateDTO | null; onChanged: (s: CashStateDTO) => void }) {
+export function Cash({
+  t,
+  slug,
+  onError,
+  state,
+  onChanged,
+  terminal,
+}: TillProps & { state: CashStateDTO | null; onChanged: (s: CashStateDTO) => void; terminal: TillTerminalDTO | null }) {
   const [panel, setPanel] = useState<Panel>(null);
   if (!state) return <div className="flex-1" />;
   const open = state.open;
@@ -57,6 +64,7 @@ export function Cash({ t, slug, onError, state, onChanged }: TillProps & { state
         </section>
       )}
       {!open && !state.last && <p className="py-10 text-muted">{t("neverOpened")}</p>}
+      {terminal?.reports && <Reports t={t} slug={slug} onError={onError} />}
 
       {panel?.kind === "count" && (
         <CountSheet
@@ -88,6 +96,68 @@ export function Cash({ t, slug, onError, state, onChanged }: TillProps & { state
         />
       )}
     </div>
+  );
+}
+
+/** How often the till looks at a report the yazarkasa is printing. */
+const REPORT_POLL_MS = 1_500;
+
+/**
+ * X and Z reports on this computer's yazarkasa (N12). The Z report closes the fiscal day,
+ * so it asks first; its numbers wait in Taslaklar beside the till's own day.
+ */
+function Reports({ t, slug, onError }: Pick<TillProps, "t" | "slug" | "onError">) {
+  const [job, setJob] = useState<TerminalJobDTO | null>(null);
+  const [confirmZ, setConfirmZ] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const working = !!job && (job.state === "queued" || job.state === "sent");
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(() => {
+      api.staff.till.terminalJob(slug, job.id).then(setJob, (e: unknown) => setError(onError(e)));
+    }, REPORT_POLL_MS);
+    return () => clearInterval(timer);
+  }, [working, job?.id, slug, onError]);
+
+  const start = (kind: "x" | "z") => {
+    setConfirmZ(false);
+    setError(null);
+    api.staff.till.terminalReport(slug, { kind }).then(setJob, (e: unknown) => setError(onError(e)));
+  };
+  const done = job && !working ? (job.outcome === "approved" ? (job.report === "z" ? t("zDone") : t("reportDone")) : `${t("reportFailed")}${job.resultMessage ? `: ${job.resultMessage}` : ""}`) : null;
+
+  return (
+    <section className="flex flex-col gap-3 rounded-3xl border border-line p-5" aria-labelledby="yk-day">
+      <h2 id="yk-day" className="text-lg font-semibold">
+        {t("ykDayTitle")}
+      </h2>
+      <p className="max-w-xl text-sm leading-normal text-muted">{t("ykDayHelp")}</p>
+      {working ? (
+        <p className="flex items-center gap-3" role="status">
+          <span aria-hidden="true" className="h-3 w-3 animate-pulse rounded-full bg-chart-accent" />
+          {t("reportWorking")}
+        </p>
+      ) : confirmZ ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="font-semibold">{t("zConfirm")}</span>
+          <Button kind="primary" onClick={() => start("z")}>
+            {t("zConfirmYes")}
+          </Button>
+          <Button kind="bare" onClick={() => setConfirmZ(false)}>
+            {t("cancel")}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => start("x")}>{t("xReport")}</Button>
+          <Button kind="secondary" onClick={() => setConfirmZ(true)}>
+            {t("zReport")}
+          </Button>
+        </div>
+      )}
+      {done && <p className={job?.outcome === "approved" ? "text-green" : "text-red"}>{done}</p>}
+      {error && <Notice tone="red">{error}</Notice>}
+    </section>
   );
 }
 

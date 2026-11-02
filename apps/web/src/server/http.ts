@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { AppError, isAppError, type CustomerRecord, type PeniApp } from "./app";
 import { getApp } from "./runtime";
+import { BRIDGE_HEADER } from "./terminal";
 
 export const SESSION_COOKIE = "peni_session";
 /** Staff sessions, separate from the customer one: a barista can be both. */
@@ -76,6 +77,11 @@ export function staffTokenFrom(req: NextRequest): string | null {
 
 export function tillTokenFrom(req: NextRequest): string | null {
   return req.headers.get(TILL_HEADER) ?? req.cookies.get(TILL_COOKIE)?.value ?? null;
+}
+
+/** The yazarkasa bridge sends its own token in a header (N12). */
+export function bridgeTokenFrom(req: NextRequest): string | null {
+  return req.headers.get(BRIDGE_HEADER);
 }
 
 type Handler<T> = (ctx: {

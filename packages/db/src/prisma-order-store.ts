@@ -14,6 +14,7 @@ function toOrder({ lines, ...o }: Row): Order {
       unitPriceKurus: l.unitPriceKurus,
       quantity: l.quantity,
       discountPercent: l.discountPercent,
+      kdvPercent: l.kdvPercent,
     })),
   };
 }

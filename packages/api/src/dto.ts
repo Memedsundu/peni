@@ -84,6 +84,8 @@ export interface StaffMenuProductDTO {
   imageUrl: string | null;
   /** On the askı list (set in Peni ve askı). */
   askida: boolean;
+  /** KDV on its sale, in percent: what the fiscal receipt files it under (N12). */
+  kdvPercent: number;
 }
 
 /** `GET /staff/:slug/menu`, and the answer to every menu change. */
@@ -508,6 +510,23 @@ export interface PaymentDTO {
   failure: string | null;
   /** A refund's reason. */
   reason: string | null;
+  /** While the yazarkasa works on it (N12): what it's doing. Null otherwise. */
+  device: PaymentDeviceDTO | null;
+  /** What the yazarkasa printed, once it did: "Fiş 0042", "Visa •••• 4242". */
+  fiscal: { receiptNo: string | null; zNumber: string | null; card: string | null; decidedByStaff: boolean } | null;
+}
+
+export interface PaymentDeviceDTO {
+  /** Not picked up by the till computer's bridge yet. */
+  queued: boolean;
+  /** "waiting_card", "pin", "authorising", "printing", "cancelling"; null before it starts. */
+  stage: string | null;
+  /** The device's own words. */
+  message: string | null;
+  /** The barista backed out; the device was asked to stop. */
+  cancelling: boolean;
+  /** The device can't say what happened: someone looks at what it printed and says (`decidePayment`). */
+  needsDecision: boolean;
 }
 
 /** The answer to starting, confirming, cancelling or checking a payment. */
@@ -1324,6 +1343,215 @@ export interface TillDeviceDTO {
   lastSeenIso: string | null;
 }
 
+// ─────────────────────────────────────────────── the yazarkasa (N12)
+
+/** How pennies and the askı go on the fiscal receipt. */
+export type ReceiptTreatmentDTO = "discount" | "payment";
+
+export interface TerminalSettingsDTO {
+  /** The device's department for each KDV rate, by the rate: { "10": 2 }. */
+  departments: Record<string, number>;
+  peni: ReceiptTreatmentDTO;
+  askida: ReceiptTreatmentDTO;
+}
+
+export interface TerminalCapabilitiesDTO {
+  sale: boolean;
+  refund: boolean;
+  reports: boolean;
+  cancel: boolean;
+}
+
+/** What a bridge says about itself and its device each time it checks in. */
+export interface BridgeStatusDTO {
+  version: string;
+  /** "simulator" (the practice yazarkasa) or "ingenico". */
+  driver: string;
+  ready: boolean;
+  message: string | null;
+  model: string | null;
+  serial: string | null;
+  capabilities: TerminalCapabilitiesDTO;
+}
+
+/** One till computer on the Cihazlar page, with its yazarkasa. */
+export interface TerminalDeviceDTO {
+  id: string;
+  name: string;
+  createdIso: string;
+  lastSeenIso: string | null;
+  bridge: {
+    /** "waiting": a code was made, the bridge hasn't used it. "online" / "offline": connected, heard from lately or not. */
+    state: "waiting" | "online" | "offline";
+    pairExpiresIso: string | null;
+    /** The computer's name, as the bridge said. */
+    name: string | null;
+    lastSeenIso: string | null;
+    status: BridgeStatusDTO | null;
+    enabled: boolean;
+    settings: TerminalSettingsDTO;
+    /** Reports and test slips from today, newest first. */
+    jobs: TerminalJobDTO[];
+  } | null;
+  /** Today's cash and card sales on this computer: through the yazarkasa, and taken by hand. */
+  today: { printed: number; manual: number; manualKurus: number };
+}
+
+/** `GET /staff/:slug/terminals` */
+export interface TerminalsPageDTO {
+  cafe: { slug: string; name: string };
+  devices: TerminalDeviceDTO[];
+}
+
+/** `POST /staff/:slug/terminals/:deviceId/connect`: the code to type into the bridge, shown once. */
+export interface BridgeCodeDTO {
+  code: string;
+  expiresIso: string;
+  page: TerminalsPageDTO;
+}
+
+/** A report, test slip, sale or refund the yazarkasa was asked for. */
+export interface TerminalJobDTO {
+  id: string;
+  kind: "sale" | "refund" | "report" | "test";
+  report: "x" | "z" | null;
+  state: "queued" | "sent" | "done" | "cancelled";
+  stage: string | null;
+  message: string | null;
+  outcome: "approved" | "declined" | "failed" | "cancelled" | "unknown" | null;
+  /** The device's words about the outcome. */
+  resultMessage: string | null;
+  createdIso: string;
+  finishedIso: string | null;
+  /** A Z report's numbers, as the device printed them. */
+  z: { zNumber: string | null; totalKurus: number | null; cashKurus: number | null; cardKurus: number | null; receipts: number | null } | null;
+}
+
+/** `GET /staff/:slug/till/terminal`: the yazarkasa of the till computer the barista is at. */
+export interface TillTerminalDTO {
+  /** A bridge is connected to this computer (or was): the till says when it isn't answering. */
+  connected: boolean;
+  /** It's answering and switched on: cash and card go through it. */
+  online: boolean;
+  ready: boolean;
+  enabled: boolean;
+  message: string | null;
+  /** X and Z reports can be printed from the till. */
+  reports: boolean;
+}
+
+// The bridge's side (`apps/till-bridge`).
+
+/** `POST /bridge/pair` */
+export interface BridgePairedDTO {
+  token: string;
+  cafe: { name: string };
+  device: { name: string };
+}
+
+export interface FiscalLineDTO {
+  name: string;
+  quantity: number;
+  unitPriceKurus: number;
+  kdvPercent: number;
+  department: number;
+  discountKurus: number;
+  totalKurus: number;
+}
+
+export interface FiscalAdjustmentDTO {
+  kind: "order" | "peni" | "askida" | "cash" | "card";
+  amountKurus: number;
+  label: string;
+}
+
+/** A sale as the device should print it and take its payment. Lines, less discounts, less what was paid before, is what it takes. */
+export interface FiscalSaleDTO {
+  ref: string;
+  orderNumber: number;
+  businessDay: string;
+  cashier: string;
+  lines: FiscalLineDTO[];
+  discounts: FiscalAdjustmentDTO[];
+  paidBefore: FiscalAdjustmentDTO[];
+  take: { method: "cash" | "card"; amountKurus: number; tenderedKurus: number | null; changeKurus: number | null };
+}
+
+export interface FiscalReceiptInfoDTO {
+  number: string | null;
+  zNumber: string | null;
+  ekuNumber: string | null;
+  serial: string | null;
+  printedAt: string | null;
+}
+
+export interface CardInfoDTO {
+  scheme: string | null;
+  last4: string | null;
+  bank: string | null;
+  authCode: string | null;
+  rrn: string | null;
+}
+
+export interface FiscalRefundDTO {
+  ref: string;
+  orderNumber: number;
+  businessDay: string;
+  cashier: string;
+  method: "cash" | "card";
+  amountKurus: number;
+  reason: string;
+  lines: FiscalLineDTO[];
+  original: { ref: string; receiptNo: string | null; terminal: { jobId: string; receipt: FiscalReceiptInfoDTO | null; card: CardInfoDTO | null } | null };
+}
+
+export type TerminalTaskDTO =
+  | { kind: "sale"; sale: FiscalSaleDTO }
+  | { kind: "refund"; refund: FiscalRefundDTO }
+  | { kind: "report"; report: "x" | "z" }
+  | { kind: "test" };
+
+/** A Z report's numbers as the device sends them, the same fields as one read from a photo. */
+export interface ZReportDataDTO {
+  date: string | null;
+  zNumber: string | null;
+  totalKurus: number | null;
+  cashKurus: number | null;
+  cardKurus: number | null;
+  otherKurus: number | null;
+  receipts: number | null;
+  refundsKurus: number | null;
+  kdv: { ratePct: number; amountKurus: number }[];
+}
+
+export type TerminalResultDTO =
+  | { outcome: "approved"; receipt?: FiscalReceiptInfoDTO | null; card?: CardInfoDTO | null; z?: ZReportDataDTO | null; message?: string | null }
+  | { outcome: "declined"; code?: string | null; message: string }
+  | { outcome: "failed"; code?: string | null; message: string }
+  | { outcome: "cancelled"; message?: string | null }
+  | { outcome: "unknown"; message: string };
+
+/** A job as the bridge gets it. */
+export interface BridgeJobDTO {
+  id: string;
+  task: TerminalTaskDTO;
+  /** The barista backed out: stop if the device still can. */
+  cancel: boolean;
+  createdIso: string;
+}
+
+/** `POST /bridge/poll`: the next job, or none after a wait. */
+export interface BridgePollDTO {
+  job: BridgeJobDTO | null;
+  /** Wait this long before asking again; 0 to ask straight away. */
+  waitMs: number;
+}
+
+/** `POST /bridge/jobs/:id/progress` */
+export interface BridgeProgressDTO {
+  cancel: boolean;
+}
+
 /** `GET /till`: the till's sign-in screen, for a computer set up as a till. */
 export interface TillDTO {
   cafe: { slug: string; name: string };
@@ -1803,6 +2031,8 @@ export interface ZReportDraftDTO extends DraftBaseDTO {
   /** What was read, beside the till's day as it is now; null once decided. */
   zreport: ZCheckDTO | null;
   outcome: CheckOutcomeDTO | null;
+  /** The yazarkasa sent it itself (N12): there's no photo to look at. */
+  fromTerminal: boolean;
 }
 
 /** What a statement line looks like it is, from its description. */

@@ -46,6 +46,7 @@ import {
   type BillStore,
   type CheckOutcome,
   type Draft,
+  type ZReportProposal,
   type DocumentType,
   type DuplicateRef,
   type Job,
@@ -718,6 +719,37 @@ export class AssistantService {
     return this.saveCheckDraft(job, by, { kind: "zreport", proposal, title: this.checks.zTitle(proposal), doubts: read.doubts });
   }
 
+  /**
+   * A Z report the yazarkasa printed and sent itself (N12): the same check as one read from
+   * a photo, without the reading. It waits in Taslaklar beside the till's own day.
+   */
+  async zFromTerminal(cafeId: string, proposal: ZReportProposal): Promise<string> {
+    const draft = {
+      kind: "zreport",
+      proposal,
+      title: this.checks.zTitle(proposal),
+      doubts: [],
+      id: `drf_${randomUUID()}`,
+      cafeId,
+      status: "open",
+      documentId: null,
+      entry: null,
+      jobId: null,
+      createdAt: this.now(),
+      decidedById: null,
+      decidedAt: null,
+      resultId: null,
+      changed: [],
+      dismissReason: null,
+      duplicateOf: null,
+      outcome: null,
+    } as Draft;
+    draft.duplicateOf = await this.checks.duplicate(cafeId, "zreport", proposal, draft.id);
+    await this.store.saveDraft(draft);
+    await this.record({ cafeId, kind: "draft.created", purpose: READ, draftId: draft.id, detail: draft.title });
+    return draft.id;
+  }
+
   private async saveCheckDraft(
     job: Job,
     by: string | null,
@@ -983,7 +1015,13 @@ export class AssistantService {
         outcome: outcomeDto(d.outcome),
       };
     if (d.kind === "zreport")
-      return { ...base, kind: "zreport", zreport: d.status === "open" ? await this.checks.zreport(ctx, d.proposal) : null, outcome: outcomeDto(d.outcome) };
+      return {
+        ...base,
+        kind: "zreport",
+        zreport: d.status === "open" ? await this.checks.zreport(ctx, d.proposal) : null,
+        outcome: outcomeDto(d.outcome),
+        fromTerminal: !!d.proposal.fromTerminal,
+      };
     return {
       ...base,
       kind: "bill",

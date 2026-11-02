@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { Ledger, NO_PIN, PeniService, defaultSettings, type PeniClaim } from "@peni/core";
+import { DEFAULT_TERMINAL_SETTINGS, Ledger, NO_PIN, PeniService, defaultSettings, type PeniClaim } from "@peni/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPrismaClient, createPrismaStores, type PrismaClient } from "../src";
 
@@ -52,7 +52,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     const base = { categoryId: hot.id, category: "", available: true };
     await stores.menu.saveProduct(cafeId, { ...base, productId: "turk", name: "Türk Kahvesi", priceKurus: 9_000, sortOrder: 1 });
     await stores.menu.saveProduct(cafeId, { ...base, productId: "cay", name: "Çay", priceKurus: 3_000, sortOrder: 0, description: "İnce belli" });
-    await stores.menu.saveProduct(cafeId, { ...base, productId: "kek", name: "Kek", categoryId: sweet.id, priceKurus: 6_000 });
+    await stores.menu.saveProduct(cafeId, { ...base, productId: "kek", name: "Kek", categoryId: sweet.id, priceKurus: 6_000, kdvPercent: 1 });
     await stores.menu.saveProduct(cafeId, { ...base, productId: "cay", name: "Çay", priceKurus: 3_500, sortOrder: 0 });
     await stores.menu.saveProduct(cafeId, { ...base, productId: "eski", name: "Eski", priceKurus: 1_000, archivedAt: at });
     expect((await stores.menu.listMenu(cafeId)).map((m) => [m.productId, m.category, m.priceKurus, m.description ?? null])).toEqual([
@@ -70,6 +70,11 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       plan: "penny",
       trialEndsAt: new Date("2026-11-15T09:00:00Z"),
     });
+  });
+
+  it("keeps each product's KDV, 10 unless set (N12)", async () => {
+    expect((await stores.menu.getProduct(cafeId, "kek"))!.kdvPercent).toBe(1);
+    expect((await stores.menu.getProduct(cafeId, "cay"))!.kdvPercent).toBe(10);
   });
 
   it("keeps memberships, member codes, sessions and lookups", async () => {
@@ -290,14 +295,15 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect([...numbers].sort((a, b) => a - b)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
     expect(await stores.orders.nextNumber(cafeId, "2026-10-17")).toBe(1);
 
-    const line = (productId: string, unitPriceKurus: number, quantity: number, discountPercent = 0) => ({ productId, name: productId, unitPriceKurus, quantity, discountPercent });
+    // A line keeps its KDV (N12); 10 unless the product said otherwise.
+    const line = (productId: string, unitPriceKurus: number, quantity: number, discountPercent = 0, kdvPercent = 10) => ({ productId, name: productId, unitPriceKurus, quantity, discountPercent, kdvPercent });
     const base = {
       cafeId, businessDay: day, status: "open" as const, discountPercent: 0, createdByMemberId: "sm_x",
       paidAt: null, paidByMemberId: null, paymentMethod: null, tenderedKurus: null, changeKurus: null,
       voidedAt: null, voidedByMemberId: null, voidReason: null, refundedAt: null, refundedByMemberId: null, refundReason: null,
       refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
     };
-    const first = { ...base, id: `ord_1_${run}`, number: 1, createKey: `ck1_${run}`, createdAt: at, lines: [line("cay", 3_000, 2), line("simit", 2_500, 1, 10)], subtotalKurus: 8_500, discountKurus: 250, totalKurus: 8_250 };
+    const first = { ...base, id: `ord_1_${run}`, number: 1, createKey: `ck1_${run}`, createdAt: at, lines: [line("cay", 3_000, 2), line("simit", 2_500, 1, 10, 1)], subtotalKurus: 8_500, discountKurus: 250, totalKurus: 8_250 };
     await stores.orders.saveOrder(first);
     await stores.orders.saveOrder({ ...base, id: `ord_2_${run}`, number: 2, createKey: `ck2_${run}`, createdAt: new Date(at.getTime() + 60_000), lines: [line("turk", 9_000, 1)], subtotalKurus: 9_000, discountKurus: 0, totalKurus: 9_000 });
     expect((await stores.orders.getOrder(cafeId, first.id))!.lines).toEqual(first.lines);
@@ -395,6 +401,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       id: `pay_${run}`, cafeId, orderId, kind: "sale" as const, method: "card" as const, status: "pending" as const, amountKurus: 3_000,
       tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, cashSessionId: null, key: `pk_${run}`, reason: null,
       startedAt: at, startedByMemberId: "sm_x", settledAt: null, settledByMemberId: null, reference: null, receiptNo: null, failure: null,
+      terminalData: null,
     };
     expect(await stores.payments.savePayment(payment)).toBe(true);
     // A double tap with the same key is refused; the first one is found by its key.
@@ -406,6 +413,58 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.payments.savePayment(later);
     expect(await stores.payments.listPayments(cafeId, [orderId, "ord_none"])).toEqual([approved, later]);
     expect(await stores.payments.getPayment("cafe_other", payment.id)).toBeNull();
+  });
+
+  it("keeps each till computer's yazarkasa bridge, its jobs handed out once, and what the device printed (N12)", async () => {
+    const memberId = `sm_${run}`; // made by the staff test above
+    const device = { id: `dev_y_${run}`, cafeId, name: "Kasa 2", createdAt: at, createdByMemberId: memberId, lastSeenAt: null, revokedAt: null };
+    await stores.staff.createDevice(device, `dhy_${run}`);
+    const bridge = {
+      id: `brg_${run}`, cafeId, deviceId: device.id, pairCodeHash: `pc_${run}`, pairExpiresAt: at, tokenHash: null, name: null, pairedAt: null,
+      lastSeenAt: null, status: null, enabled: true, settings: DEFAULT_TERMINAL_SETTINGS, createdAt: at, createdByMemberId: memberId, revokedAt: null,
+    };
+    await stores.terminals.saveBridge(bridge);
+    expect(await stores.terminals.bridgeForPairCode(`pc_${run}`)).toEqual(bridge);
+    const status = { version: "1", driver: "simulator", ready: true, message: null, model: "Deneme", serial: "SIM1", capabilities: { sale: true, refund: false, reports: true, cancel: true } };
+    await stores.terminals.updateBridge(bridge.id, { tokenHash: `tk_${run}`, pairCodeHash: null, lastSeenAt: at, status });
+    // Settings saved meanwhile aren't undone by the bridge checking in.
+    await stores.terminals.updateBridge(bridge.id, { enabled: false });
+    await stores.terminals.updateBridge(bridge.id, { lastSeenAt: at });
+    expect(await stores.terminals.bridgeForToken(`tk_${run}`)).toMatchObject({ id: bridge.id, enabled: false, status, settings: DEFAULT_TERMINAL_SETTINGS });
+    expect((await stores.terminals.bridgeForDevice(device.id))!.id).toBe(bridge.id);
+    expect((await stores.terminals.listBridges(cafeId)).map((b) => b.id)).toEqual([bridge.id]);
+
+    const job = (id: string, minutes: number, over = {}) => ({
+      id, cafeId, bridgeId: bridge.id, task: { kind: "test" as const }, paymentId: null, orderId: null, state: "queued" as const, stage: null, message: null,
+      cancelRequestedAt: null, result: null, conflict: null, createdAt: new Date(at.getTime() + minutes * 60_000), createdByMemberId: memberId,
+      sentAt: null, touchedAt: null, finishedAt: null, ...over,
+    });
+    await stores.terminals.saveJob(job(`tjb_2_${run}`, 2));
+    await stores.terminals.saveJob(job(`tjb_1_${run}`, 1, { task: { kind: "report", report: "z" } }));
+    expect((await stores.terminals.queuedJobs(bridge.id)).map((j) => j.id)).toEqual([`tjb_1_${run}`, `tjb_2_${run}`]);
+    // Two polls at once: only one gets it.
+    const taken = await Promise.all([1, 2].map(() => stores.terminals.updateJob(`tjb_1_${run}`, { state: "sent", sentAt: at }, "queued")));
+    expect(taken.filter(Boolean)).toHaveLength(1);
+    expect(await stores.terminals.activeJob(bridge.id)).toMatchObject({ id: `tjb_1_${run}`, task: { kind: "report", report: "z" } });
+    await stores.terminals.updateJob(`tjb_1_${run}`, { cancelRequestedAt: at });
+    await stores.terminals.updateJob(`tjb_1_${run}`, { stage: "printing" }, "sent");
+    const result = { outcome: "approved" as const, z: { date: "2026-10-16", zNumber: "7", totalKurus: 100, cashKurus: 100, cardKurus: 0, otherKurus: 0, receipts: 1, refundsKurus: 0, kdv: [] } };
+    expect(await stores.terminals.updateJob(`tjb_1_${run}`, { state: "done", result, finishedAt: at }, "sent")).toBe(true);
+    expect(await stores.terminals.getJob(`tjb_1_${run}`)).toMatchObject({ state: "done", stage: "printing", cancelRequestedAt: at, result, conflict: null });
+    expect(await stores.terminals.activeJob(bridge.id)).toBeNull();
+    expect((await stores.terminals.listJobs(bridge.id, at)).map((j) => j.id)).toEqual([`tjb_2_${run}`, `tjb_1_${run}`]);
+
+    // A payment keeps what the device printed.
+    const terminalData = { jobId: `tjb_1_${run}`, receipt: { number: "0042", zNumber: "7", ekuNumber: "1", serial: "SIM1", printedAt: null }, card: { scheme: "Visa", last4: "4242", bank: null, authCode: "123456", rrn: null } };
+    const paid = {
+      id: `pay_y_${run}`, cafeId, orderId: `ord_c_${run}`, kind: "sale" as const, method: "card" as const, status: "approved" as const, amountKurus: 3_000,
+      tenderedKurus: null, changeKurus: null, terminal: "bridge", deviceId: device.id, cashSessionId: null, key: `pky_${run}`, reason: null,
+      startedAt: at, startedByMemberId: "sm_x", settledAt: at, settledByMemberId: null, reference: "123456", receiptNo: "0042", failure: null, terminalData,
+    };
+    await stores.payments.savePayment(paid);
+    expect((await stores.payments.getPayment(cafeId, paid.id))!.terminalData).toEqual(terminalData);
+    await stores.terminals.saveJob(job(`tjb_p_${run}`, 3, { paymentId: paid.id }));
+    expect((await stores.terminals.jobForPayment(paid.id))!.id).toBe(`tjb_p_${run}`);
   });
 
   it("keeps one open drawer per café, its counts and moves, and the payments taken in it", async () => {
@@ -426,6 +485,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       id: `pay_cash_${run}`, cafeId, orderId: `ord_c_${run}`, kind: "sale" as const, method: "cash" as const, status: "approved" as const, amountKurus: 3_000,
       tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, cashSessionId: first.id, key: `pkcash_${run}`, reason: null,
       startedAt: at, startedByMemberId: "sm_x", settledAt: at, settledByMemberId: "sm_x", reference: null, receiptNo: null, failure: null,
+      terminalData: null,
     };
     await stores.payments.savePayment(payment);
     expect(await stores.payments.listCashSessionPayments(cafeId, first.id)).toEqual([payment]);

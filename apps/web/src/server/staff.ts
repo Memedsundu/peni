@@ -354,6 +354,9 @@ export class StaffService {
     return { devices: (await this.store.listDevices(ctx.cafe.id)).map(toDeviceDTO) };
   }
 
+  /** Set by the app: the computer's yazarkasa bridge goes with it (N12). */
+  onDeviceRevoked: (deviceId: string) => Promise<void> = async () => {};
+
   /** A lost or replaced computer: its token stops working and everyone signed in on it is signed out. */
   async revokeDevice(ctx: StaffContext, deviceId: string): Promise<{ devices: TillDeviceDTO[] }> {
     this.require(ctx, "devices.manage");
@@ -362,6 +365,7 @@ export class StaffService {
     const now = this.now();
     await this.store.saveDevice({ ...device, revokedAt: now });
     await this.store.revokeSessionsOnDevice(device.id, now);
+    await this.onDeviceRevoked(device.id);
     return this.devices(ctx);
   }
 

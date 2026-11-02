@@ -9,6 +9,7 @@ import {
   type PeniCheckDTO,
   type TillAskidaDTO,
   type TillMenuDTO,
+  type TillTerminalDTO,
 } from "@peni/api";
 import { formatPercent, formatTL, goodsName } from "@peni/brand/format";
 import { lineTotal, orderTotals, QUICK_DISCOUNTS, type OrderLine } from "@peni/core";
@@ -56,11 +57,14 @@ export function Sell({
   slug,
   onError,
   deviceId,
+  terminal,
   drawerClosed,
   onOpenDrawer,
   onDrawerChanged,
 }: TillProps & {
   deviceId: string;
+  /** This computer's yazarkasa (N12), when one is connected. */
+  terminal: TillTerminalDTO | null;
   /** Cash can't be taken until the drawer is opened (piece 9). */
   drawerClosed: boolean;
   /** Goes to Kasa; the order on screen stays as it is. */
@@ -224,6 +228,8 @@ export function Sell({
     // A declined or cancelled payment is over: trying again is a new payment.
     if (answer.payment.status !== "pending") payKeys.current.clear();
     setCart((c) => ({ ...c, order: answer.order }));
+    // The yazarkasa stopped because the barista backed out: nothing more to show.
+    if (answer.payment.status === "cancelled" && answer.payment.failure === "CANCELLED") return setPanel(null);
     setPanel({ kind: "payment", orderId: answer.order.id, payment: answer.payment, tenderedKurus });
   };
 
@@ -328,6 +334,8 @@ export function Sell({
   const closePayment = () => {
     if (panel?.kind === "payment" && panel.payment.status === "pending") {
       const { orderId, payment } = panel;
+      // The yazarkasa may already have the card: it's asked to stop, and the sheet stays until it says.
+      if (payment.confirmBy === "terminal") return void settle((o, p) => api.staff.till.cancelPayment(slug, o, p));
       // The barista backs out; the order stays as it is for the next try.
       api.staff.till.cancelPayment(slug, orderId, payment.id).catch((e: unknown) => setError(onError(e)));
       payKeys.current.clear();
@@ -516,10 +524,12 @@ export function Sell({
         <PaymentSheet
           t={t}
           payment={panel.payment}
+          terminal={terminal}
           busy={busy}
           onClose={closePayment}
           onConfirm={() => void settle((o, p) => api.staff.till.confirmPayment(slug, o, p))}
           onDecline={() => void settle((o, p) => api.staff.till.cancelPayment(slug, o, p, { declined: true }))}
+          onDecide={(approved) => void settle((o, p) => api.staff.till.decidePayment(slug, o, p, { approved }))}
           onCheck={() => void settle((o, p) => api.staff.till.payment(slug, o, p))}
           onRetry={() => (panel.payment.method === "cash" || panel.payment.method === "card") && void pay(panel.payment.method, panel.tenderedKurus)}
         />
@@ -545,30 +555,36 @@ const TERMINAL_POLL_MS = 1500;
 
 /**
  * One sheet for a payment that isn't through yet. With the manual terminal (D24) the
- * barista taps once the terminal approves; with a terminal behind the till bridge the
- * till waits for its answer. A decline, or a terminal that can't be reached, says so
- * and offers another try.
+ * barista taps once the terminal approves; with the yazarkasa behind the till bridge
+ * (N12) the till waits for its answer and shows what the device is doing. A decline, or
+ * a device that can't be reached, says so and offers another try; a device that went
+ * quiet mid-way asks the barista what it printed.
  */
 function PaymentSheet({
   t,
   payment,
+  terminal,
   busy,
   onClose,
   onConfirm,
   onDecline,
+  onDecide,
   onCheck,
   onRetry,
 }: {
   t: TillProps["t"];
   payment: PaymentDTO;
+  terminal: TillTerminalDTO | null;
   busy: boolean;
   onClose: () => void;
   onConfirm: () => void;
   onDecline: () => void;
+  onDecide: (approved: boolean) => void;
   onCheck: () => void;
   onRetry: () => void;
 }) {
   const waitingOnTerminal = payment.status === "pending" && payment.confirmBy === "terminal";
+  const device = payment.device;
   const check = useRef(onCheck);
   check.current = onCheck;
   useEffect(() => {
@@ -577,14 +593,8 @@ function PaymentSheet({
     return () => clearInterval(timer);
   }, [waitingOnTerminal, payment.id]);
 
-  const problem =
-    payment.status === "declined"
-      ? payment.failure === "TERMINAL_UNREACHABLE"
-        ? t("terminalUnreachable")
-        : `${t("cardDeclined")}${payment.failure ? ` (${payment.failure})` : ""}`
-      : payment.status === "cancelled"
-        ? t("paymentClosed")
-        : null;
+  const problem = payment.status === "declined" ? declineText(t, payment.failure) : payment.status === "cancelled" ? t("paymentClosed") : null;
+  const stage = !device ? null : device.cancelling ? t("dev_cancelling") : device.queued ? t("dev_queued") : device.stage ? deviceStage(t, device.stage) : null;
 
   return (
     <Sheet title={payment.method === "cash" ? t("cashTitle") : t("cardTitle")} onClose={onClose} labelClose={t("close")}>
@@ -596,16 +606,31 @@ function PaymentSheet({
             {t("retry")}
           </Button>
         </>
+      ) : waitingOnTerminal && device?.needsDecision ? (
+        <>
+          <Notice tone="red">{t("decideTitle")}</Notice>
+          <p className="leading-normal text-muted">{t("decideBody")}</p>
+          <Button kind="primary" size="lg" disabled={busy} onClick={() => onDecide(true)}>
+            {t("decideYes")}
+          </Button>
+          <Button kind="quiet" disabled={busy} onClick={() => onDecide(false)}>
+            {t("decideNo")}
+          </Button>
+        </>
       ) : waitingOnTerminal ? (
         <>
-          <p className="flex items-center gap-3 text-muted" role="status">
+          <p className="flex items-center gap-3 text-lg" role="status">
             <span aria-hidden="true" className="h-3 w-3 animate-pulse rounded-full bg-chart-accent" />
-            {payment.method === "cash" ? t("waiting_cash") : t("waiting_card")}
+            {stage ?? (payment.method === "cash" ? t("waiting_cash") : t("waiting_card"))}
           </p>
-          <Button onClick={onClose}>{t("cancel")}</Button>
+          {device?.message && <p className="text-sm text-muted">{device.message}</p>}
+          <Button onClick={onClose} disabled={device?.cancelling}>
+            {t("cancel")}
+          </Button>
         </>
       ) : (
         <>
+          {terminal?.connected && payment.terminal === "manual" && <Notice>{t("manualHint")}</Notice>}
           <p className="text-muted">{t("cardBody")}</p>
           <Button kind="primary" size="lg" disabled={busy} onClick={onConfirm} autoFocus>
             {t("cardDone")}
@@ -617,6 +642,32 @@ function PaymentSheet({
       )}
     </Sheet>
   );
+}
+
+/** What the till says about a payment that didn't go through. */
+function declineText(t: TillProps["t"], failure: string | null): string {
+  if (failure === "TERMINAL_UNREACHABLE") return t("terminalUnreachable");
+  if (failure === "TERMINAL_TIMEOUT") return t("terminalTimeout");
+  if (failure === "DECIDED_NOT_TAKEN") return t("decidedNotTaken");
+  if (failure?.startsWith("TERMINAL_FAILED:")) return `${t("deviceFailed")}: ${failure.slice("TERMINAL_FAILED:".length)}`;
+  return `${t("cardDeclined")}${failure ? ` (${failure})` : ""}`;
+}
+
+function deviceStage(t: TillProps["t"], stage: string): string | null {
+  switch (stage) {
+    case "waiting_card":
+      return t("dev_waiting_card");
+    case "pin":
+      return t("dev_pin");
+    case "authorising":
+      return t("dev_authorising");
+    case "printing":
+      return t("dev_printing");
+    case "cancelling":
+      return t("dev_cancelling");
+    default:
+      return null;
+  }
 }
 
 function RoundButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {

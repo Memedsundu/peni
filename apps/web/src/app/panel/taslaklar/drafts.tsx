@@ -329,6 +329,7 @@ function Check({
 function DocumentView({ t, draft }: { t: T; draft: DraftDTO }) {
   const doc = draft.document;
   if (!doc && draft.entry) return <EntryView t={t} entry={draft.entry} />;
+  if (!doc && draft.kind === "zreport" && draft.fromTerminal) return <Notice>{t("drFromTerminal")}</Notice>;
   if (!doc) return <Notice>{t("drNoDocument")}</Notice>;
   const pdf = doc.contentType === "application/pdf";
   // An Excel or CSV statement isn't shown in the page; it downloads.
