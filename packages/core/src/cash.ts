@@ -1,5 +1,6 @@
 import type { Kurus } from "./money";
 import type { Payment } from "./payments";
+import { forgetIn } from "./removal";
 
 /**
  * Cash sessions (plan piece 9): the drawer is opened with a count, takes the day's cash,
@@ -124,6 +125,12 @@ export interface CashStore {
 export class InMemoryCashStore implements CashStore {
   private readonly sessions = new Map<string, CashSession>();
   private readonly moves = new Map<string, CashMove>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.sessions, cafeId);
+    forgetIn(this.moves, cafeId);
+  }
 
   async saveSession(session: CashSession) {
     const otherOpen = [...this.sessions.values()].some((s) => s.cafeId === session.cafeId && s.id !== session.id && !s.closing);

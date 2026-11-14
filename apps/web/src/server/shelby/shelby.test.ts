@@ -5,7 +5,7 @@ import { checkMove } from "./check";
 import { mapShelby, milliOf, mondayOf, unitOf, type Mapped } from "./map";
 import { reportMarkdown } from "./report";
 import type { ShelbySnapshot } from "./source";
-import { writeShelby } from "./write";
+import { PennyRecordsError, pennyMade, writeShelby } from "./write";
 
 const PASSWORD = "shelby-pass";
 const at = (s: string) => new Date(s);
@@ -649,5 +649,178 @@ describe("Shelby → Penny (plan piece 33)", { timeout: 30_000 }, () => {
     snap.orders[0]!.total = 250;
     const rows = await checkMove(snap, stores, "cafe_shelby");
     expect(rows.filter((x) => !x.ok).map((x) => x.label)).toEqual(["2026-10", "by cash"]);
+  });
+
+  it("starts a drawer still open in Shelby with what went in and out of it since it opened", async () => {
+    const s = snap.cashSessions[0]!;
+    Object.assign(s, { closedAt: null, closedById: null, closingExpected: null, closingCount: null, closingDifference: null, closingNote: null, closeRequestKey: null });
+    const open = mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: NOW }).records;
+    const cash = open.payments.filter((p) => p.cashSessionId === "shelby_cs_cs1" && p.method === "cash");
+    const expected = 150_000 + cash.reduce((t, p) => t + (p.kind === "sale" ? p.amountKurus : -p.amountKurus), 0);
+    // ₺300 went from the drawer to the bank; the sale and the opening count came with the orders and the session.
+    const movement = (id: string, amount: number, kind: string, sourceKey: string) => ({
+      id,
+      account: "drawer",
+      amount,
+      kind,
+      sourceKey,
+      operationKey: `op_${id}`,
+      actorId: MANAGER,
+      actorName: "Ayşe Kaya",
+      note: null,
+      sessionId: "cs1",
+      createdAt: at("2026-10-18T12:00:00Z"),
+    });
+    snap.moneyMovements = [movement("m1", -300, "transfer", "manual:1"), movement("m2", 120, "sale", "order_sale:1"), movement("m3", 5, "count_difference", "cash_count:cs1:open")];
+    snap.moneyAccounts.find((a) => a.kind === "drawer")!.balance = (expected - 30_000) / 100;
+    mapped = mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: NOW });
+    expect(mapped.records.cashMoves).toEqual([expect.objectContaining({ kind: "out", amountKurus: 30_000, reason: "Transfer (Shelby)", sessionId: "shelby_cs_cs1" })]);
+
+    await writeShelby(stores, mapped.records);
+    const rows = await checkMove(snap, stores, "cafe_shelby");
+    expect(rows.filter((x) => !x.ok)).toEqual([]);
+    expect(rows.find((x) => x.label === "drawer")).toMatchObject({ shelby: expected - 30_000, peni: expected - 30_000 });
+  });
+
+  it("starts stock above Penny's most at the most, and says so", async () => {
+    snap.stockItems[2]!.currentStock = 9_999_992;
+    mapped = mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: NOW });
+    expect(mapped.report.warnings.join("\n")).toMatch(/Cheesecake dilim: 9999992 .*they start at 1000000/);
+    await writeShelby(stores, mapped.records);
+    expect((await stores.stock.getItem("cafe_shelby", "shelby_s3"))!.qtyMilli).toBe(1_000_000_000);
+    expect((await checkMove(snap, stores, "cafe_shelby")).filter((x) => !x.ok)).toEqual([]);
+  });
+});
+
+describe("The preview copy: replacing the café with a fresh move (N13)", { timeout: 30_000 }, () => {
+  const LATER = at("2026-10-21T06:00:00Z");
+  const again = () => mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: LATER }).records;
+
+  it("deletes the café as it is and moves Shelby again, as it is now", async () => {
+    await writeShelby(stores, mapped.records);
+    // Shelby carries on: a new product, a sale and a new name; an older bill is deleted there.
+    snap.products.push({ ...snap.products[0]!, id: 13, name: "Flat white" });
+    snap.orders.push({ ...snap.orders.at(-1)!, id: 99, orderNumber: "ORD-20261020-0099", total: 140, createdAt: at("2026-10-20T08:00:00Z"), paidAt: at("2026-10-20T08:00:00Z") });
+    snap.users.find((u) => u.id === BARISTA)!.name = "Can Demirci";
+    snap.expenses = snap.expenses.filter((e) => e.id !== 5);
+    snap.expensePayments = snap.expensePayments.filter((p) => p.expenseId !== 5);
+    snap.expenseChecks = snap.expenseChecks.filter((c) => c.expenseId !== 5);
+
+    await expect(writeShelby(stores, again())).rejects.toThrow(/already has the café.*add --replace/);
+    await writeShelby(stores, again(), { replace: true });
+
+    expect((await checkMove(snap, stores, "cafe_shelby")).filter((x) => !x.ok)).toEqual([]);
+    expect((await stores.menu.getProduct("cafe_shelby", "shelby_p13"))?.name).toBe("Flat white");
+    expect(await stores.bills.getBill("cafe_shelby", "shelby_e5")).toBeNull();
+    expect((await stores.staff.getAccountByEmail("can@shelby.test"))?.name).toBe("Can Demirci");
+    expect(await stores.books.getStart("cafe_shelby")).toMatchObject({ createdAt: LATER });
+    const app = new PeniApp({ demo: false, bcryptRounds: 4, clock: () => LATER }, stores);
+    expect((await app.staff.at((await app.staff.signIn("can@shelby.test", PASSWORD)).token, "shelby")).member.role).toBe("barista");
+  });
+
+  it("deletes the accounts that were only this café's; one that works at another café stays and joins again", async () => {
+    await writeShelby(stores, mapped.records);
+    const other = { ...mapped.records.cafe, id: "cafe_moda", slug: "moda", name: "Moda" };
+    await stores.identity.saveCafe(other);
+    await stores.staff.saveMember({ ...mapped.records.members[1]!, id: "mem_moda_ayse", cafeId: "cafe_moda" });
+    snap.users.find((u) => u.id === MANAGER)!.name = "Ayşe Yılmaz";
+    snap.users.find((u) => u.id === BARISTA)!.name = "Can Demirci";
+
+    const steps: string[] = [];
+    await writeShelby(stores, again(), { replace: true, progress: (x) => steps.push(x) });
+    expect(steps).toContain("  2 staff account(s) with it, 1 kept (they work at another café too)");
+    // Kept as it was, and back in the café; the other café is untouched.
+    expect(await stores.staff.getAccountByEmail("ayse@shelby.test")).toMatchObject({ id: "shelby_u" + MANAGER, name: "Ayşe Kaya" });
+    expect((await stores.staff.membershipsOf("shelby_u" + MANAGER)).map((m) => m.cafeId).sort()).toEqual(["cafe_moda", "cafe_shelby"]);
+    expect(await stores.identity.getCafe("cafe_moda")).not.toBeNull();
+    // Made again from Shelby.
+    expect((await stores.staff.getAccountByEmail("can@shelby.test"))?.name).toBe("Can Demirci");
+  });
+
+  it("refuses while the café holds what was made in Penny, and says what", async () => {
+    await writeShelby(stores, mapped.records);
+    const r = mapped.records;
+    const sale = r.orders.find((o) => o.status === "paid")!;
+    await stores.orders.saveOrder({ ...sale, id: "ord_penny", createKey: "till:1", number: 99, businessDay: "2026-10-20" });
+    const pay = r.payments.find((p) => p.orderId === sale.id)!;
+    await stores.payments.savePayment({ ...pay, id: "pay_penny", orderId: "ord_penny", key: "till:1:sale" });
+    const bill = (await stores.bills.getBill("cafe_shelby", "shelby_e1"))!;
+    await stores.bills.saveBill({ ...bill, note: "Penny'de düzeltildi", updatedAt: at("2026-10-20T10:00:00Z") });
+    await stores.shifts.setWorkDays("cafe_shelby", [{ cafeId: "cafe_shelby", memberId: "shelby_m" + BARISTA, day: "2026-10-20", minutes: 420, note: null, byId: "shelby_m" + ADMIN, updatedAt: at("2026-10-20T18:00:00Z") }], []);
+
+    expect(await pennyMade(stores, "cafe_shelby")).toEqual([
+      { what: "till orders", count: 1 },
+      { what: "till payments and refunds", count: 1 },
+      { what: "moved bills changed or voided", count: 1 },
+      { what: "days worked entered or changed", count: 1 },
+    ]);
+    const refused = await writeShelby(stores, again(), { replace: true }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(PennyRecordsError);
+    expect((refused as Error).message).toBe(
+      [
+        "Penny's Shelby Sokak (shelby) has records that weren't moved from Shelby:",
+        "  - till orders: 1",
+        "  - till payments and refunds: 1",
+        "  - moved bills changed or voided: 1",
+        "  - days worked entered or changed: 1",
+        "Replacing the café would delete them. Add --discard-penny-records to delete them anyway.",
+      ].join("\n"),
+    );
+    // Nothing was touched.
+    expect(await stores.orders.getOrder("cafe_shelby", "ord_penny")).not.toBeNull();
+
+    await writeShelby(stores, again(), { replace: true, discardPennyRecords: true });
+    expect(await stores.orders.getOrder("cafe_shelby", "ord_penny")).toBeNull();
+    expect((await stores.bills.getBill("cafe_shelby", "shelby_e1"))!.note).not.toBe("Penny'de düzeltildi");
+    expect(await pennyMade(stores, "cafe_shelby")).toEqual([]);
+    expect((await checkMove(snap, stores, "cafe_shelby")).filter((x) => !x.ok)).toEqual([]);
+  });
+
+  it("forgets everything of the café in memory and nothing of another café", async () => {
+    await writeShelby(stores, mapped.records);
+    await stores.identity.saveCafe({ ...mapped.records.cafe, id: "cafe_moda", slug: "moda", name: "Moda" });
+    await stores.menu.saveCategory({ id: "cat_moda", cafeId: "cafe_moda", name: "Sıcak", sortOrder: 0 });
+    const earn = (cafeId: string) => ({
+      id: `tx_${cafeId}`,
+      cafeId,
+      kind: "earn" as const,
+      entries: [
+        { account: `member:m_${cafeId}`, delta: 5 },
+        { account: `issuance:${cafeId}`, delta: -5 },
+      ],
+      idempotencyKey: `k_${cafeId}`,
+      reversesId: null,
+      meta: {},
+      createdAt: NOW,
+    });
+    await stores.ledger.append(earn("cafe_moda"));
+
+    expect(await stores.removal.removeCafe("cafe_shelby")).toEqual({ accountsRemoved: 3, accountsKept: 0 });
+    const left = JSON.stringify(Object.values(stores), (_, v: unknown) => (v instanceof Map ? [...v] : v instanceof Set ? [...v] : v));
+    expect(left).not.toContain("cafe_shelby");
+    expect(left).not.toContain("shelby_");
+    expect(await stores.ledger.balance("member:m_cafe_moda")).toBe(5);
+    expect(await stores.menu.listCategories("cafe_moda")).toHaveLength(1);
+  });
+
+  it("never replaces a café with peni history: the ledger is never deleted", async () => {
+    await writeShelby(stores, mapped.records);
+    await stores.ledger.append({
+      id: "tx_askida",
+      cafeId: "cafe_shelby",
+      kind: "askida_till",
+      entries: [
+        { account: "askida:cafe_shelby", delta: 1 },
+        { account: "till_donation:cafe_shelby", delta: -1 },
+      ],
+      idempotencyKey: "k_askida",
+      reversesId: null,
+      meta: {},
+      createdAt: NOW,
+    });
+    await expect(writeShelby(stores, again(), { replace: true })).rejects.toThrow(/peni movements: 1/);
+    await expect(writeShelby(stores, again(), { replace: true, discardPennyRecords: true })).rejects.toThrow(/1 peni movement\(s\).*can't be replaced/);
+    await expect(stores.removal.removeCafe("cafe_shelby")).rejects.toThrow(/peni history/);
+    expect(await stores.identity.getCafe("cafe_shelby")).not.toBeNull();
   });
 });

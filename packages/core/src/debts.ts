@@ -1,5 +1,6 @@
 import type { MoneyAccount } from "./books";
 import type { Kurus } from "./money";
+import { forgetIn } from "./removal";
 
 /**
  * Borçlar (plan piece 19): everything the café owes besides open bills. A bill paid with a
@@ -243,6 +244,15 @@ export class InMemoryDebtStore implements DebtStore {
   private readonly repayments = new Map<string, LoanRepayment>();
   private readonly cards = new Map<string, CardSettings>();
   private readonly cardPayments = new Map<string, CardPayment>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.checks, cafeId);
+    forgetIn(this.loans, cafeId);
+    forgetIn(this.repayments, cafeId);
+    forgetIn(this.cards, cafeId);
+    forgetIn(this.cardPayments, cafeId);
+  }
 
   async listChecks(cafeId: string, opts: { open?: boolean } = {}) {
     return [...this.checks.values()]

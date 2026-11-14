@@ -27,11 +27,14 @@ export class PrismaLedgerStore implements LedgerStore {
     return this.current.getStore() ?? this.prisma;
   }
 
-  async atomically<T>(fn: () => Promise<T>): Promise<T> {
-    return this.prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LEDGER_LOCK_KEY})`;
-      return this.current.run(tx, fn);
-    });
+  async atomically<T>(fn: () => Promise<T>, opts: { timeoutMs?: number } = {}): Promise<T> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${LEDGER_LOCK_KEY})`;
+        return this.current.run(tx, fn);
+      },
+      opts.timeoutMs ? { timeout: opts.timeoutMs, maxWait: 60_000 } : undefined,
+    );
   }
 
   async findByIdempotencyKey(key: string) {

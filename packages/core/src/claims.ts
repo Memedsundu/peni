@@ -1,4 +1,5 @@
 import type { Peni } from "./money";
+import { forgetIn } from "./removal";
 
 /**
  * Peni claims (plan pieces 7 and 10). When an order is paid, the server makes a
@@ -83,6 +84,11 @@ export interface ClaimStore {
 export class InMemoryClaimStore implements ClaimStore {
   private readonly claims = new Map<string, PeniClaim>();
   private readonly misses: { who: string; at: Date }[] = [];
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.claims, cafeId);
+  }
 
   async saveClaim(claim: PeniClaim) {
     const clash = [...this.claims.values()].some(

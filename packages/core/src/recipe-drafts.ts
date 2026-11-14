@@ -1,5 +1,6 @@
 import type { DraftStatus } from "./assistant";
 import type { NewStockItem, StockKind, StockMode, StockUnit } from "./stock";
+import { forgetIn } from "./removal";
 
 /**
  * Recipes the assistant drafts (D21): for a product with no recipe yet, a first go at what
@@ -66,6 +67,11 @@ export interface RecipeDraftStore {
 
 export class InMemoryRecipeDraftStore implements RecipeDraftStore {
   private readonly drafts = new Map<string, RecipeDraft>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.drafts, cafeId);
+  }
 
   async saveRecipeDraft(draft: RecipeDraft) {
     this.drafts.set(draft.id, structuredClone(draft));

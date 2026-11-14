@@ -4,6 +4,7 @@ import type { Order } from "./orders";
 import { plusDays } from "./shifts";
 import { MILLI } from "./stock";
 import { weekdayOf } from "./tasks";
+import { forgetIn } from "./removal";
 
 /**
  * Gözcü (plan piece 31): Peni keeping an eye out for the owner. Price watch (C12), unusual
@@ -130,6 +131,12 @@ export interface WatchStore {
 export class InMemoryWatchStore implements WatchStore {
   private readonly seen = new Map<string, WatchDismissal>();
   private readonly suggested = new Map<string, WatchSuggestion>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.seen, cafeId);
+    forgetIn(this.suggested, cafeId);
+  }
 
   async listDismissed(cafeId: string) {
     return [...this.seen.values()].filter((d) => d.cafeId === cafeId).map((d) => ({ ...d }));

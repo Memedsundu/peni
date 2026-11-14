@@ -91,8 +91,11 @@ export interface LedgerStore {
   balance(accountId: string): Promise<Peni>;
   append(transaction: LedgerTransaction): Promise<void>;
   query(query: TransactionQuery): Promise<LedgerTransaction[]>;
-  /** Runs `fn` atomically and serialized against other ledger writes. Not re-entrant. */
-  atomically<T>(fn: () => Promise<T>): Promise<T>;
+  /**
+   * Runs `fn` atomically and serialized against other ledger writes. Not re-entrant.
+   * `timeoutMs` is for long work such as the Shelby move (N13); it defaults to a few seconds.
+   */
+  atomically<T>(fn: () => Promise<T>, opts?: { timeoutMs?: number }): Promise<T>;
 }
 
 export class Ledger {

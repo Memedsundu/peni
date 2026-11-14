@@ -5,7 +5,9 @@
 //
 // Options: --cafe <Shelby café id> (when Shelby has several), --slug <Peni slug> (shelby),
 // --all (also the previous owner's records), --report <file.md>, --now <ISO time>,
-// --rehearsal (lets --write run while Shelby isn't frozen: for a copy, never for the real move).
+// --rehearsal (lets --write run while Shelby isn't frozen: for a copy, never for the real move),
+// --replace (Penny has the café already: delete it and move again; the preview copy, N13),
+// --discard-penny-records (with --replace: even when people made records in Penny's copy).
 // Shelby is only read. Exits 1 when a total doesn't match.
 import { writeFileSync } from "node:fs";
 import { createPrismaClient, createPrismaStores } from "@peni/db";
@@ -28,6 +30,7 @@ async function main(): Promise<number> {
   const write = flag("write");
   const peniUrl = process.env.DATABASE_URL;
   if (write && !peniUrl) throw new Error("--write needs DATABASE_URL, Peni's database");
+  if (flag("discard-penny-records") && !flag("replace")) throw new Error("--discard-penny-records only goes with --replace");
 
   const cafes = await listShelbyCafes(shelbyUrl);
   const shelbyCafe = arg("cafe") ?? (cafes.length === 1 ? cafes[0]!.id : undefined);
@@ -45,13 +48,17 @@ async function main(): Promise<number> {
 
   const stores = write ? createPrismaStores(createPrismaClient(peniUrl!)) : inMemoryStores();
   console.log(write ? "Writing into Peni…" : "Dry run: writing into memory…");
-  await writeShelby(stores, records, (step) => console.log(`  ${step}`));
+  await writeShelby(stores, records, {
+    progress: (step) => console.log(`  ${step}`),
+    replace: flag("replace"),
+    discardPennyRecords: flag("discard-penny-records"),
+  });
   const rows = await checkMove(snap, stores, records.cafe.id, from);
   if ((await stores.identity.listCafes()).some((c) => c.id === "cafe_moda")) {
     console.warn("This Peni database also has the demo cafés. The live site runs with PENI_DEMO=0 on a database without them (docs/switch-day.md).");
   }
 
-  const mode = !write ? "Dry run" : flag("rehearsal") ? "Rehearsal into Peni" : "Moved into Peni, Shelby frozen";
+  const mode = `${!write ? "Dry run" : flag("rehearsal") ? "Copy into Penny, Shelby not frozen" : "Moved into Penny, Shelby frozen"}${write && flag("replace") ? ", replacing the café" : ""}`;
   const md = reportMarkdown(report, rows, { when: now, mode });
   const file = arg("report");
   if (file) writeFileSync(file, md);

@@ -2,6 +2,9 @@ import type { Payment, PaymentStore, TerminalData } from "@peni/core";
 import type { Db } from "./db";
 import { Prisma, type Payment as Row } from "./generated/client";
 
+/** Payments written per statement when many are added at once. */
+const CHUNK = 1000;
+
 function toPayment(row: Row): Payment {
   return { ...row, terminalData: (row.terminalData as TerminalData | null) ?? null };
 }
@@ -18,6 +21,14 @@ export class PrismaPaymentStore implements PaymentStore {
       // The key is taken at this café: a double tap, and the other one was kept.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return false;
       throw error;
+    }
+  }
+
+  async addPayments(payments: Payment[]): Promise<void> {
+    for (let i = 0; i < payments.length; i += CHUNK) {
+      await this.db().payment.createMany({
+        data: payments.slice(i, i + CHUNK).map((p) => ({ ...p, terminalData: p.terminalData ? (p.terminalData as unknown as Prisma.InputJsonValue) : Prisma.DbNull })),
+      });
     }
   }
 

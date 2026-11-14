@@ -1,4 +1,5 @@
 import type { Kurus } from "./money";
+import { forgetIn, forgetKeys } from "./removal";
 
 /**
  * Siparişler (plan piece 6): what the till sells. Prices come from the menu on the
@@ -111,6 +112,8 @@ export interface OrderStore {
   nextNumber(cafeId: string, businessDay: string): Promise<number>;
   /** Creates the order or replaces it, lines included. */
   saveOrder(order: Order): Promise<void>;
+  /** Creates many new orders at once, lines included: moving a café in from Shelby (N13). Ids already there are an error. */
+  addOrders(orders: Order[]): Promise<void>;
   getOrder(cafeId: string, id: string): Promise<Order | null>;
   findByCreateKey(cafeId: string, createKey: string): Promise<Order | null>;
   /** Newest first; deleted orders never. */
@@ -121,6 +124,12 @@ export class InMemoryOrderStore implements OrderStore {
   private readonly orders = new Map<string, Order>();
   private readonly counters = new Map<string, number>();
 
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.orders, cafeId);
+    forgetKeys(this.counters, `${cafeId}:`);
+  }
+
   async nextNumber(cafeId: string, businessDay: string) {
     const key = `${cafeId}:${businessDay}`;
     const next = (this.counters.get(key) ?? 0) + 1;
@@ -130,6 +139,12 @@ export class InMemoryOrderStore implements OrderStore {
 
   async saveOrder(order: Order) {
     this.orders.set(order.id, clone(order));
+  }
+
+  async addOrders(orders: Order[]) {
+    const taken = orders.find((o) => this.orders.has(o.id));
+    if (taken) throw new Error(`Order ${taken.id} is already there`);
+    for (const o of orders) this.orders.set(o.id, clone(o));
   }
 
   async getOrder(cafeId: string, id: string) {

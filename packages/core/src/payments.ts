@@ -1,6 +1,7 @@
 import type { Kurus } from "./money";
 import type { PaymentMethod } from "./orders";
 import type { TerminalData } from "./terminal";
+import { forgetIn, forgetKeys } from "./removal";
 
 /**
  * Payments (plan piece 8). Every sale and every refund at the till goes through one
@@ -145,6 +146,8 @@ export interface PaymentStore {
    * café is refused with `false`: the other one won a race, so find it by key.
    */
   savePayment(payment: Payment): Promise<boolean>;
+  /** Creates many new payments at once: moving a café in from Shelby (N13). An id or key already there is an error. */
+  addPayments(payments: Payment[]): Promise<void>;
   getPayment(cafeId: string, id: string): Promise<Payment | null>;
   findPaymentByKey(cafeId: string, key: string): Promise<Payment | null>;
   /** Oldest first. */
@@ -160,6 +163,12 @@ export class InMemoryPaymentStore implements PaymentStore {
   /** Café and client key → payment id, so a save doesn't look through every payment. */
   private readonly byKey = new Map<string, string>();
 
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.payments, cafeId);
+    forgetKeys(this.byKey, `${cafeId} `);
+  }
+
   async savePayment(payment: Payment) {
     const k = `${payment.cafeId} ${payment.key}`;
     const holder = this.byKey.get(k);
@@ -167,6 +176,14 @@ export class InMemoryPaymentStore implements PaymentStore {
     this.byKey.set(k, payment.id);
     this.payments.set(payment.id, { ...payment });
     return true;
+  }
+
+  async addPayments(payments: Payment[]) {
+    for (const p of payments) {
+      if (this.payments.has(p.id) || this.byKey.has(`${p.cafeId} ${p.key}`)) throw new Error(`Payment ${p.id} is already there`);
+      this.byKey.set(`${p.cafeId} ${p.key}`, p.id);
+      this.payments.set(p.id, { ...p });
+    }
   }
 
   async getPayment(cafeId: string, id: string) {

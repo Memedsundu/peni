@@ -2,6 +2,7 @@ import { unitCost, type Bill } from "./bills";
 import type { Kurus } from "./money";
 import { plusDays, weekStartOf } from "./shifts";
 import { MILLI, type Recipe, type StockItem } from "./stock";
+import { forgetInList } from "./removal";
 
 /**
  * The weekly letter (plan piece 30, B10): every Monday, what changed last week, why it
@@ -58,6 +59,11 @@ export interface LetterStore {
 
 export class InMemoryLetterStore implements LetterStore {
   private readonly letters: WeeklyLetter[] = [];
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetInList(this.letters, cafeId);
+  }
 
   async getLetter(cafeId: string, weekStart: string) {
     const l = this.letters.find((x) => x.cafeId === cafeId && x.weekStart === weekStart);

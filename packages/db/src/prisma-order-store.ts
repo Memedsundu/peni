@@ -4,6 +4,8 @@ import type { Prisma } from "./generated/client";
 
 const WITH_LINES = { lines: { orderBy: { position: "asc" } } } as const;
 type Row = Prisma.OrderGetPayload<{ include: typeof WITH_LINES }>;
+/** Orders written per statement when many are added at once. */
+const CHUNK = 1000;
 
 function toOrder({ lines, ...o }: Row): Order {
   return {
@@ -40,6 +42,15 @@ export class PrismaOrderStore implements OrderStore {
       create: { ...data, lines: { create: lineRows } },
       update: { ...data, lines: { deleteMany: {}, create: lineRows } },
     });
+  }
+
+  async addOrders(orders: Order[]): Promise<void> {
+    const db = this.db();
+    for (let i = 0; i < orders.length; i += CHUNK) {
+      const chunk = orders.slice(i, i + CHUNK);
+      await db.order.createMany({ data: chunk.map(({ lines: _, ...o }) => o) });
+      await db.orderLine.createMany({ data: chunk.flatMap((o) => o.lines.map((l, position) => ({ orderId: o.id, position, ...l }))) });
+    }
   }
 
   async getOrder(cafeId: string, id: string): Promise<Order | null> {

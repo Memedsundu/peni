@@ -1,6 +1,6 @@
 import { cashTotals, earned, localDateKey, plusDays, startOfLocalDay } from "@peni/core";
 import type { PeniStores } from "../app";
-import { defaultFrom, kurus, milliOf, mondayOf } from "./map";
+import { defaultFrom, kurus, mondayOf, startMilli } from "./map";
 import type { ShelbySnapshot } from "./source";
 
 /**
@@ -99,7 +99,8 @@ export function shelbyTotals(snap: ShelbySnapshot, from: Date | null = defaultFr
     put(side, "Money now", "bank", "kurus", balance("bank"));
   }
 
-  for (const s of snap.stockItems) put(side, "Stock now", s.name, "milli", Math.max(0, milliOf(s.currentStock, s.unit)));
+  // What Penny can hold: below zero is none, and nothing is above Penny's most (map.ts, startMilli).
+  for (const s of snap.stockItems) put(side, "Stock now", s.name, "milli", startMilli(s.currentStock, s.unit));
 
   // Pay for the weeks moved, and what was paid against them.
   const fromDay = from ? localDateKey(from, tz) : null;

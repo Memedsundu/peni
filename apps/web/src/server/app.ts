@@ -45,6 +45,8 @@ import {
   type RecipeDraftStore,
   InMemoryTerminalStore,
   type TerminalStore,
+  InMemoryCafeRemovalStore,
+  type CafeRemovalStore,
   type LetterStore,
   type AssistantStore,
   type ChatStore,
@@ -177,10 +179,12 @@ export interface PeniStores {
   watch: WatchStore;
   recipeDrafts: RecipeDraftStore;
   terminals: TerminalStore;
+  /** Only the Shelby move uses it: replacing its preview copy (N13). */
+  removal: CafeRemovalStore;
 }
 
 export function inMemoryStores(): PeniStores {
-  return {
+  const stores = {
     ledger: new InMemoryLedgerStore(),
     directory: new InMemoryDirectory(),
     identity: new InMemoryIdentityStore(),
@@ -207,6 +211,8 @@ export function inMemoryStores(): PeniStores {
     recipeDrafts: new InMemoryRecipeDraftStore(),
     terminals: new InMemoryTerminalStore(),
   };
+  const { ledger, directory, identity, staff, ...others } = stores;
+  return { ...stores, removal: new InMemoryCafeRemovalStore(ledger, directory, identity, staff, [directory, ...Object.values(others)]) };
 }
 
 export interface PeniAppOptions {
