@@ -210,6 +210,12 @@ const TEXT = {
   eventOver: { tr: "Geçti", en: "Over" },
   wentN: { tr: "{n} kişi katıldı", en: "{n} went" },
   eventFull: { tr: "Doldu", en: "Full" },
+  // Sharing, older posts, who's coming
+  sharePost: { tr: "Paylaş", en: "Share" },
+  olderPosts: { tr: "Daha eski paylaşımları göster", en: "Show older posts" },
+  seeCafeFeed: { tr: "Kafenin tüm akışı", en: "The café's whole feed" },
+  whoIsGoing: { tr: "Katılanlar", en: "Who's going" },
+  moreGoing: { tr: "+{n}", en: "+{n}" },
 
   // Members' events and reports (piece 15)
   openEvent: { tr: "Etkinlik aç", en: "Open an event" },

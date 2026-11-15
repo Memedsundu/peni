@@ -25,9 +25,31 @@ export function Community({ cafeSlug }: { cafeSlug: string | null }) {
   return <PanelShell cafeSlug={cafeSlug} page="topluluk">{(p) => <Feed key={p.cafe.slug} {...p} />}</PanelShell>;
 }
 
+/** How many posts Topluluk opens with, and how many more each "Daha eski" brings. */
+const FEED_PAGE = 30;
+
 function Feed({ cafe, t, lang, signedOut }: PanelProps) {
   const [feed, setFeed] = useState<StaffFeedDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [limit, setLimit] = useState(FEED_PAGE);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Every change answers with the newest 30. With older ones open here, read as many as are open instead.
+  const onFeed = (f: StaffFeedDTO) => {
+    if (limit > FEED_PAGE) void api.staff.feed.get(cafe.slug, limit).then(setFeed, () => setFeed(f));
+    else setFeed(f);
+  };
+  const showOlder = async () => {
+    const next = limit + FEED_PAGE;
+    setLoadingOlder(true);
+    try {
+      setFeed(await api.staff.feed.get(cafe.slug, next));
+      setLimit(next);
+    } catch (e) {
+      setError(errorText(e, lang));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   useEffect(() => {
     api.staff.feed.get(cafe.slug).then(
@@ -56,13 +78,18 @@ function Feed({ cafe, t, lang, signedOut }: PanelProps) {
         </p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
-      {feed && feed.reports.length > 0 && <Reports t={t} lang={lang} slug={cafe.slug} reports={feed.reports} onFeed={setFeed} />}
-      {feed?.canWrite && <Composer t={t} lang={lang} slug={cafe.slug} onPosted={setFeed} />}
+      {feed && feed.reports.length > 0 && <Reports t={t} lang={lang} slug={cafe.slug} reports={feed.reports} onFeed={onFeed} />}
+      {feed?.canWrite && <Composer t={t} lang={lang} slug={cafe.slug} onPosted={onFeed} />}
       {feed && feed.posts.length === 0 && <p className="py-10 text-center text-muted">{t("noPosts")}</p>}
       {feed?.posts.map((p) => (
-        <PostCard key={p.id} t={t} lang={lang} slug={cafe.slug} post={p} canWrite={feed.canWrite} canModerate={feed.canModerate} onFeed={setFeed} />
+        <PostCard key={p.id} t={t} lang={lang} slug={cafe.slug} post={p} canWrite={feed.canWrite} canModerate={feed.canModerate} onFeed={onFeed} />
       ))}
-      {feed && feed.paused.length > 0 && <Paused t={t} lang={lang} slug={cafe.slug} paused={feed.paused} onFeed={setFeed} />}
+      {feed && feed.olderPosts > 0 && (
+        <Button kind="quiet" disabled={loadingOlder} onClick={() => void showOlder()}>
+          {loadingOlder ? t("loading") : fill(t("olderPostsN"), { n: feed.olderPosts })}
+        </Button>
+      )}
+      {feed && feed.paused.length > 0 && <Paused t={t} lang={lang} slug={cafe.slug} paused={feed.paused} onFeed={onFeed} />}
     </>
   );
 }

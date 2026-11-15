@@ -9,6 +9,7 @@ import {
   sniffImageType,
   type CommunityStore,
   type ContentReport,
+  type FeedCursor,
   type ImageStore,
   type PeniDirectory,
   type Permission,
@@ -55,6 +56,32 @@ export interface CommunityAttention {
   events: { count: number; names: string[] };
 }
 
+/**
+ * Where the customers' feed goes on from: the last post a page showed, and when the first page
+ * was read, so every later page judges "pinned on top" as the first one did and never repeats a
+ * post that was on top. Opaque to clients.
+ */
+export interface FeedPageCursor extends FeedCursor {
+  asOf: Date;
+}
+
+export function writeFeedCursor(c: FeedPageCursor): string {
+  return Buffer.from(`${c.publishedAt.getTime()}.${c.asOf.getTime()}.${c.id}`, "utf8").toString("base64url");
+}
+
+/** A cursor this server wrote; anything else is a VALIDATION error. */
+export function readFeedCursor(raw: string): FeedPageCursor {
+  const bad = new AppError("VALIDATION", "That page marker can't be read", 400);
+  if (!/^[A-Za-z0-9_-]{1,400}$/.test(raw)) throw bad;
+  const m = /^(\d{1,15})\.(\d{1,15})\.(.{1,200})$/.exec(Buffer.from(raw, "base64url").toString("utf8"));
+  if (!m) throw bad;
+  return { publishedAt: new Date(Number(m[1])), asOf: new Date(Number(m[2])), id: m[3]! };
+}
+
+/** The café's own feed shows this many posts unless the screen asks for more, and never more than STAFF_FEED_MAX. */
+export const STAFF_FEED_PAGE = 30;
+export const STAFF_FEED_MAX = 500;
+
 /** A capacity below the people already going would turn someone away. */
 export function eventCapacity(capacity: number | null, going: number): number | null {
   if (capacity !== null && capacity < going) throw new AppError("EVENT_CAPACITY_BELOW", "Fewer places than people going", 400);
@@ -81,11 +108,24 @@ export class FeedService {
     private readonly now: () => Date,
   ) {}
 
-  async view(ctx: StaffContext): Promise<StaffFeedDTO> {
+  /**
+   * The newest `limit` posts, pinned ones first (STAFF_FEED_PAGE unless asked, at most
+   * STAFF_FEED_MAX), so a café with years of posts doesn't send them all on every change.
+   */
+  async view(ctx: StaffContext, limit = STAFF_FEED_PAGE): Promise<StaffFeedDTO> {
     const canWrite = ctx.permissions.has("posts.write");
     const canModerate = ctx.permissions.has("posts.moderate");
     if (!canWrite && !canModerate) this.require(ctx, "posts.write");
-    const posts = await this.community.listPosts(ctx.cafe.id, { hiddenComments: true });
+    const size = Math.min(STAFF_FEED_MAX, Math.max(1, Math.floor(limit) || STAFF_FEED_PAGE));
+    // The café sees a pin as long as it's set, even on an event that's over.
+    const pinned = (await this.community.listPinned(ctx.cafe.id, { hiddenComments: true })).slice(0, size);
+    const rest = await this.community.pagePosts(ctx.cafe.id, {
+      limit: size - pinned.length,
+      skip: pinned.map((p) => p.id),
+      hiddenComments: true,
+    });
+    const posts = [...pinned, ...rest];
+    const olderPosts = Math.max(0, (await this.community.countPosts(ctx.cafe.id)) - posts.length);
     const open = canModerate ? await this.reports.listOpen(ctx.cafe.id) : [];
     const paused = canModerate ? (await this.directory.listMemberships({ cafeId: ctx.cafe.id })).filter((m) => m.pausedAt) : [];
     const names = await this.publicNames([
@@ -128,7 +168,8 @@ export class FeedService {
     return {
       canWrite,
       canModerate,
-      posts: [...posts].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.publishedAt.getTime() - a.publishedAt.getTime()).map(dto),
+      posts: posts.map(dto),
+      olderPosts,
       reports: await this.reportCards(ctx, open),
       paused: paused
         .sort((a, b) => b.pausedAt!.getTime() - a.pausedAt!.getTime())

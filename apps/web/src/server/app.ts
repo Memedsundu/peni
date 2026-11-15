@@ -15,6 +15,7 @@ import type {
   MemberLookupDTO,
   MenuItemDTO,
   PostDTO,
+  PostsPageDTO,
   RecentRecipientDTO,
   RefItemDTO,
   SessionDTO,
@@ -27,7 +28,9 @@ import type {
 } from "@peni/api";
 import {
   InMemoryCommunityStore,
+  COMMENTS_IN_FEED,
   COMMENTS_PER_HOUR,
+  FEED_PAGE,
   COMMENTS_PER_MINUTE,
   eventOver,
   InMemoryImageStore,
@@ -139,7 +142,7 @@ import { StockService } from "./stock";
 import { BillService } from "./bills";
 import { DebtService } from "./debts";
 import { MoneyService } from "./money";
-import { bare, eventCapacity, eventTime, FeedService, threads } from "./feed";
+import { bare, eventCapacity, eventTime, FeedService, readFeedCursor, threads, writeFeedCursor, type FeedPageCursor } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 import { RecipeDraftService } from "./recipe-drafts";
 
@@ -639,11 +642,18 @@ export class PeniApp {
     return Promise.all((await this.identity.listCafes()).map((c) => this.cafeSummary(c, customer)));
   }
 
-  async cafeDetail(slug: string, customer: CustomerRecord | null): Promise<CafeDetailDTO> {
+  /**
+   * The café with its feed's first page. With `post`, the feed is that one post alone with every
+   * comment: the page a shared link opens, so it works for visitors who aren't signed in.
+   */
+  async cafeDetail(slug: string, customer: CustomerRecord | null, opts: { post?: string | null } = {}): Promise<CafeDetailDTO> {
     const cafe = await this.requireCafe(slug);
     const settings = await this.directory.getSettings(cafe.id);
     const menu = await this.menu.listMenu(cafe.id);
     const membership = customer ? await this.directory.findMembership(customer.id, cafe.id) : null;
+    const feed = opts.post
+      ? { posts: await this.postDTOs([await this.visiblePost(cafe, opts.post)], customer, settings.timeZone), olderPosts: null }
+      : await this.feedPage(cafe, customer, settings.timeZone, null);
 
     return {
       ...(await this.cafeSummary(cafe, customer)),
@@ -653,7 +663,8 @@ export class PeniApp {
       maxRedeemSharePercent: settings.maxRedeemShareBps / 100,
       menu: menu.map((m) => toMenuDTO(m, settings)),
       askida: await this.askida(cafe, settings, menu, { membershipId: membership?.id ?? null }),
-      posts: await this.postsFor(cafe.id, customer, settings.timeZone),
+      posts: feed.posts,
+      olderPosts: feed.olderPosts,
       membership: membership
         ? {
             id: membership.id,
@@ -1086,6 +1097,50 @@ export class PeniApp {
 
   // ─────────────────────────────────────────────── community
 
+  /** The next page of older posts, after the page `before` came with. Public, like the café. */
+  async olderPosts(slug: string, customer: CustomerRecord | null, before: string): Promise<PostsPageDTO> {
+    const cursor = readFeedCursor(before);
+    const cafe = await this.requireCafe(slug);
+    const settings = await this.directory.getSettings(cafe.id);
+    return this.feedPage(cafe, customer, settings.timeZone, cursor);
+  }
+
+  /** One post with every comment, for "Önceki yorumları göster". Public, like the café. */
+  async cafePost(slug: string, postId: string, customer: CustomerRecord | null): Promise<PostDTO> {
+    const cafe = await this.requireCafe(slug);
+    const settings = await this.directory.getSettings(cafe.id);
+    return (await this.postDTOs([await this.visiblePost(cafe, postId)], customer, settings.timeZone))[0]!;
+  }
+
+  /**
+   * What a link to the café, or to one of its posts, shows when it's shared: only what a visitor
+   * could see on the page. Null when the café or the post isn't there to see.
+   */
+  async sharePreview(slug: string, postId?: string | null): Promise<SharePreview | null> {
+    const cafe = await this.identity.getCafeBySlug(slug);
+    if (!cafe) return null;
+    const place = [cafe.district, cafe.city].filter(Boolean).join(", ");
+    const where = [cafe.address, place].filter(Boolean).join(" · ");
+    if (!postId) {
+      return { cafeName: cafe.name, title: cafe.name, description: where || "Penny'de bir mahalle kafesi", imageUrl: cafe.coverImageUrl };
+    }
+    const post = await this.community.getPost(postId);
+    if (!post || post.cafeId !== cafe.id) return null;
+    const words = post.title ? post.body : post.body.split("\n").slice(1).join(" ");
+    let when: string | null = null;
+    if (post.kind === "event" && post.eventStartsAt) {
+      const { timeZone } = await this.directory.getSettings(cafe.id);
+      when = post.eventStartsAt.toLocaleString("tr-TR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", timeZone });
+    }
+    const description = [when, clip(words.replace(/\s+/g, " ").trim(), 160)].filter(Boolean).join(" · ");
+    return {
+      cafeName: cafe.name,
+      title: clip(postTitle(post), 80) || cafe.name,
+      description: description || [cafe.name, where].filter(Boolean).join(" · "),
+      imageUrl: post.imageUrls?.[0] ?? cafe.coverImageUrl,
+    };
+  }
+
   async react(customer: CustomerRecord, slug: string, postId: string) {
     await this.requirePost(slug, postId, customer);
     await this.community.toggleReaction(postId, customer.id, this.now());
@@ -1317,59 +1372,103 @@ export class PeniApp {
     };
   }
 
-  private async postsFor(cafeId: string, customer: CustomerRecord | null, timeZone: string): Promise<PostDTO[]> {
+  /**
+   * One page of the customers' feed. The first page has the pinned posts on top that still count
+   * as pinned (not an event that's over), then the newest FEED_PAGE of the rest; later pages go
+   * on from the cursor and never bring the ones on top again.
+   */
+  private async feedPage(cafe: Cafe, customer: CustomerRecord | null, timeZone: string, cursor: FeedPageCursor | null): Promise<PostsPageDTO> {
+    const asOf = cursor?.asOf ?? this.now();
+    const onTop = (await this.community.listPinned(cafe.id)).filter((p) => !eventOver(p, asOf));
+    const page = await this.community.pagePosts(cafe.id, { before: cursor, limit: FEED_PAGE + 1, skip: onTop.map((p) => p.id) });
+    const rest = page.slice(0, FEED_PAGE);
+    const last = rest.at(-1);
+    const posts = [...(cursor ? [] : onTop), ...rest];
+    return {
+      posts: await this.postDTOs(posts, customer, timeZone, { onTop: new Set(cursor ? [] : onTop.map((p) => p.id)), feed: true }),
+      olderPosts: page.length > FEED_PAGE && last ? writeFeedCursor({ publishedAt: last.publishedAt, id: last.id, asOf }) : null,
+    };
+  }
+
+  /** A post a visitor can see on this café's feed: not taken down, not another café's. */
+  private async visiblePost(cafe: Cafe, postId: string): Promise<PostWithActivity> {
+    const post = await this.community.getPost(postId);
+    if (!post || post.cafeId !== cafe.id) throw new AppError("POST_NOT_FOUND", "No such post", 404);
+    return post;
+  }
+
+  /**
+   * Posts as the viewer sees them. On a feed page (`feed`) a post carries only its newest
+   * COMMENTS_IN_FEED members' comments, each with the café's replies; `earlierComments` says
+   * how many were left out. `onTop` marks the pinned ones shown on top; without it a post shows
+   * as pinned while its pin still counts.
+   */
+  private async postDTOs(
+    posts: PostWithActivity[],
+    customer: CustomerRecord | null,
+    timeZone: string,
+    opts: { onTop?: Set<string>; feed?: boolean } = {},
+  ): Promise<PostDTO[]> {
     const now = this.now();
     const today = startOfLocalDay(now, timeZone);
     const viewer = customer?.id ?? null;
-    const posts = await this.community.listPosts(cafeId);
-    const reported = viewer ? await this.reports.reportedBy(cafeId, viewer) : new Set<string>();
+    const cafeIds = [...new Set(posts.map((p) => p.cafeId))];
+    const reported = new Set<string>();
+    if (viewer) for (const id of cafeIds) for (const r of await this.reports.reportedBy(id, viewer)) reported.add(r);
+    const shown = posts.map((p) => {
+      const all = threads(p.comments);
+      const kept = opts.feed ? all.slice(-COMMENTS_IN_FEED) : all;
+      return { p, kept, earlier: all.length - kept.length };
+    });
     const people = new Map(
       (
         await this.identity.getCustomers([
-          ...new Set(posts.flatMap((p) => [...p.rsvps, ...p.comments.map((c) => c.customerId), p.hostCustomerId]).filter((x): x is string => !!x)),
+          ...new Set(
+            shown
+              .flatMap(({ p, kept }) => [...p.rsvps, ...kept.map((t) => t.comment.customerId), p.hostCustomerId])
+              .filter((x): x is string => !!x),
+          ),
         ])
       ).map((c) => [c.id, c]),
     );
     // An event that's over no longer stays on top; it sits by its date like any other post.
-    const pinned = (p: PostWithActivity) => p.pinned && !eventOver(p, now);
-    return [...posts]
-      .sort((a, b) => Number(pinned(b)) - Number(pinned(a)) || b.publishedAt.getTime() - a.publishedAt.getTime())
-      .map((p) => ({
-        id: p.id,
-        kind: p.kind,
-        body: p.body,
-        publishedAt: p.publishedAt.toISOString(),
-        pinned: pinned(p),
-        eventStartsAt: p.eventStartsAt?.toISOString() ?? null,
-        eventCapacity: p.eventCapacity,
-        eventOver: eventOver(p, now),
-        reactionCount: p.reactions.length,
-        // The store already left out hidden comments and the replies under them.
-        commentCount: p.comments.length,
-        rsvpCount: p.rsvps.length,
-        reactedByMe: !!viewer && p.reactions.includes(viewer),
-        rsvpedByMe: !!viewer && p.rsvps.includes(viewer),
-        comments: threads(p.comments).map(({ comment: c, replies }) => ({
-          id: c.id,
-          authorName: publicName(c.customerId ? people.get(c.customerId) : undefined),
-          body: c.body,
-          createdAt: c.createdAt.toISOString(),
-          mine: !!viewer && c.customerId === viewer,
-          reportedByMe: reported.has(`comment:${c.id}`),
-          replies: replies.map((r) => ({ id: r.id, body: r.body, createdAt: r.createdAt.toISOString() })),
-        })),
-        imageUrls: p.imageUrls ?? [],
-        title: p.title,
-        attendees: p.rsvps.map((id) => {
-          const c = people.get(id);
-          const me = id === viewer;
-          return { initials: c && (me || c.profileVisible) ? initialsOf(c.displayName) : null, me };
-        }),
-        answeredTodayByMe:
-          p.kind === "question" && !!viewer && p.comments.some((c) => c.customerId === viewer && c.createdAt >= today),
-        host: p.hostCustomerId ? { name: publicName(people.get(p.hostCustomerId)), mine: p.hostCustomerId === viewer } : null,
-        reportedByMe: reported.has(`post:${p.id}`),
-      }));
+    const pinned = (p: PostWithActivity) => (opts.onTop ? opts.onTop.has(p.id) : p.pinned && !eventOver(p, now));
+    return shown.map(({ p, kept, earlier }) => ({
+      id: p.id,
+      kind: p.kind,
+      body: p.body,
+      publishedAt: p.publishedAt.toISOString(),
+      pinned: pinned(p),
+      eventStartsAt: p.eventStartsAt?.toISOString() ?? null,
+      eventCapacity: p.eventCapacity,
+      eventOver: eventOver(p, now),
+      reactionCount: p.reactions.length,
+      // The store already left out hidden comments and the replies under them.
+      commentCount: p.comments.length,
+      earlierComments: earlier,
+      rsvpCount: p.rsvps.length,
+      reactedByMe: !!viewer && p.reactions.includes(viewer),
+      rsvpedByMe: !!viewer && p.rsvps.includes(viewer),
+      comments: kept.map(({ comment: c, replies }) => ({
+        id: c.id,
+        authorName: publicName(c.customerId ? people.get(c.customerId) : undefined),
+        body: c.body,
+        createdAt: c.createdAt.toISOString(),
+        mine: !!viewer && c.customerId === viewer,
+        reportedByMe: reported.has(`comment:${c.id}`),
+        replies: replies.map((r) => ({ id: r.id, body: r.body, createdAt: r.createdAt.toISOString() })),
+      })),
+      imageUrls: p.imageUrls ?? [],
+      title: p.title,
+      attendees: p.rsvps.map((id) => {
+        const c = people.get(id);
+        const me = id === viewer;
+        return { initials: c && (me || c.profileVisible) ? initialsOf(c.displayName) : null, me };
+      }),
+      answeredTodayByMe: p.kind === "question" && !!viewer && p.comments.some((c) => c.customerId === viewer && c.createdAt >= today),
+      host: p.hostCustomerId ? { name: publicName(people.get(p.hostCustomerId)), mine: p.hostCustomerId === viewer } : null,
+      reportedByMe: reported.has(`post:${p.id}`),
+    }));
   }
 
   private async nextEvent(cafeId: string): Promise<CafeSummaryDTO["nextEvent"]> {
@@ -1567,6 +1666,23 @@ function refItemsFor(cafe: Cafe, settings: CafePeniSettings, menu: MenuItem[]): 
     .sort((a, b) => a.priceKurus - b.priceKurus)
     .slice(0, 2)
     .map((m) => ({ name: m.name, priceKurus: m.priceKurus }));
+}
+
+/** What a shared link to a café or one of its posts shows (`sharePreview`). */
+export interface SharePreview {
+  cafeName: string;
+  title: string;
+  description: string;
+  /** The post's first photo, else the café's cover; may be a path on this site. */
+  imageUrl: string | null;
+}
+
+/** At most `max` characters, cut at a word with "…" when it's longer. */
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
 
 function postTitle(p: Post): string {

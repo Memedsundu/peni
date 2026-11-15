@@ -218,3 +218,172 @@ describe("the café answers a comment", () => {
     expect((await app.feed.view(leyla)).reports.map((r) => r.targetId)).not.toContain("cmt_reply_1");
   });
 });
+
+describe("the customers' feed in pages", () => {
+  /** Posts `n` more on Moda's feed, a minute apart; the first two go out at the same instant. */
+  const postMany = async (n: number) => {
+    for (let i = 0; i < n; i++) {
+      if (i > 1) now = new Date(now.getTime() + 60_000);
+      await app.feed.create(leyla, { createKey: `page-key-${String(i).padStart(4, "0")}`, kind: "post", body: `Paylaşım ${i}`, imageUrls: [], pinned: false });
+    }
+  };
+  /** Every page's post ids, following `olderPosts` to the end. */
+  const pages = async (who: CustomerRecord | null = ayse) => {
+    const first = await app.cafeDetail("moda", who);
+    const out = [first.posts.map((p) => p.id)];
+    let cursor = first.olderPosts;
+    while (cursor) {
+      const page = await app.olderPosts("moda", who, cursor);
+      out.push(page.posts.map((p) => p.id));
+      cursor = page.olderPosts;
+    }
+    return out;
+  };
+
+  it("sends the pinned posts and the newest ten, then ten at a time, never skipping or repeating one", async () => {
+    await postMany(25);
+    const all = (await app.feed.view(leyla, 500)).posts;
+    const seen = await pages(null);
+    expect(seen.map((p) => p.length)).toEqual([2 + 10, 10, all.length - 22]);
+    // The two pinned posts on top, once; posts published at the same instant both come, in a fixed order.
+    expect(seen[0]!.slice(0, 2)).toEqual(["post_question_1", "post_event_1"]);
+    expect(seen.flat()).toHaveLength(all.length);
+    expect(new Set(seen.flat())).toEqual(new Set(all.map((p) => p.id)));
+    expect(seen.flat()).toEqual(expect.arrayContaining(["post_page-key-0000", "post_page-key-0001"]));
+    // Newest first after the pinned ones, as the café's own feed has them.
+    expect(seen.flat().slice(2)).toEqual(all.slice(2).map((p) => p.id));
+  });
+
+  it("ends with null, and turns away a page marker it didn't write", async () => {
+    const first = await app.cafeDetail("moda", null);
+    // The demo has fewer than a page of posts.
+    expect(first.olderPosts).toBeNull();
+    expect(await code(app.olderPosts("moda", null, "nonsense!"))).toBe("VALIDATION");
+    expect(await code(app.olderPosts("moda", null, Buffer.from("1.2").toString("base64url")))).toBe("VALIDATION");
+    expect(await code(app.olderPosts("moda", null, ""))).toBe("VALIDATION");
+  });
+
+  it("never brings a pinned post back further down, even when its event ends between pages", async () => {
+    await postMany(25);
+    const first = await app.cafeDetail("moda", ayse);
+    const event = first.posts.find((p) => p.id === "post_event_1")!;
+    expect(event.pinned).toBe(true);
+    // The event ends while the person scrolls.
+    now = new Date(new Date(event.eventStartsAt!).getTime() + 4 * 3_600_000);
+    const later: string[] = [];
+    let cursor = first.olderPosts;
+    while (cursor) {
+      const page = await app.olderPosts("moda", ayse, cursor);
+      later.push(...page.posts.map((p) => p.id));
+      cursor = page.olderPosts;
+    }
+    expect(later).not.toContain("post_event_1");
+    expect(later).not.toContain("post_question_1");
+    // Read afresh, it sits by its date, once.
+    expect((await pages()).flat().filter((id) => id === "post_event_1")).toHaveLength(1);
+    expect((await app.cafeDetail("moda", ayse)).posts[0]!.id).toBe("post_question_1");
+  });
+
+  it("carries a post's newest twenty comments, says how many came before, and gives them all on asking", async () => {
+    for (let i = 0; i < 22; i++) {
+      now = new Date(now.getTime() + 15_000);
+      await app.comment(ayse, "moda", "post_1", `Yorum ${i}`);
+    }
+    const onFeed = (await feed()).find((p) => p.id === "post_1")!;
+    // 24 members' comments (the demo's 2 and Ayşe's 22) and the café's reply to one of them.
+    expect(onFeed).toMatchObject({ commentCount: 25, earlierComments: 4 });
+    expect(onFeed.comments).toHaveLength(20);
+    expect(onFeed.comments.at(0)!.body).toBe("Yorum 2");
+    expect(onFeed.comments.at(-1)!).toMatchObject({ body: "Yorum 21", mine: true });
+
+    const whole = await app.cafePost("moda", "post_1", ayse);
+    expect(whole).toMatchObject({ commentCount: 25, earlierComments: 0 });
+    expect(whole.comments).toHaveLength(24);
+    expect(whole.comments.find((c) => c.id === "cmt_6")!.replies.map((r) => r.id)).toEqual(["cmt_reply_1"]);
+    expect(await code(app.cafePost("moda", "post_k2", ayse))).toBe("POST_NOT_FOUND");
+  });
+
+  it("opens one post alone with all its comments, for a visitor too, and not one that's gone", async () => {
+    const shared = await app.cafeDetail("moda", null, { post: "post_1" });
+    expect(shared.posts.map((p) => p.id)).toEqual(["post_1"]);
+    expect(shared.posts[0]).toMatchObject({ earlierComments: 0, commentCount: 3, reactedByMe: false });
+    expect(shared.olderPosts).toBeNull();
+    expect(shared.name).toBeTruthy();
+    // A signed-in member sees their own like on it.
+    const liked = (await app.cafeDetail("moda", ayse, { post: "post_1" })).posts[0]!.reactedByMe;
+    await app.react(ayse, "moda", "post_1");
+    expect((await app.cafeDetail("moda", ayse, { post: "post_1" })).posts[0]!.reactedByMe).toBe(!liked);
+
+    await app.feed.remove(leyla, "post_2");
+    expect(await code(app.cafeDetail("moda", null, { post: "post_2" }))).toBe("POST_NOT_FOUND");
+    expect(await code(app.cafeDetail("moda", null, { post: "post_k2" }))).toBe("POST_NOT_FOUND");
+    expect(await code(app.cafeDetail("moda", null, { post: "post_nope" }))).toBe("POST_NOT_FOUND");
+  });
+});
+
+describe("the café's own feed is capped", () => {
+  it("shows the newest thirty, pinned first, more on asking, and says how many are older", async () => {
+    for (let i = 0; i < 35; i++) {
+      now = new Date(now.getTime() + 60_000);
+      await app.feed.create(leyla, { createKey: `cap-key-${String(i).padStart(4, "0")}`, kind: "post", body: `Paylaşım ${i}`, imageUrls: [], pinned: false });
+    }
+    const total = (await app.feed.view(leyla, 500)).posts.length;
+    expect(total).toBeGreaterThan(40);
+
+    const usual = await app.feed.view(leyla);
+    expect(usual.posts).toHaveLength(30);
+    expect(usual.olderPosts).toBe(total - 30);
+    expect(usual.posts.slice(0, 2).map((p) => p.pinned)).toEqual([true, true]);
+    expect(usual.posts[2]!.id).toBe("post_cap-key-0034");
+
+    const three = await app.feed.view(leyla, 3);
+    expect(three.posts.map((p) => p.id)).toEqual([usual.posts[0]!.id, usual.posts[1]!.id, "post_cap-key-0034"]);
+    expect(three.olderPosts).toBe(total - 3);
+    expect((await app.feed.view(leyla, 10_000)).olderPosts).toBe(0);
+    // Every other change answers with the usual size.
+    expect((await app.feed.update(leyla, "post_cap-key-0000", { pinned: true })).posts).toHaveLength(30);
+  });
+});
+
+describe("link previews", () => {
+  it("shows the café's name, where it is and its cover", async () => {
+    const cafe = (await app.identity.getCafeBySlug("moda"))!;
+    expect(await app.sharePreview("moda")).toEqual({
+      cafeName: cafe.name,
+      title: cafe.name,
+      description: expect.stringContaining("Moda Cd. No: 42"),
+      imageUrl: null,
+    });
+    await app.identity.saveCafe({ ...cafe, coverImageUrl: "/api/v1/images/img_cover" });
+    expect((await app.sharePreview("moda"))!.imageUrl).toBe("/api/v1/images/img_cover");
+    expect(await app.sharePreview("nowhere")).toBeNull();
+  });
+
+  it("shows a post's first line, the rest of its words and its first photo", async () => {
+    const { url } = await app.feed.uploadImage(leyla, PNG);
+    await app.feed.create(leyla, {
+      createKey: "share-key-0001", kind: "post", body: "Yeni kavurduk: Etiyopya Guji.\nÇekirdek olarak da var.", imageUrls: [url], pinned: false,
+    });
+    const cafe = (await app.identity.getCafeBySlug("moda"))!;
+    expect(await app.sharePreview("moda", "post_share-key-0001")).toEqual({
+      cafeName: cafe.name,
+      title: "Yeni kavurduk: Etiyopya Guji.",
+      description: "Çekirdek olarak da var.",
+      imageUrl: url,
+    });
+  });
+
+  it("shows an event's topic, day and time", async () => {
+    const preview = (await app.sharePreview("moda", "post_event_1"))!;
+    const event = (await feed(null)).find((p) => p.id === "post_event_1")!;
+    expect(preview.title).toBe(event.title);
+    expect(preview.description).toMatch(/^\d{1,2} [A-ZÇĞİÖŞÜa-zçğıöşü]+ [A-ZÇĞİÖŞÜa-zçğıöşü]+ \d{2}:\d{2} · /);
+  });
+
+  it("shows nothing for a post that's taken down or another café's", async () => {
+    await app.feed.remove(leyla, "post_2");
+    expect(await app.sharePreview("moda", "post_2")).toBeNull();
+    expect(await app.sharePreview("moda", "post_k2")).toBeNull();
+    expect(await app.sharePreview("moda", "post_nope")).toBeNull();
+  });
+});
