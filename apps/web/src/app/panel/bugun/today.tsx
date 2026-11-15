@@ -68,6 +68,15 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
         {data && <p className="text-muted capitalize">{longDay(data.today, lang)}</p>}
       </section>
       {error && <Notice tone="red">{error}</Notice>}
+      {has(cafe, "till.use") && !cafe.hasPin && (
+        // Without a PIN nobody gets past the till's "Kim çalışıyor?" screen.
+        <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
+          <p className="leading-normal">{t("todaySetPin")}</p>
+          <a href={withCafe("/panel/hesap", cafe.slug)} className="inline-flex min-h-11 shrink-0 items-center self-start rounded-full bg-ink px-4 text-sm font-semibold text-paper sm:self-auto">
+            {t("todaySetPinGo")}
+          </a>
+        </section>
+      )}
       {data && (
         <>
           {data.sales && <SalesToday sales={data.sales} slug={cafe.slug} t={t} lang={lang} />}

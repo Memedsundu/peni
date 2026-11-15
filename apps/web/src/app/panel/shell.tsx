@@ -19,6 +19,8 @@ const GROUPS = [
   { key: "products", label: "navGroupProducts" },
   { key: "team", label: "navGroupTeam" },
   { key: "cafe", label: "navGroupCafe" },
+  // Last and without a heading: what's yours, not the café's.
+  { key: "me", label: null },
 ] as const satisfies readonly { key: string; label: TextKey | null }[];
 
 type Group = (typeof GROUPS)[number]["key"];
@@ -47,6 +49,8 @@ const PAGES = [
   { key: "penny", group: "cafe", href: "/panel/penny", label: "navPenny", plan: "penny", can: (c: StaffCafeAccessDTO) => has(c, "peni.till") },
   { key: "cihazlar", group: "cafe", href: "/panel/cihazlar", label: "navDevices", plan: "isletme", can: (c: StaffCafeAccessDTO) => has(c, "devices.manage") },
   { key: "plan", group: "cafe", href: "/panel/plan", label: "navPlan", plan: "topluluk", can: (c: StaffCafeAccessDTO) => c.role === "owner" },
+  // Everyone has one: their till PIN and their password.
+  { key: "hesap", group: "me", href: "/panel/hesap", label: "navAccount", plan: "topluluk", can: () => true },
 ] as const satisfies readonly { key: string; group: Group; href: string; label: TextKey; plan: CafePlanKey; can: (c: StaffCafeAccessDTO) => boolean }[];
 
 /** With this few pages the menu is one short list; headings would only add noise. */
@@ -355,7 +359,8 @@ function MenuLinks({ menu, page, t, tiles = false }: { menu: PanelMenu; page: Pa
         const id = `${tiles ? "sheet" : "side"}-${g.key}`;
         if (!g.label)
           return (
-            <ul key={g.key} className={list}>
+            // The last group ("Hesabım") sits a little apart from the café's pages.
+            <ul key={g.key} className={`${list} ${g.key === "me" && !tiles ? "mt-3 border-t border-line-soft pt-3" : ""}`}>
               {here.map(link)}
             </ul>
           );

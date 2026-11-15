@@ -547,6 +547,7 @@ export class StaffService {
         role: m.role,
         permissions: ALL_PERMISSIONS.filter((p) => permissions.has(p)),
         plan: { now: plan, paid: cafe.plan, trialEndsAt: cafe.trialEndsAt?.toISOString() ?? null },
+        hasPin: !!m.pinHash,
       });
     }
     return out;

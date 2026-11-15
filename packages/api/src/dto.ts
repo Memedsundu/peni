@@ -1338,6 +1338,8 @@ export interface StaffCafeAccessDTO {
   /** Permission keys from @peni/core's PERMISSIONS, e.g. "till.use". Only what the café's plan has. */
   permissions: string[];
   plan: StaffCafePlanDTO;
+  /** Whether they have set their till PIN at this café; without one they can't sign in at the till. */
+  hasPin: boolean;
 }
 
 /** What a café pays for (N11). */
