@@ -1,5 +1,8 @@
+import type { AlertDTO } from "@peni/api";
+import type { Permission } from "@peni/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { inMemoryStores, PeniApp } from "./app";
+import type { EmailMessage } from "./customer-auth";
 import { DEMO_STAFF, DEMO_STAFF_PASSWORD, seed } from "./seed";
 import type { StaffContext } from "./staff";
 
@@ -8,14 +11,17 @@ let now: Date;
 let leyla: StaffContext;
 let hakan: StaffContext;
 let ece: StaffContext;
+let sent: EmailMessage[];
 
+const code = (p: Promise<unknown>) => p.then(() => "ok", (e: { code?: string }) => e.code);
 const at = async (who: keyof typeof DEMO_STAFF, slug = "moda") =>
   app.staff.at((await app.staff.signIn(DEMO_STAFF[who].email, DEMO_STAFF_PASSWORD)).token, slug);
 
 beforeEach(async () => {
   // Friday 16 October, 12:00 in Istanbul.
   now = new Date("2026-10-16T09:00:00Z");
-  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now }, inMemoryStores());
+  sent = [];
+  app = new PeniApp({ demo: true, bcryptRounds: 4, clock: () => now, auth: { email: { send: async (m) => void sent.push(m) } } }, inMemoryStores());
   await seed(app, { sales: false, drafts: false });
   [leyla, hakan, ece] = await Promise.all([at("leyla"), at("hakan"), at("ece")]);
 });
@@ -103,5 +109,80 @@ describe("Bugün's setup checklist", () => {
     for (const [i, itemId] of ["stk_cay", "stk_limon", "stk_lokum", "stk_sansebastian", "stk_nane"].entries())
       await app.bills.add(leyla, { key: `buy${i}`, supplierId: "sup_seed_firin", date: "2026-11-01", lines: [{ itemId, qtyMilli: 1_000, totalKurus: 10_000 }] });
     expect((await app.alerts.today(leyla)).setup).toBeNull();
+  });
+});
+
+describe("Bugün's community alerts", () => {
+  const COMMUNITY: AlertDTO["type"][] = ["reportsOpen", "commentsNew", "memberEvents"];
+  const community = (alerts: AlertDTO[]) => alerts.filter((a) => COMMUNITY.includes(a.type)).map((a) => [a.type, a.level, a.count, a.names, a.href]);
+  const as = (...permissions: Permission[]) => app.alerts.list("cafe_moda", new Set(permissions)).then(community);
+
+  it("tells the café about reports waiting, new comments and members' events", async () => {
+    // Moda's demo: Kerem's ad two neighbours reported, seven comments in the last two days, Zeynep's chess table.
+    expect(community((await app.alerts.today(leyla)).alerts)).toEqual([
+      ["reportsOpen", "critical", 1, [], "/panel/topluluk"],
+      ["commentsNew", "warning", 7, ["Emre Ç.", "Bir üye", "Zeynep D.", "Mehmet K.", "Can Ö."], "/panel/topluluk"],
+      ["memberEvents", "warning", 1, ["Cumartesi satranç"], "/panel/topluluk"],
+    ]);
+    // Posting without moderating: no reports. Neither: nothing.
+    expect((await as("posts.write")).map((a) => a[0])).toEqual(["commentsNew", "memberEvents"]);
+    expect((await as("posts.moderate")).map((a) => a[0])).toEqual(COMMUNITY);
+    expect(await as("stock.view", "debts.view")).toEqual([]);
+    // The chef and the barista don't look after Topluluk.
+    expect(community((await app.alerts.today(hakan)).alerts)).toEqual([]);
+    expect(community((await app.alerts.today(ece)).alerts)).toEqual([]);
+  });
+
+  it("clears comments and events once someone looks at Topluluk, and counts what comes after", async () => {
+    expect(await code(app.feed.markSeen(ece))).toBe("FORBIDDEN");
+    expect(await app.feed.markSeen(leyla)).toEqual({ ok: true });
+    expect((await as("posts.moderate")).map((a) => a[0])).toEqual(["reportsOpen"]);
+
+    now = new Date(now.getTime() + 60_000);
+    await app.comment((await app.identity.getCustomer("cus_ayse"))!, "moda", "post_1", "Bu akşam açık mısınız?");
+    expect(await as("posts.write")).toEqual([["commentsNew", "warning", 1, ["Ayşe Y."], "/panel/topluluk"]]);
+    // A comment the café hid isn't news.
+    const hidden = (await app.feed.view(leyla)).posts.find((p) => p.id === "post_1")!.comments.at(-1)!;
+    await app.feed.setCommentHidden(leyla, "post_1", hidden.id, true);
+    expect(await as("posts.write")).toEqual([]);
+
+    // The report clears once a moderator answers it.
+    await app.feed.resolveReport(leyla, { targetType: "comment", targetId: "cmt_spam_1", action: "keep", pauseAuthor: false });
+    expect(await as("posts.moderate")).toEqual([]);
+  });
+
+  it("looks back two weeks at most, and leaves out events that are over or taken down", async () => {
+    now = new Date(now.getTime() + 15 * 86_400_000);
+    expect(await as("posts.moderate")).toEqual([["reportsOpen", "critical", 1, [], "/panel/topluluk"]]);
+
+    now = new Date("2026-10-16T09:00:00Z");
+    await app.feed.remove(leyla, "post_member_event_1");
+    expect((await as("posts.write")).map((a) => a[0])).toEqual(["commentsNew"]);
+  });
+
+  it("counts a reported comment only while it's there to look at", async () => {
+    await app.report((await app.identity.getCustomer("cus_ayse"))!, "moda", { targetType: "comment", targetId: "cmt_1", reason: "rude" });
+    expect((await as("posts.moderate"))[0]).toEqual(["reportsOpen", "critical", 2, [], "/panel/topluluk"]);
+    await app.deleteComment((await app.identity.getCustomer("cus_mehmet"))!, "moda", "post_question_1", "cmt_1");
+    expect((await as("posts.moderate"))[0]).toEqual(["reportsOpen", "critical", 1, [], "/panel/topluluk"]);
+  });
+
+  it("reaches a café on the free plan, by Bugün and by the morning email", async () => {
+    const cafe = (await app.identity.getCafe("cafe_moda"))!;
+    await app.identity.saveCafe({ ...cafe, plan: "topluluk", trialEndsAt: null });
+    const owner = await at("leyla");
+    const today = await app.alerts.today(owner);
+    expect(today.alerts.map((a) => a.type)).toEqual(COMMUNITY);
+    expect(today.email).toEqual({ eligible: true, on: true });
+
+    const results = await app.alerts.sendDigests();
+    expect(results.find((r) => r.cafeId === "cafe_moda")).toEqual({ cafeId: "cafe_moda", day: "2026-10-16", sent: 2 });
+    // The owner and the manager; the chef and the barista have nothing to do with Topluluk.
+    expect(sent.map((m) => m.to).sort()).toEqual([DEMO_STAFF.leyla.email, DEMO_STAFF.murat.email].sort());
+    const mail = sent.find((m) => m.to === DEMO_STAFF.leyla.email)!;
+    expect(mail.subject).toBe("Bugün 3 konu · Moda Kahvesi");
+    expect(mail.text).toContain("• 1 şikâyet bekliyor");
+    expect(mail.text).toContain("• 7 yeni yorum (Emre Ç., Bir üye, Zeynep D., Mehmet K., Can Ö.");
+    expect(mail.text).toContain("• Üyeler 1 etkinlik açtı (Cumartesi satranç)");
   });
 });

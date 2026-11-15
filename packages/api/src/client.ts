@@ -100,6 +100,7 @@ import type {
   UpdateEventInput,
   ReportInput,
   ResolveReportInput,
+  ReplyInput,
   CreatePostInput,
   UpdatePostInput,
   TillDonationInput,
@@ -657,6 +658,14 @@ export function createPeniClient(options: PeniClientOptions) {
         /** Needs "posts.moderate"; `hidden: false` brings it back. */
         hideComment: (cafeSlug: string, postId: string, commentId: string, hidden: boolean) =>
           call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}/comments/${slug(commentId)}`, { hidden }, true),
+        /** Needs "posts.write": the café answers a member's comment, in its own name. The same `replyKey` again answers once. */
+        reply: (cafeSlug: string, postId: string, commentId: string, input: ReplyInput) =>
+          call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}/comments/${slug(commentId)}/reply`, input, true),
+        /** Needs "posts.write": takes one of the café's replies back, for good. */
+        removeReply: (cafeSlug: string, postId: string, replyId: string) =>
+          call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}/comments/${slug(replyId)}/remove`, {}, true),
+        /** Someone on the staff has looked at Topluluk: Bugün stops counting the comments and events from before now as new. */
+        seen: (cafeSlug: string) => call<{ ok: true }>("POST", `/staff/${slug(cafeSlug)}/feed/seen`, {}, true),
         /** A JPEG, PNG or WebP of at most 2 MB, shrunk on the device first. Answers with its URL for `imageUrls`. */
         uploadImage: (cafeSlug: string, photo: Blob) => call<{ url: string }>("POST", `/staff/${slug(cafeSlug)}/images`, photo, true),
         /** Needs "posts.moderate": take the reported thing down (and maybe pause its writer), or keep it. */

@@ -30,10 +30,17 @@ function Feed({ cafe, t, lang, signedOut }: PanelProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.staff.feed.get(cafe.slug).then(setFeed, (e: unknown) => {
-      if (e instanceof PeniApiError && e.status === 401) signedOut();
-      else setError(errorText(e, lang));
-    });
+    api.staff.feed.get(cafe.slug).then(
+      (f) => {
+        setFeed(f);
+        // Someone looked: Bugün stops counting these comments and events as new.
+        void api.staff.feed.seen(cafe.slug).catch(() => undefined);
+      },
+      (e: unknown) => {
+        if (e instanceof PeniApiError && e.status === 401) signedOut();
+        else setError(errorText(e, lang));
+      },
+    );
     // Once per café; the language or a new callback isn't a reason to load again.
   }, [cafe.slug]);
 
@@ -253,6 +260,9 @@ function EventInputs({ t, value, onChange }: { t: T; value: EventFields; onChang
   );
 }
 
+/** "Yanıtla", "Gizle": small text buttons under a comment, still a full finger tall. */
+const commentAction = "flex min-h-11 cursor-pointer items-center text-sm font-semibold underline underline-offset-4 disabled:cursor-not-allowed disabled:opacity-40";
+
 const REASON_KEYS = { spam: "reasonSpam", rude: "reasonRude", unsafe: "reasonUnsafe", other: "reasonOther" } as const;
 
 /** What members reported, one card per reported thing, with the three answers a moderator has. */
@@ -391,6 +401,11 @@ function PostCard({
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** The comment being answered, and the answer so far. */
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [reply, setReply] = useState("");
+  // One key per answer: a retried tap answers once.
+  const replyKey = useRef(newIdempotencyKey());
 
   const run = async (call: () => Promise<StaffFeedDTO>, after?: () => void) => {
     setBusy(true);
@@ -413,6 +428,7 @@ function PostCard({
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
         {post.pinned && <span className="rounded-full bg-green-soft px-3 py-1 font-medium text-green">{t("pinned")}</span>}
         {label && <span className="rounded-full bg-panel px-3 py-1">{label}</span>}
+        {post.eventOver && <span className="rounded-full border border-line px-3 py-1">{t("eventOverTag")}</span>}
         {post.openReports > 0 && <span className="rounded-full bg-red-soft px-3 py-1 font-medium text-red">{fill(t("reportsN"), { n: post.openReports })}</span>}
         <span>
           {when(post.publishedAt, lang)}
@@ -471,7 +487,8 @@ function PostCard({
 
       <p className="text-sm text-muted">
         {fill(t("likes"), { n: post.reactionCount })} · {fill(t("comments"), { n: post.comments.length - hiddenCount })}
-        {isEvent && ` · ${post.eventCapacity ? fill(t("goingOf"), { n: post.rsvpCount, max: post.eventCapacity }) : fill(t("going"), { n: post.rsvpCount })}`}
+        {isEvent &&
+          ` · ${post.eventOver ? fill(t("went"), { n: post.rsvpCount }) : post.eventCapacity ? fill(t("goingOf"), { n: post.rsvpCount, max: post.eventCapacity }) : fill(t("going"), { n: post.rsvpCount })}`}
       </p>
       {post.hostName && <p className="text-sm text-muted">{t("memberEventHelp")}</p>}
 
@@ -497,18 +514,84 @@ function PostCard({
       {post.comments.length > 0 && (
         <ul className="flex flex-col rounded-2xl bg-panel px-4">
           {post.comments.map((c) => (
-            <li key={c.id} className={`flex items-start justify-between gap-3 border-b border-line-soft py-3 last:border-0 ${c.hidden ? "text-muted" : ""}`}>
-              <span className="flex flex-col gap-0.5">
+            <li key={c.id} className="flex flex-col gap-1 border-b border-line-soft py-3 last:border-0">
+              <span className={`flex flex-col gap-0.5 ${c.hidden ? "text-muted" : ""}`}>
                 <span className="text-sm">
                   <strong className="font-semibold">{c.authorName}</strong> <span className="text-muted">· {when(c.createdAt, lang)}</span>
                   {c.hidden && <span className="ml-2 rounded-full bg-paper px-2 py-0.5 text-xs">{t("hidden")}</span>}
                 </span>
                 <span className={c.hidden ? "line-through decoration-line" : ""}>{c.body}</span>
               </span>
-              {canModerate && (
-                <Button kind="bare" size="sm" className="shrink-0 underline underline-offset-4" disabled={busy} onClick={() => void run(() => api.staff.feed.hideComment(slug, post.id, c.id, !c.hidden))}>
-                  {c.hidden ? t("unhide") : t("hide")}
-                </Button>
+              {/* The café's answers, under the comment they answer; customers see them under the café's name. */}
+              {c.replies.map((r) => (
+                <div key={r.id} className="mt-1 ml-3 flex flex-col gap-0.5 border-l-2 border-line pl-3">
+                  <span className="text-sm">
+                    <strong className="font-semibold">{t("replyFromCafe")}</strong>{" "}
+                    <span className="text-muted">
+                      · {r.byName ? `${r.byName} · ` : ""}
+                      {when(r.createdAt, lang)}
+                    </span>
+                  </span>
+                  <span>{r.body}</span>
+                  {canWrite && (
+                    <button type="button" className={commentAction} disabled={busy} onClick={() => void run(() => api.staff.feed.removeReply(slug, post.id, r.id))}>
+                      {t("replyRemove")}
+                    </button>
+                  )}
+                </div>
+              ))}
+              {(canModerate || (canWrite && !c.hidden)) && (
+                <span className="flex gap-5">
+                  {canWrite && !c.hidden && (
+                    <button
+                      type="button"
+                      className={commentAction}
+                      aria-expanded={replyTo === c.id}
+                      onClick={() => {
+                        setReply("");
+                        setReplyTo(replyTo === c.id ? null : c.id);
+                      }}
+                    >
+                      {t("reply")}
+                    </button>
+                  )}
+                  {canModerate && (
+                    <button type="button" className={commentAction} disabled={busy} onClick={() => void run(() => api.staff.feed.hideComment(slug, post.id, c.id, !c.hidden))}>
+                      {c.hidden ? t("unhide") : t("hide")}
+                    </button>
+                  )}
+                </span>
+              )}
+              {replyTo === c.id && (
+                <form
+                  className="flex items-center gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const body = reply.trim();
+                    if (!body || busy) return;
+                    void run(
+                      () => api.staff.feed.reply(slug, post.id, c.id, { replyKey: replyKey.current, body }),
+                      () => {
+                        replyKey.current = newIdempotencyKey();
+                        setReply("");
+                        setReplyTo(null);
+                      },
+                    );
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    maxLength={500}
+                    placeholder={t("replyPlaceholder")}
+                    aria-label={t("replyPlaceholder")}
+                    className="min-h-11 min-w-0 flex-1 rounded-full border border-line bg-paper px-4 text-base outline-none focus:border-ink"
+                  />
+                  <Button kind="secondary" size="sm" type="submit" disabled={busy || !reply.trim()}>
+                    {t("replySend")}
+                  </Button>
+                </form>
               )}
             </li>
           ))}

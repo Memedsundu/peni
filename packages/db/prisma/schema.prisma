@@ -186,6 +186,7 @@ model Cafe {
   memberships    Membership[]
   posts          CafePost[]
   images         CafeImage[]
+  communitySeen  CommunitySeen?
 }
 
 /// Mirrors CafePlan in @peni/core: free, pennies, everything.
@@ -261,6 +262,7 @@ model StaffMember {
   account StaffAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   posts   CafePost[]
   devices TillDevice[]
+  replies PostComment[]
 
   @@unique([cafeId, accountId])
   @@index([accountId])
@@ -1145,19 +1147,38 @@ model CafeImage {
   @@index([cafeId, createdAt])
 }
 
+/// A member's comment, or the café's reply to one (`customerId` null, `replyToId` set).
 model PostComment {
-  id         String    @id @default(cuid())
-  postId     String
-  customerId String
-  body       String    @db.VarChar(500)
-  createdAt  DateTime  @default(now())
+  id            String    @id @default(cuid())
+  postId        String
+  /// The member who wrote it; null on the café's reply.
+  customerId    String?
+  body          String    @db.VarChar(500)
+  createdAt     DateTime  @default(now())
   /// Set by staff, or automatically after enough reports.
-  hiddenAt   DateTime?
+  hiddenAt      DateTime?
+  /// On the café's reply: who on the staff wrote it.
+  staffMemberId String?
+  /// On the café's reply: the member's comment it answers; goes when that comment goes.
+  replyToId     String?
 
-  post     CafePost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  post        CafePost      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  staffMember StaffMember?  @relation(fields: [staffMemberId], references: [id], onDelete: SetNull)
+  replyTo     PostComment?  @relation("Replies", fields: [replyToId], references: [id], onDelete: Cascade)
+  replies     PostComment[] @relation("Replies")
 
   @@index([postId, createdAt])
+  // How many comments a member wrote lately (the limits on comments).
+  @@index([customerId, createdAt])
+}
+
+/// When someone on the staff last looked at Topluluk: Bugün counts what came after as new.
+model CommunitySeen {
+  cafeId String   @id
+  seenAt DateTime
+
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
 }
 
 model PostReaction {

@@ -113,6 +113,14 @@ export const resolveReportSchema = z.object({
 
 export const pauseMemberSchema = z.object({ paused: z.boolean() });
 
+/** `POST /staff/:slug/feed/:postId/comments/:commentId/reply`: the café answers a member's comment. */
+export const replySchema = z.object({
+  /** Made once per reply on the device, so a retried tap answers once. */
+  replyKey: z.string().trim().min(8).max(100),
+  body: z.string().trim().min(1).max(500),
+});
+export type ReplyInput = z.infer<typeof replySchema>;
+
 /** `POST /cafes/:slug/members/lookup`: by phone or by Peni kodu, one of them. [G6, D28] */
 export const memberLookupSchema = z
   .object({ phone: phoneSchema.optional(), code: memberCodeSchema.optional() })

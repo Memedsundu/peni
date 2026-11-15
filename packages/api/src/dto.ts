@@ -688,15 +688,29 @@ export interface PostDTO {
   pinned: boolean;
   eventStartsAt: string | null;
   eventCapacity: number | null;
+  /** Events only: it started more than three hours ago, so nobody can join or leave it any more. */
+  eventOver: boolean;
   reactionCount: number;
+  /** Members' comments and the café's replies, as many as the viewer can see. */
   commentCount: number;
   rsvpCount: number;
   reactedByMe: boolean;
   rsvpedByMe: boolean;
   /** Photos, in order (plan piece 14). */
   imageUrls: string[];
-  /** "Bir üye" for hidden profiles, otherwise "Ayşe Y.". `mine` when the viewer wrote it and can delete it. */
-  comments: { id: string; authorName: string; body: string; createdAt: string; mine: boolean; reportedByMe: boolean }[];
+  /**
+   * Members' comments, oldest first. "Bir üye" for hidden profiles, otherwise "Ayşe Y.". `mine` when the
+   * viewer wrote it and can delete it. `replies` are the café's answers under it, oldest first.
+   */
+  comments: {
+    id: string;
+    authorName: string;
+    body: string;
+    createdAt: string;
+    mine: boolean;
+    reportedByMe: boolean;
+    replies: { id: string; body: string; createdAt: string }[];
+  }[];
   /** Event topic. Null for posts and questions. [G4] */
   title: string | null;
   /** RSVPs in arrival order. Declines are never listed. [G4] */
@@ -751,14 +765,26 @@ export interface StaffPostDTO {
   publishedAt: string;
   eventStartsAt: string | null;
   eventCapacity: number | null;
+  /** Events only: it started more than three hours ago. */
+  eventOver: boolean;
   /** The staff member who posted it; null for older posts and members' events. */
   authorName: string | null;
   /** The member who opened this event; the café can take it down or pin it, not edit it. */
   hostName: string | null;
   reactionCount: number;
   rsvpCount: number;
-  /** Every comment, hidden ones too, oldest first. Names as customers see them. */
-  comments: { id: string; authorName: string; body: string; createdAt: string; hidden: boolean }[];
+  /**
+   * Every member's comment, hidden ones too, oldest first. Names as customers see them. `replies` are
+   * the café's answers under it, with the staff member who wrote each (customers see the café's name).
+   */
+  comments: {
+    id: string;
+    authorName: string;
+    body: string;
+    createdAt: string;
+    hidden: boolean;
+    replies: { id: string; body: string; createdAt: string; byName: string | null }[];
+  }[];
   /** Open reports on the post itself. */
   openReports: number;
 }
@@ -1800,7 +1826,13 @@ export type AlertTypeDTO =
   | "tasksLate"
   | "draftsOpen"
   | "watch"
-  | "cashShort";
+  | "cashShort"
+  /** Members reported a comment or an event, and nobody has answered yet. `count`: reported things. */
+  | "reportsOpen"
+  /** Members' comments since staff last opened Topluluk. `names`: who wrote them. */
+  | "commentsNew"
+  /** Events members opened since staff last opened Topluluk. `names`: the events' topics. */
+  | "memberEvents";
 
 /** Something that needs doing, worked out from the café's own numbers. One per kind. */
 export interface AlertDTO {

@@ -5,14 +5,28 @@ const activity = (opts: ListOptions) =>
   ({
     reactions: { select: { customerId: true } },
     rsvps: { select: { customerId: true }, orderBy: { createdAt: "asc" } },
-    comments: { where: opts.hiddenComments ? {} : { hiddenAt: null }, orderBy: { createdAt: "asc" } },
+    comments: {
+      // A reply goes where the comment it answers goes.
+      where: opts.hiddenComments ? {} : { hiddenAt: null, OR: [{ replyToId: null }, { replyTo: { hiddenAt: null } }] },
+      orderBy: { createdAt: "asc" },
+    },
   }) as const;
+
+type CommentRow = {
+  id: string;
+  customerId: string | null;
+  body: string;
+  createdAt: Date;
+  hiddenAt: Date | null;
+  staffMemberId: string | null;
+  replyToId: string | null;
+};
 
 type Row = Omit<Post, "imageUrls"> & {
   imageUrls: string[];
   reactions: { customerId: string }[];
   rsvps: { customerId: string }[];
-  comments: { id: string; customerId: string; body: string; createdAt: Date; hiddenAt: Date | null }[];
+  comments: CommentRow[];
 };
 
 export class PrismaCommunityStore implements CommunityStore {
@@ -56,13 +70,43 @@ export class PrismaCommunityStore implements CommunityStore {
     await this.db().postComment.create({ data: { ...comment, postId } });
   }
 
+  async findComment(commentId: string): Promise<{ postId: string; comment: PostComment } | null> {
+    const row = await this.db().postComment.findUnique({ where: { id: commentId } });
+    return row ? { postId: row.postId, comment: comment(row) } : null;
+  }
+
   async setCommentHidden(postId: string, commentId: string, hiddenAt: Date | null): Promise<void> {
     await this.db().postComment.updateMany({ where: { id: commentId, postId }, data: { hiddenAt } });
   }
 
   async deleteComment(postId: string, commentId: string): Promise<void> {
+    // The café's replies under it go with it (ON DELETE CASCADE).
     await this.db().postComment.deleteMany({ where: { id: commentId, postId } });
   }
+
+  async countCommentsBy(cafeId: string, customerId: string, since: Date): Promise<number> {
+    return this.db().postComment.count({ where: { customerId, createdAt: { gte: since }, post: { cafeId } } });
+  }
+
+  async seenAt(cafeId: string): Promise<Date | null> {
+    return (await this.db().communitySeen.findUnique({ where: { cafeId } }))?.seenAt ?? null;
+  }
+
+  async markSeen(cafeId: string, at: Date): Promise<void> {
+    await this.db().communitySeen.upsert({ where: { cafeId }, create: { cafeId, seenAt: at }, update: { seenAt: at } });
+  }
+}
+
+function comment(c: CommentRow): PostComment {
+  return {
+    id: c.id,
+    customerId: c.customerId,
+    body: c.body,
+    createdAt: c.createdAt,
+    hiddenAt: c.hiddenAt,
+    staffMemberId: c.staffMemberId,
+    replyToId: c.replyToId,
+  };
 }
 
 function toDomain(row: Row): PostWithActivity {
@@ -82,6 +126,6 @@ function toDomain(row: Row): PostWithActivity {
     hiddenAt: row.hiddenAt,
     reactions: row.reactions.map((r) => r.customerId),
     rsvps: row.rsvps.map((r) => r.customerId),
-    comments: row.comments.map((c) => ({ id: c.id, customerId: c.customerId, body: c.body, createdAt: c.createdAt, hiddenAt: c.hiddenAt })),
+    comments: row.comments.map(comment),
   };
 }

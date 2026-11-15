@@ -116,6 +116,25 @@ export function alertWords(a: AlertDTO, lang: AlertLang, money: (kurus: number) 
         detail: names,
         action: tr ? "Gözcüye bak" : "Open Watch",
       };
+    case "reportsOpen":
+      return {
+        title: tr ? `${a.count} şikâyet bekliyor` : `${a.count} ${a.count === 1 ? "report is" : "reports are"} waiting`,
+        detail: tr ? "Üyeler bir yorumu ya da etkinliği şikâyet etti. Bakıp karar ver." : "Members reported a comment or an event. Have a look and decide.",
+        action: tr ? "Şikâyetlere bak" : "Open reports",
+      };
+    case "commentsNew":
+      return {
+        title: tr ? `${a.count} yeni yorum` : `${a.count} new ${a.count === 1 ? "comment" : "comments"}`,
+        // The names are the writers and the count is their comments, so "ve N tane daha" would count the wrong thing.
+        detail: a.names.join(", "),
+        action: tr ? "Yorumlara bak" : "Open comments",
+      };
+    case "memberEvents":
+      return {
+        title: tr ? `Üyeler ${a.count} etkinlik açtı` : `Members opened ${a.count} ${a.count === 1 ? "event" : "events"}`,
+        detail: names,
+        action: tr ? "Etkinliklere bak" : "Open events",
+      };
     case "cashShort":
       return {
         title: tr ? `Para ${dayName(a.day!, lang)} gününe yetmeyebilir` : `Money may run short by ${dayName(a.day!, lang)}`,

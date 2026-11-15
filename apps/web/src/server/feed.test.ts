@@ -108,3 +108,113 @@ describe("the café feed (plan piece 14)", () => {
     expect(await code(app.feed.remove(leyla, post!.id))).toBe("ok");
   });
 });
+
+describe("limits on comments", () => {
+  it("takes five comments a minute and thirty an hour from one member at one café", async () => {
+    const say = (n: number, postId = "post_1") => code(app.comment(mehmet, "moda", postId, `Yorum ${n}`));
+    let n = 0;
+    for (let i = 0; i < 5; i++) expect(await say(++n)).toBe("ok");
+    // Another post at the same café counts too.
+    expect(await say(++n, "post_2")).toBe("COMMENT_TOO_FAST");
+    now = new Date(now.getTime() + 61_000);
+    expect(await say(++n)).toBe("ok");
+
+    for (let minute = 0; minute < 6; minute++) {
+      now = new Date(now.getTime() + 61_000);
+      for (let i = 0; i < 5 && n < 31; i++) expect(await say(++n)).toBe("ok");
+    }
+    // 30 in the hour now; a quiet minute is not enough.
+    now = new Date(now.getTime() + 61_000);
+    expect(await say(++n)).toBe("COMMENT_TOO_FAST");
+    expect(await app.community.countCommentsBy("cafe_moda", "cus_mehmet", new Date(now.getTime() - 3_600_000))).toBe(30);
+    // Someone else isn't held up.
+    expect(await code(app.comment(ayse, "moda", "post_1", "Yorum 1"))).toBe("ok");
+    // An hour after the first ones, there's room again.
+    now = new Date(now.getTime() + 3_600_000);
+    expect(await say(++n)).toBe("ok");
+  });
+
+  it("refuses the same words twice on one post within the hour, whatever the case", async () => {
+    expect(await code(app.comment(ayse, "moda", "post_1", "İyi akşamlar"))).toBe("ok");
+    expect(await code(app.comment(ayse, "moda", "post_1", "  iyi AKŞAMLAR "))).toBe("COMMENT_REPEAT");
+    // Elsewhere, or someone else, is fine.
+    expect(await code(app.comment(ayse, "moda", "post_2", "İyi akşamlar"))).toBe("ok");
+    expect(await code(app.comment(mehmet, "moda", "post_1", "İyi akşamlar"))).toBe("ok");
+    // Hidden by the café still counts.
+    const mine = (await app.feed.view(leyla)).posts.find((p) => p.id === "post_1")!.comments.find((c) => c.body === "İyi akşamlar")!;
+    await app.feed.setCommentHidden(leyla, "post_1", mine.id, true);
+    expect(await code(app.comment(ayse, "moda", "post_1", "İyi akşamlar"))).toBe("COMMENT_REPEAT");
+    now = new Date(now.getTime() + 3_600_000 + 1_000);
+    expect(await code(app.comment(ayse, "moda", "post_1", "İyi akşamlar"))).toBe("ok");
+  });
+});
+
+describe("the café answers a comment", () => {
+  const post1 = async (who: CustomerRecord | null = ayse) => (await feed(who)).find((p) => p.id === "post_1")!;
+  const staffPost1 = async () => (await app.feed.view(leyla)).posts.find((p) => p.id === "post_1")!;
+
+  it("shows the demo's answer under Can's question, in the café's name to customers and Leyla's to staff", async () => {
+    const seen = await post1();
+    expect(seen.comments.map((c) => [c.id, c.replies.map((r) => r.body)])).toEqual([
+      ["cmt_5", []],
+      ["cmt_6", ["Evet, 250 gramlık paketler kasada."]],
+    ]);
+    expect(seen.commentCount).toBe(3);
+    expect((await staffPost1()).comments.find((c) => c.id === "cmt_6")!.replies).toEqual([
+      expect.objectContaining({ id: "cmt_reply_1", body: "Evet, 250 gramlık paketler kasada.", byName: "Leyla Kara" }),
+    ]);
+  });
+
+  it("answers once per key, only a member's comment in view, and only for those who post", async () => {
+    const input = { replyKey: "reply-key-0001", body: "Afiyet olsun!" };
+    await app.feed.reply(leyla, "post_1", "cmt_5", input);
+    const view = await app.feed.reply(leyla, "post_1", "cmt_5", input);
+    expect(view.posts.find((p) => p.id === "post_1")!.comments.find((c) => c.id === "cmt_5")!.replies).toEqual([
+      { id: "cmt_reply-key-0001", body: "Afiyet olsun!", createdAt: now.toISOString(), byName: "Leyla Kara" },
+    ]);
+    expect((await post1()).commentCount).toBe(4);
+    // The same key elsewhere belongs to something else.
+    expect(await code(app.feed.reply(leyla, "post_1", "cmt_6", input))).toBe("IDEMPOTENCY_CONFLICT");
+    expect(await code(app.feed.reply(leyla, "post_1", "cmt_6", { replyKey: "reply-key-0007", body: "Hm" }))).toBe("ok");
+    // No reply to a reply, nothing that isn't there, nothing on another post.
+    expect(await code(app.feed.reply(leyla, "post_1", "cmt_reply_1", { replyKey: "reply-key-0002", body: "Ek" }))).toBe("COMMENT_NOT_FOUND");
+    expect(await code(app.feed.reply(leyla, "post_1", "cmt_nope", { replyKey: "reply-key-0003", body: "Ek" }))).toBe("COMMENT_NOT_FOUND");
+    expect(await code(app.feed.reply(leyla, "post_2", "cmt_5", { replyKey: "reply-key-0004", body: "Ek" }))).toBe("COMMENT_NOT_FOUND");
+    expect(await code(app.feed.reply(ece, "post_1", "cmt_5", { replyKey: "reply-key-0005", body: "Ek" }))).toBe("FORBIDDEN");
+    // Not on a comment the café hid.
+    await app.feed.setCommentHidden(leyla, "post_1", "cmt_5", true);
+    expect(await code(app.feed.reply(leyla, "post_1", "cmt_5", { replyKey: "reply-key-0006", body: "Ek" }))).toBe("COMMENT_NOT_FOUND");
+  });
+
+  it("takes a reply back for good, and leaves members' comments alone", async () => {
+    const after = await app.feed.removeReply(leyla, "post_1", "cmt_reply_1");
+    expect(after.posts.find((p) => p.id === "post_1")!.comments.find((c) => c.id === "cmt_6")!.replies).toEqual([]);
+    expect((await post1()).commentCount).toBe(2);
+    expect(await code(app.feed.removeReply(leyla, "post_1", "cmt_reply_1"))).toBe("ok");
+    expect(await code(app.feed.removeReply(leyla, "post_1", "cmt_6"))).toBe("COMMENT_NOT_FOUND");
+    expect(await code(app.feed.removeReply(ece, "post_1", "cmt_6"))).toBe("FORBIDDEN");
+  });
+
+  it("hides the replies with the comment they answer, and deletes them with it", async () => {
+    await app.feed.setCommentHidden(leyla, "post_1", "cmt_6", true);
+    const seen = await post1();
+    expect(seen.comments.map((c) => c.id)).toEqual(["cmt_5"]);
+    expect(seen.commentCount).toBe(1);
+    // Moderators still see both.
+    expect((await staffPost1()).comments.find((c) => c.id === "cmt_6")).toMatchObject({ hidden: true, replies: [expect.objectContaining({ id: "cmt_reply_1" })] });
+    await app.feed.setCommentHidden(leyla, "post_1", "cmt_6", false);
+    expect((await post1()).commentCount).toBe(3);
+
+    const can = (await app.identity.getCustomer("cus_can"))!;
+    await app.deleteComment(can, "moda", "post_1", "cmt_6");
+    expect((await staffPost1()).comments.map((c) => c.id)).toEqual(["cmt_5"]);
+    expect(await app.community.findComment("cmt_reply_1")).toBeNull();
+  });
+
+  it("can't be hidden, reported or taken back by a member", async () => {
+    expect(await code(app.feed.setCommentHidden(leyla, "post_1", "cmt_reply_1", true))).toBe("COMMENT_NOT_FOUND");
+    expect(await code(app.report(ayse, "moda", { targetType: "comment", targetId: "cmt_reply_1", reason: "rude" }))).toBe("NOT_FOUND");
+    expect(await code(app.deleteComment(ayse, "moda", "post_1", "cmt_reply_1"))).toBe("COMMENT_NOT_FOUND");
+    expect((await app.feed.view(leyla)).reports.map((r) => r.targetId)).not.toContain("cmt_reply_1");
+  });
+});

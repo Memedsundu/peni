@@ -78,6 +78,56 @@ describe("members' events (plan piece 15, D4)", () => {
   });
 });
 
+describe("events that are over", () => {
+  it("lets nobody back out of an event that started more than three hours ago", async () => {
+    // The demo's photo evening was six days ago; Ayşe went.
+    expect((await feed()).find((p) => p.id === "post_event_past")).toMatchObject({ eventOver: true, rsvpedByMe: true });
+    expect(await code(app.rsvp(people.ayse!, "moda", "post_event_past"))).toBe("EVENT_OVER");
+    expect(await code(app.rsvp(people.selin!, "moda", "post_event_past"))).toBe("EVENT_OVER");
+    expect(await code(app.rsvp(people.emre!, "moda", "post_event_past"))).toBe("EVENT_OVER");
+    expect((await feed()).find((p) => p.id === "post_event_past")!.rsvpCount).toBe(9);
+  });
+
+  it("still takes people while it's on, and leaves it to the café once it's over", async () => {
+    const { postId } = await app.openEvent(people.zeynep!, "moda", saturday);
+    const startsAt = new Date(saturday.startsAt).getTime();
+    now = new Date(startsAt + 3 * 3_600_000 - 60_000);
+    expect((await feed()).find((p) => p.id === postId)!.eventOver).toBe(false);
+    expect(await code(app.rsvp(people.ayse!, "moda", postId))).toBe("ok");
+
+    now = new Date(startsAt + 3 * 3_600_000 + 60_000);
+    expect((await feed()).find((p) => p.id === postId)!.eventOver).toBe(true);
+    expect(await code(app.rsvp(people.ayse!, "moda", postId))).toBe("EVENT_OVER");
+    expect(await code(app.rsvp(people.can!, "moda", postId))).toBe("EVENT_OVER");
+    expect(await code(app.updateEvent(people.zeynep!, "moda", postId, { title: "Geçen haftaki tavla" }))).toBe("EVENT_OVER");
+    expect(await code(app.cancelEvent(people.zeynep!, "moda", postId))).toBe("EVENT_OVER");
+    expect((await feed()).find((p) => p.id === postId)).toMatchObject({ title: saturday.title, rsvpCount: 2 });
+    // The café can still take it down.
+    expect((await app.feed.remove(leyla, postId)).posts.map((p) => p.id)).not.toContain(postId);
+  });
+
+  it("stops keeping an over event on top of the customers' feed, while the café still sees it pinned", async () => {
+    const before = (await feed()).find((p) => p.id === "post_event_1")!;
+    expect(before).toMatchObject({ pinned: true, eventOver: false });
+    now = new Date(new Date(before.eventStartsAt!).getTime() + 4 * 3_600_000);
+
+    const posts = await feed();
+    const over = posts.find((p) => p.id === "post_event_1")!;
+    expect(over).toMatchObject({ pinned: false, eventOver: true });
+    // It sits by its date among the unpinned posts.
+    const byDate = [...posts].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.publishedAt.localeCompare(a.publishedAt));
+    expect(posts.map((p) => p.id)).toEqual(byDate.map((p) => p.id));
+    expect(posts.findIndex((p) => p.id === "post_event_1")).toBeGreaterThan(posts.findIndex((p) => p.id === "post_question_1"));
+    expect(posts.find((p) => p.id === "post_1")!.eventOver).toBe(false);
+
+    const staffView = await app.feed.view(leyla);
+    expect(staffView.posts.find((p) => p.id === "post_event_1")).toMatchObject({ pinned: true, eventOver: true });
+    // So the café can unpin it.
+    const unpinned = await app.feed.update(leyla, "post_event_1", { pinned: false });
+    expect(unpinned.posts.find((p) => p.id === "post_event_1")!.pinned).toBe(false);
+  });
+});
+
 describe("reports and moderation (plan piece 15)", () => {
   it("takes reports on members' comments and events, once each, and never on your own or the café's", async () => {
     const { postId } = await app.openEvent(people.zeynep!, "moda", saturday);

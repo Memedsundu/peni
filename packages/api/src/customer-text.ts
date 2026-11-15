@@ -203,6 +203,13 @@ const TEXT = {
   goingOfN: { tr: "{n}/{max} kişi katılıyor", en: "{n} of {max} going" },
   photoN: { tr: "Fotoğraf {n}", en: "Photo {n}" },
   close: { tr: "Kapat", en: "Close" },
+  feed: { tr: "Akış", en: "Feed" },
+  earlierComments: { tr: "Önceki {n} yorumu göster", en: "Show {n} earlier comments" },
+  options: { tr: "Seçenekler", en: "Options" },
+  yourComment: { tr: "Yorumun", en: "Your comment" },
+  eventOver: { tr: "Geçti", en: "Over" },
+  wentN: { tr: "{n} kişi katıldı", en: "{n} went" },
+  eventFull: { tr: "Doldu", en: "Full" },
 
   // Members' events and reports (piece 15)
   openEvent: { tr: "Etkinlik aç", en: "Open an event" },

@@ -252,6 +252,7 @@ function Post({
       <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
         {post.pinned && <Chip filled>{t("pinnedPost")}</Chip>}
         {label && <Chip>{label}</Chip>}
+        {post.kind === "event" && post.eventOver && <Chip>{t("eventOver")}</Chip>}
         {post.host?.mine && (
           <Txt size={14} muted>
             {t("hostedByYou")}
@@ -271,7 +272,11 @@ function Post({
           {post.title}
         </Txt>
       ) : null}
-      {post.kind === "event" && post.eventStartsAt ? <Txt size={18}>{when(post.eventStartsAt, lang, true)}</Txt> : null}
+      {post.kind === "event" && post.eventStartsAt ? (
+        <Txt size={18} muted={post.eventOver}>
+          {when(post.eventStartsAt, lang, true)}
+        </Txt>
+      ) : null}
 
       <Photos urls={post.imageUrls} />
       {post.body ? <Txt style={{ lineHeight: 26 }}>{post.body}</Txt> : null}
@@ -298,8 +303,9 @@ function Post({
             {post.reactionCount}
           </Txt>
         </Pressable>
-        {post.kind === "event" && post.host?.mine && <Chip filled big>{`${t("goingYes")} ✓`}</Chip>}
-        {post.kind === "event" && !post.host?.mine && (
+        {/* An event that's over can't be joined or left any more. */}
+        {post.kind === "event" && !post.eventOver && post.host?.mine && <Chip filled big>{`${t("goingYes")} ✓`}</Chip>}
+        {post.kind === "event" && !post.eventOver && !post.host?.mine && (
           <Btn kind={post.rsvpedByMe ? "cafe" : "quiet"} size="sm" disabled={busy || paused} onPress={() => (member ? void run(() => api.cafes.rsvp(slug, post.id)) : onNeedMember())}>
             {post.rsvpedByMe ? `${t("goingYes")} ✓` : t("join")}
           </Btn>
@@ -308,14 +314,16 @@ function Post({
           <Txt size={14} muted>
             {post.kind !== "event"
               ? fill(t("commentsN"), { n: post.commentCount })
-              : post.eventCapacity
+              : post.eventOver
+                ? fill(t("wentN"), { n: post.rsvpCount })
+                : post.eventCapacity
                 ? fill(t("goingOfN"), { n: post.rsvpCount, max: post.eventCapacity })
                 : fill(t("goingN"), { n: post.rsvpCount })}
           </Txt>
         </View>
       </View>
 
-      {post.kind === "event" && (post.rsvpedByMe || post.host?.mine) && (
+      {post.kind === "event" && !post.eventOver && (post.rsvpedByMe || post.host?.mine) && (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {post.host?.mine && (
             <>
@@ -349,18 +357,31 @@ function Post({
       {post.comments.length > 0 && (
         <View style={{ gap: 10, borderLeftWidth: 2, borderColor: c.line, paddingLeft: 16 }}>
           {post.comments.map((cm) => (
-            <View key={cm.id} style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
-              <View style={{ flex: 1 }}>
-                <Txt>
-                  <Txt weight="semibold">{cm.authorName}</Txt> {cm.body}
-                </Txt>
+            <View key={cm.id} style={{ gap: 8 }}>
+              <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+                <View style={{ flex: 1 }}>
+                  <Txt>
+                    <Txt weight="semibold">{cm.authorName}</Txt> {cm.body}
+                  </Txt>
+                </View>
+                {cm.mine && (
+                  <Btn kind="bare" size="sm" disabled={busy} onPress={() => void run(() => api.cafes.deleteComment(slug, post.id, cm.id))} style={{ minHeight: 28, paddingHorizontal: 4 }}>
+                    {t("deleteComment")}
+                  </Btn>
+                )}
+                {!cm.mine && canWrite && <ReportButton done={cm.reportedByMe} onPress={() => onReport({ targetType: "comment", targetId: cm.id })} />}
               </View>
-              {cm.mine && (
-                <Btn kind="bare" size="sm" disabled={busy} onPress={() => void run(() => api.cafes.deleteComment(slug, post.id, cm.id))} style={{ minHeight: 28, paddingHorizontal: 4 }}>
-                  {t("deleteComment")}
-                </Btn>
-              )}
-              {!cm.mine && canWrite && <ReportButton done={cm.reportedByMe} onPress={() => onReport({ targetType: "comment", targetId: cm.id })} />}
+              {/* The café's answer sits under the comment it answers. */}
+              {cm.replies.map((r) => (
+                <View key={r.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, marginLeft: 12 }}>
+                  <Initial name={cafeName} cafe size={22} />
+                  <View style={{ flex: 1 }}>
+                    <Txt>
+                      <Txt weight="semibold">{cafeName}</Txt> {r.body}
+                    </Txt>
+                  </View>
+                </View>
+              ))}
             </View>
           ))}
         </View>
