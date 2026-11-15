@@ -55,9 +55,8 @@ function WatchPage({ cafe, t, lang, signedOut }: PanelProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("wTitle")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("wHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("wHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {save.error && <Notice tone="red">{save.error}</Notice>}

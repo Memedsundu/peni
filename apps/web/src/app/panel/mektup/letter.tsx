@@ -68,9 +68,8 @@ function LettersPage({ cafe, t, lang, signedOut, initial }: PanelProps & { initi
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("ltTitle")}</h1>
-        <p className="leading-normal text-muted">{t("ltHelp")}</p>
+        <p className="text-sm leading-normal text-muted">{t("ltHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && data.state !== "ready" && !week && (

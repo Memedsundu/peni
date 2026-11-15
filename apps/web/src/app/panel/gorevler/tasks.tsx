@@ -82,9 +82,8 @@ function TasksPage({ cafe, t, lang, signedOut, initialDay }: PanelProps & { init
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("tasks")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("tasksHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("tasksHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && (

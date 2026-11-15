@@ -85,7 +85,7 @@ export function AssistantProvider({
 }
 
 /** The header's way in: a "Sor" box on wide screens, a button on a phone. */
-export function AskButton({ t }: { t: T }) {
+export function AskButton({ t, full = false }: { t: T; /** As wide as its place, with the long label: the side menu's. */ full?: boolean }) {
   const assistant = useAssistant();
   if (!assistant) return null;
   return (
@@ -93,11 +93,17 @@ export function AskButton({ t }: { t: T }) {
       type="button"
       onClick={() => assistant.open()}
       aria-label={t("asOpen")}
-      className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line bg-paper px-4 text-sm text-muted hover:border-ink hover:text-ink"
+      className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line bg-paper px-4 text-sm text-muted hover:border-ink hover:text-ink ${full ? "w-full" : ""}`}
     >
       <Spark />
-      <span className="font-semibold text-ink sm:hidden">{t("asAsk")}</span>
-      <span className="hidden sm:inline">{t("asOpen")}…</span>
+      {full ? (
+        <span>{t("asOpen")}…</span>
+      ) : (
+        <>
+          <span className="font-semibold text-ink sm:hidden">{t("asAsk")}</span>
+          <span className="hidden sm:inline">{t("asOpen")}…</span>
+        </>
+      )}
     </button>
   );
 }

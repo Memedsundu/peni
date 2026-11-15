@@ -40,9 +40,8 @@ function Feed({ cafe, t, lang, signedOut }: PanelProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("community")}</h1>
-        <p className="leading-normal text-muted">
+        <p className="text-sm leading-normal text-muted">
           {t("communityHelp")}{" "}
           <a href={`/kafe/${encodeURIComponent(cafe.slug)}`} className="text-ink underline underline-offset-4">
             {t("seePage")}

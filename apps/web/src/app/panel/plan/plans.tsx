@@ -30,9 +30,8 @@ function PlansPage({ cafe, t, lang, contactEmail }: PanelProps & { contactEmail:
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("planTitle")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("planHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("planHelp")}</p>
       </section>
 
       <section className="flex flex-col gap-1 rounded-3xl bg-panel p-5">

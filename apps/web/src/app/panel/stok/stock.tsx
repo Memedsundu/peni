@@ -6,9 +6,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice, Sheet } from "../../kasa/ui";
 import { bigInput, bigUnit, formatChange, formatQty, parseBig, parseTL, tlInput } from "../amounts";
-import { Field, LevelPill, Segmented, Stat, useSave } from "../controls";
+import { Chips, Field, LevelPill, nameHas, SearchField, Segmented, Stat, useSave } from "../controls";
 import { field, has, PanelShell, when, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T, type TextKey } from "../text";
+
+/** "Son hareketler" opens with this many; the rest are a tap away. */
+const MOVES_SHOWN = 8;
 
 type Open = { kind: "add" } | { kind: "count" } | { kind: "waste"; itemId: string | null } | { kind: "item"; itemId: string } | null;
 
@@ -44,6 +47,9 @@ function StockPage({ cafe, t, lang, signedOut }: PanelProps) {
   const [data, setData] = useState<StockDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<Open>(null);
+  const [query, setQuery] = useState("");
+  const [show, setShow] = useState<"all" | "out" | "low">("all");
+  const [allMoves, setAllMoves] = useState(false);
 
   useEffect(() => {
     api.staff.stock.get(cafe.slug).then(setData, (e: unknown) => {
@@ -59,13 +65,17 @@ function StockPage({ cafe, t, lang, signedOut }: PanelProps) {
   };
   const out = data?.items.filter((i) => i.level === "out").length ?? 0;
   const low = data?.items.filter((i) => i.level === "low").length ?? 0;
+  // Search and the Biten / Azalan chips narrow the list together. A chip whose count has
+  // dropped to 0 (after a count, say) quietly goes back to all.
+  const level = (show === "out" && out > 0) || (show === "low" && low > 0) ? show : "all";
+  const shown = (data?.items ?? []).filter((i) => (level === "all" || i.level === level) && nameHas(i.name, query));
+  const moves = data ? (allMoves ? data.moves : data.moves.slice(0, MOVES_SHOWN)) : [];
 
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("stock")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("stockHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("stockHelp")}</p>
         {has(cafe, "bills.add") && (
           <p className="text-sm text-muted">
             {t("deliveryCame")}{" "}
@@ -105,25 +115,49 @@ function StockPage({ cafe, t, lang, signedOut }: PanelProps) {
               <p className="leading-normal text-muted">{t("noStockHelp")}</p>
             </div>
           ) : (
-            <ul className="flex flex-col divide-y divide-line-soft border-y border-line-soft">
-              {data.items.map((i) => (
-                <li key={i.id}>
-                  <ItemRow t={t} lang={lang} item={i} onOpen={() => setOpen({ kind: "item", itemId: i.id })} />
-                </li>
-              ))}
-            </ul>
+            <section className="flex flex-col gap-3">
+              {data.items.length > 8 && <SearchField label={t("stockSearch")} value={query} onChange={setQuery} />}
+              {out + low > 0 && (
+                <Chips
+                  label={t("stockShow")}
+                  value={level}
+                  onChange={setShow}
+                  options={[
+                    { value: "all" as const, label: t("allChip"), count: data.items.length },
+                    ...(out > 0 ? [{ value: "out" as const, label: t("statOut"), count: out }] : []),
+                    ...(low > 0 ? [{ value: "low" as const, label: t("statLow"), count: low }] : []),
+                  ]}
+                />
+              )}
+              {shown.length === 0 ? (
+                <p className="text-muted">{t("stockNoMatch")}</p>
+              ) : (
+                <ul className="flex flex-col divide-y divide-line-soft border-y border-line-soft">
+                  {shown.map((i) => (
+                    <li key={i.id}>
+                      <ItemRow t={t} lang={lang} item={i} onOpen={() => setOpen({ kind: "item", itemId: i.id })} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           )}
 
           {data.moves.length > 0 && (
             <section className="flex flex-col gap-3">
               <h2 className="font-serif text-3xl">{t("recentMoves")}</h2>
               <ul className="flex flex-col divide-y divide-line-soft">
-                {data.moves.map((m) => (
+                {moves.map((m) => (
                   <li key={m.id}>
                     <MoveRow t={t} lang={lang} move={m} showItem />
                   </li>
                 ))}
               </ul>
+              {moves.length < data.moves.length && (
+                <Button kind="quiet" size="sm" className="self-start" onClick={() => setAllMoves(true)}>
+                  {fill(t("showAllN"), { n: data.moves.length })}
+                </Button>
+              )}
             </section>
           )}
 

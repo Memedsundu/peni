@@ -51,9 +51,8 @@ function RegularsPage({ cafe, t, lang, signedOut, initialMonth }: PanelProps & {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("navRegulars")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("ciHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("ciHelp")}</p>
       </section>
       <label className="flex flex-col gap-1 text-sm text-muted sm:w-72">
         {t("ciMonth")}

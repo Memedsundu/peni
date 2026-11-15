@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../kasa/api";
 import { Button, Notice, Photo, Sheet } from "../../kasa/ui";
 import { formatQty, parseSmall, parseTL, smallInput, smallUnit, tlInput } from "../amounts";
-import { Field, Segmented } from "../controls";
+import { Chips, Field, nameHas, SearchField, Segmented } from "../controls";
 import { field, has, PanelShell, type PanelProps } from "../shell";
 import { errorText, fill, type Lang, type T } from "../text";
 
@@ -48,6 +48,8 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
   const [writing, setWriting] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
   const [failed, setFailed] = useState(0);
+  const [query, setQuery] = useState("");
+  const [chip, setChip] = useState<string | null>(null);
 
   const fail = (e: unknown) => {
     if (e instanceof PeniApiError && e.status === 401) signedOut();
@@ -115,6 +117,15 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
         available: p.available,
       }));
   const categories = [...new Set(products.map((p) => p.category))];
+  // A long menu opens on its first category; the chips switch it, typing searches them all.
+  // Chip values are "c:<category>" or "all", so a category named "all" can't clash.
+  const searching = query.trim() !== "";
+  const current: string =
+    chip !== null && (chip === "all" || categories.includes(chip.slice(2))) ? chip : categories.length > 0 ? `c:${categories[0]}` : "all";
+  const useChips = categories.length > 1;
+  const shownCategories = searching || !useChips || current === "all" ? categories : categories.filter((c) => `c:${c}` === current);
+  const shownProducts = products.filter((p) => nameHas(p.name, query));
+  const withPhotos = products.some((p) => p.imageUrl);
   const tracked = recipes?.recipes.filter((r) => r.mode !== "none").length ?? 0;
   const draftOf = new Map((drafts?.drafts ?? []).map((d) => [d.productId, d]));
   const missing = new Set(drafts?.missing ?? []);
@@ -125,9 +136,8 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("menu")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{canRecipes ? t("menuHelp") : t("menuHelpNoCost")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{canRecipes ? t("menuHelp") : t("menuHelpNoCost")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {ready && (
@@ -150,17 +160,36 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
           {drafts && (drafts.missing.length > 0 || drafts.drafts.length > 0) && (
             <AssistantBar t={t} drafts={drafts} bulk={bulk} failed={failed} busy={bulk !== null || writing.size > 0} onWriteAll={() => void writeAll()} />
           )}
-          {categories.map((c) => (
-            <section key={c} className="flex flex-col gap-1">
-              <h2 className="font-serif text-3xl">{c}</h2>
-              <ul className="flex flex-col divide-y divide-line-soft border-y border-line-soft">
-                {products
-                  .filter((p) => p.category === c)
-                  .map((p) => (
+          {products.length > 8 && <SearchField label={t("menuSearch")} value={query} onChange={setQuery} />}
+          {useChips && !searching && (
+            <Chips
+              label={t("menuCategories")}
+              value={current}
+              onChange={setChip}
+              options={[
+                ...categories.map((c) => ({
+                  value: `c:${c}`,
+                  label: c,
+                  count: products.filter((p) => p.category === c).length,
+                })),
+                { value: "all", label: t("allChip"), count: products.length },
+              ]}
+            />
+          )}
+          {searching && shownProducts.length === 0 && <p className="text-muted">{t("menuNoMatch")}</p>}
+          {shownCategories.map((c) => {
+            const rows = shownProducts.filter((p) => p.category === c);
+            if (rows.length === 0) return null;
+            return (
+              <section key={c} className="flex flex-col gap-1">
+                {/* One category picked: its chip already names it. */}
+                {(searching || !useChips || current === "all") && <h2 className="font-serif text-3xl">{c}</h2>}
+                <ul className="flex flex-col divide-y divide-line-soft border-y border-line-soft">
+                  {rows.map((p) => (
                     <li key={p.productId}>
-                      <ProductRow t={t} product={p} draft={draftOf.get(p.productId)} onOpen={() => setOpen(p.productId)} />
+                      <ProductRow t={t} product={p} photo={withPhotos} draft={draftOf.get(p.productId)} onOpen={() => setOpen(p.productId)} />
                       {missing.has(p.productId) && drafts?.ai !== "off" && (
-                        <div className="-mt-2 pb-3 pl-18">
+                        <div className={`-mt-2 pb-3 ${withPhotos ? "pl-18" : ""}`}>
                           <Button kind="quiet" size="sm" disabled={writing.has(p.productId) || bulk !== null} onClick={() => void writeOne(p.productId)}>
                             {t(writing.has(p.productId) ? "rdWritingOne" : "rdWriteOne")}
                           </Button>
@@ -168,9 +197,10 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
                       )}
                     </li>
                   ))}
-              </ul>
-            </section>
-          ))}
+                </ul>
+              </section>
+            );
+          })}
         </>
       )}
       {open === "new" && menu && (
@@ -181,6 +211,12 @@ function MenuPage({ cafe, t, lang, signedOut }: PanelProps) {
           menu={menu}
           onClose={() => setOpen(null)}
           onDone={(next) => {
+            // Show the new product: open its category's chip and clear any search.
+            const added = next.products.find((p) => !menu.products.some((o) => o.productId === p.productId));
+            if (added) {
+              setChip(`c:${added.category}`);
+              setQuery("");
+            }
             setMenu(next);
             setOpen(null);
             void reload();
@@ -232,10 +268,12 @@ function margin(price: number, cost: number): number {
   return price > 0 ? Math.round(((price - cost) / price) * 100) : 0;
 }
 
-function ProductRow({ t, product: p, draft, onOpen }: { t: T; product: Product; draft?: RecipeDraftDTO; onOpen: () => void }) {
+function ProductRow({ t, product: p, photo, draft, onOpen }: { t: T; product: Product; photo: boolean; draft?: RecipeDraftDTO; onOpen: () => void }) {
+  // No line for a product that doesn't use stock: most of a menu is like that, and the
+  // count over the list ("93 üründen 13 tanesi stoktan düşüyor") already says so.
   let costLine: string | null = null;
   if (draft) costLine = draft.costKurus !== null ? fill(t("rdReadyCost"), { cost: formatTL(draft.costKurus) }) : t("rdReady");
-  else if (p.mode === "none") costLine = t("modeNoneShort");
+  else if (p.mode === "none") costLine = null;
   else if (p.mode && p.costKurus === null) costLine = t("costUnknown");
   else if (p.mode && p.costKurus !== null && p.costKurus !== undefined)
     costLine = fill(t("costAndMargin"), {
@@ -244,7 +282,7 @@ function ProductRow({ t, product: p, draft, onOpen }: { t: T; product: Product; 
     });
   return (
     <button type="button" onClick={onOpen} className="flex min-h-16 w-full cursor-pointer items-center gap-4 py-3 text-left">
-      <Photo src={p.imageUrl} alt="" label="" className="size-14 shrink-0 rounded-2xl" />
+      {photo && <Photo src={p.imageUrl} alt="" label="" className="size-14 shrink-0 rounded-2xl" />}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex flex-wrap items-center gap-2 text-lg">
           {p.name}
