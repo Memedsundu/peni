@@ -83,9 +83,8 @@ function DraftsPage({ cafe, t, lang, signedOut, initialId }: PanelProps & { init
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("drTitle")}</h1>
-        <p className="leading-normal text-muted">{t("drHelp")}</p>
+        <p className="text-sm leading-normal text-muted">{t("drHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && draft ? (

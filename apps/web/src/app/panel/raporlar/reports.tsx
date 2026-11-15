@@ -126,9 +126,8 @@ function ReportsPage({ cafe, t, lang, signedOut, initial }: PanelProps & { initi
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("rpTitle")}</h1>
-        <p className="leading-normal text-muted">{t("rpHelp")}</p>
+        <p className="text-sm leading-normal text-muted">{t("rpHelp")}</p>
       </section>
 
       {data && (

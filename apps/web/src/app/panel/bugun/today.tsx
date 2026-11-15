@@ -22,9 +22,11 @@ function longDay(day: string, lang: Lang): string {
   });
 }
 
-/** A panel path with the café on it. */
+/** A panel path with the café on it; a `#place` on the page stays last, where the browser looks for it. */
 export function withCafe(href: string, slug: string): string {
-  return `${href}${href.includes("?") ? "&" : "?"}kafe=${encodeURIComponent(slug)}`;
+  const at = href.indexOf("#");
+  const path = at < 0 ? href : href.slice(0, at);
+  return `${path}${path.includes("?") ? "&" : "?"}kafe=${encodeURIComponent(slug)}${at < 0 ? "" : href.slice(at)}`;
 }
 
 /**
@@ -43,6 +45,7 @@ export function Today({ cafeSlug }: { cafeSlug: string | null }) {
 function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
   const [data, setData] = useState<TodayDTO | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [allAlerts, setAllAlerts] = useState(false);
   const save = useSave<TodayDTO>(lang, setData);
 
   useEffect(() => {
@@ -61,7 +64,6 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("todayTitle")}</h1>
         {data && <p className="text-muted capitalize">{longDay(data.today, lang)}</p>}
       </section>
@@ -101,16 +103,21 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
               {data.alerts.length === 0 ? (
                 <p className="rounded-3xl bg-panel px-5 py-6 leading-normal">{data.email.eligible ? t("todayAllGood") : t("todayAllGoodBarista")}</p>
               ) : (
-                <ul className="flex flex-col gap-3">
-                  {data.alerts.map((a) => (
-                    <AlertCard key={`${a.type}:${a.month ?? ""}`} alert={a} today={data.today} slug={cafe.slug} t={t} lang={lang} />
-                  ))}
-                </ul>
+                <>
+                  <ul className="flex flex-col divide-y divide-line-soft overflow-hidden rounded-3xl border border-line">
+                    {shownAlerts(data.alerts, allAlerts).map((a) => (
+                      <AlertRow key={`${a.type}:${a.month ?? ""}`} alert={a} today={data.today} slug={cafe.slug} t={t} lang={lang} />
+                    ))}
+                  </ul>
+                  {data.alerts.length > shownAlerts(data.alerts, false).length && (
+                    <Button kind="quiet" size="sm" className="self-start" aria-expanded={allAlerts} onClick={() => setAllAlerts((all) => !all)}>
+                      {allAlerts ? t("todayFewerAlerts") : fill(t("todayMoreAlerts"), { n: data.alerts.length - shownAlerts(data.alerts, false).length })}
+                    </Button>
+                  )}
+                </>
               )}
             </section>
           )}
-
-          {data.setup && <SetupList setup={data.setup} slug={cafe.slug} t={t} lang={lang} />}
 
           {data.tasks && (
             <section className="flex flex-col gap-3" aria-labelledby="tasks">
@@ -148,6 +155,8 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
             </section>
           )}
 
+          {data.setup && <SetupList setup={data.setup} slug={cafe.slug} t={t} lang={lang} />}
+
           {data.email.eligible && (
             <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-col gap-1">
@@ -168,19 +177,25 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
   );
 }
 
-function AlertCard({ alert: a, today, slug, t, lang }: { alert: AlertDTO; today: string; slug: string; t: T; lang: Lang }) {
+/** How many alerts Bugün opens with: the urgent ones come first, so these are the ones that matter today. */
+const ALERTS_SHOWN = 4;
+
+/** The first few alerts, or all of them. One left over isn't worth a button. */
+function shownAlerts(alerts: AlertDTO[], all: boolean): AlertDTO[] {
+  return all || alerts.length <= ALERTS_SHOWN + 1 ? alerts : alerts.slice(0, ALERTS_SHOWN);
+}
+
+function AlertRow({ alert: a, today, slug, t, lang }: { alert: AlertDTO; today: string; slug: string; t: T; lang: Lang }) {
   const words = alertWords(a, lang, formatTL, today);
   const critical = a.level === "critical";
   return (
-    <li
-      className={`flex flex-col gap-3 rounded-3xl border p-5 sm:flex-row sm:items-center sm:justify-between ${critical ? "border-red/30 bg-red-soft" : "border-line bg-paper"}`}
-    >
-      <div className="flex flex-col gap-1">
+    <li className={`flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 ${critical ? "bg-red-soft" : "bg-paper"}`}>
+      <div className="flex min-w-0 flex-col gap-0.5">
         <p className="flex flex-wrap items-center gap-2">
           {critical && <span className="rounded-full bg-red px-2.5 py-0.5 text-xs font-semibold text-paper">{t("urgent")}</span>}
-          <span className="text-lg font-semibold">{words.title}</span>
+          <span className="font-semibold">{words.title}</span>
         </p>
-        {words.detail && <p className="text-sm leading-normal text-muted">{words.detail}</p>}
+        {words.detail && <p className="line-clamp-2 text-sm leading-normal text-muted">{words.detail}</p>}
       </div>
       <a
         href={withCafe(a.href, slug)}
@@ -194,7 +209,8 @@ function AlertCard({ alert: a, today, slug, t, lang }: { alert: AlertDTO; today:
 
 /**
  * The setup checklist: what keeps the café's stock from being complete, each with where to
- * fix it. It's only here while something is left; each row goes once it's done.
+ * fix it. It's only here while something is left; each row goes once it's done. Folded into
+ * one line, because it's set-up work, not the day's.
  */
 function SetupList({ setup, slug, t, lang }: { setup: SetupDTO; slug: string; t: T; lang: Lang }) {
   const names = (xs: string[], count: number) => (count > xs.length ? fill(t("setupMore"), { names: xs.join(", "), n: count - xs.length }) : xs.join(", "));
@@ -246,14 +262,18 @@ function SetupList({ setup, slug, t, lang }: { setup: SetupDTO; slug: string; t:
       links: [{ href: "/panel/stok", label: t("setupCount") }],
     });
   return (
-    <section className="flex flex-col gap-3" aria-labelledby="setup">
-      <div className="flex flex-col gap-1">
-        <h2 id="setup" className="text-sm text-muted">
-          {t("setupTitle")}
-        </h2>
-        <p className="text-sm leading-normal text-muted">{t("setupHelp")}</p>
-      </div>
-      <ul className="flex flex-col rounded-3xl border border-line">
+    <details className="group rounded-3xl border border-line">
+      <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 [&::-webkit-details-marker]:hidden">
+        <span className="flex flex-wrap items-baseline gap-x-3">
+          <span className="font-semibold">{t("setupTitle")}</span>
+          <span className="text-sm text-muted">{fill(t("setupSteps"), { n: rows.length })}</span>
+        </span>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0 text-muted transition-transform group-open:rotate-180">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </summary>
+      <p className="px-5 pb-3 text-sm leading-normal text-muted">{t("setupHelp")}</p>
+      <ul className="flex flex-col border-t border-line-soft">
         {rows.map((r) => (
           <li key={r.key} className="flex flex-col gap-2 border-b border-line-soft p-5 last:border-b-0">
             <p className="font-semibold">{r.title}</p>
@@ -273,7 +293,7 @@ function SetupList({ setup, slug, t, lang }: { setup: SetupDTO; slug: string; t:
           </li>
         ))}
       </ul>
-    </section>
+    </details>
   );
 }
 

@@ -40,9 +40,8 @@ function CounterPage(p: PanelProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("navPenny")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("pcHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("pcHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && !data.on && <Notice>{t("pcOff")}</Notice>}

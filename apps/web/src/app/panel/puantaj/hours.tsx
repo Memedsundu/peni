@@ -78,9 +78,8 @@ function HoursPage({ cafe, t, lang, signedOut, initialMonth }: PanelProps & { in
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("pay")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t(data?.own ? "payOwnHelp" : "payHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t(data?.own ? "payOwnHelp" : "payHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {data && (

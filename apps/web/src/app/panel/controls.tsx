@@ -40,6 +40,63 @@ export function Segmented<V extends string>({
   );
 }
 
+/**
+ * Chips to narrow a long list: "sıcak içecekler 24", "Tümü 93". Same look as Segmented, but
+ * with no visible label over them (the group is named for screen readers) and a count on each.
+ */
+export function Chips<V extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: V;
+  options: { value: V; label: string; count: number }[];
+  onChange: (v: V) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap gap-2">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          aria-pressed={o.value === value}
+          onClick={() => onChange(o.value)}
+          className={`flex min-h-11 max-w-full cursor-pointer items-center gap-1.5 rounded-full border px-4 text-sm font-semibold ${
+            o.value === value ? "border-ink bg-ink text-paper" : "border-line bg-paper text-ink"
+          }`}
+        >
+          <span className="truncate">{o.label}</span>
+          <span className="font-normal tabular opacity-70">{o.count}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A search box over a list; the placeholder doubles as its name. */
+export function SearchField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <input
+      type="search"
+      className={`${field} min-h-12`}
+      placeholder={label}
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      autoComplete="off"
+      spellCheck={false}
+    />
+  );
+}
+
+/** Whether a name holds what was typed, ignoring case the Turkish way (İ/i, I/ı). */
+export function nameHas(name: string, typed: string): boolean {
+  const q = typed.trim().toLocaleLowerCase("tr");
+  return !q || name.toLocaleLowerCase("tr").includes(q);
+}
+
 /** A labelled text box with an optional unit after it ("kg", "₺") and a hint under it. */
 export function Field({
   label,

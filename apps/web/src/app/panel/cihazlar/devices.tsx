@@ -56,9 +56,8 @@ function DevicesPage(p: PanelProps) {
   return (
     <>
       <section className="flex flex-col gap-2">
-        <p className="text-sm text-muted">{cafe.name}</p>
         <h1 className="font-serif text-5xl leading-none">{t("navDevices")}</h1>
-        <p className="max-w-2xl leading-normal text-muted">{t("dvHelp")}</p>
+        <p className="max-w-2xl text-sm leading-normal text-muted">{t("dvHelp")}</p>
       </section>
       {error && <Notice tone="red">{error}</Notice>}
       {page && page.devices.length === 0 && (
