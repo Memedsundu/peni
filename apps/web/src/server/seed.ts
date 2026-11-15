@@ -394,6 +394,16 @@ export async function seed(app: PeniApp, opts: { sales?: boolean; drafts?: boole
       ],
     },
   );
+  // The café answers Can under its own post, so staging shows replies.
+  await app.community.addComment("post_1", {
+    id: "cmt_reply_1",
+    customerId: null,
+    body: "Evet, 250 gramlık paketler kasada.",
+    createdAt: on(1, 18, 40),
+    hiddenAt: null,
+    staffMemberId: staffAt[`${DEMO_STAFF.leyla.email}:moda`]!.id,
+    replyToId: "cmt_6",
+  });
   await post({
     id: "post_2",
     cafeId: "cafe_moda",

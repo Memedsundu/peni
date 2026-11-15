@@ -85,8 +85,8 @@ function TodayPage({ cafe, t, lang, signedOut }: PanelProps) {
               <span className="shrink-0 font-semibold underline underline-offset-4">{t("ltRead")}</span>
             </a>
           )}
-          {cafe.plan.now !== "isletme" ? (
-            // Without the back office there's nothing to warn about: the café page is the day's work.
+          {cafe.plan.now !== "isletme" && data.alerts.length === 0 ? (
+            // Without the back office the café page is the day's work; a report or a new comment still shows below.
             <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5 sm:flex-row sm:items-center sm:justify-between">
               <p className="leading-normal">{t("todayCommunity")}</p>
               {(has(cafe, "posts.write") || has(cafe, "posts.moderate")) && (

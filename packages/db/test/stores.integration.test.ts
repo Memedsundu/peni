@@ -239,6 +239,47 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.community.listPosts(cafeId)).map((p) => p.id)).not.toContain(postId);
   });
 
+  it("keeps the café's replies under a comment, hidden and deleted with it, and counts a member's comments", async () => {
+    const postId = `post_reply_${run}`;
+    const other = `post_reply2_${run}`;
+    const base = { cafeId, kind: "post" as const, title: null, body: "Yeni kavurduk", publishedAt: at, pinned: false, eventStartsAt: null, eventCapacity: null };
+    await stores.community.savePost({ ...base, id: postId });
+    await stores.community.savePost({ ...base, id: other });
+    const ask = `cmt_ask_${run}`;
+    const reply = `cmt_rep_${run}`;
+    await stores.community.addComment(postId, { id: ask, customerId: ayse, body: "Çekirdek olarak da satıyor musunuz?", createdAt: at });
+    await stores.community.addComment(postId, {
+      id: reply, customerId: null, body: "Evet, kasada.", createdAt: new Date(at.getTime() + 60_000), hiddenAt: null, staffMemberId: `sm_${run}`, replyToId: ask,
+    });
+    await stores.community.addComment(other, { id: `cmt_x_${run}`, customerId: ayse, body: "Güzel", createdAt: new Date(at.getTime() + 120_000) });
+    expect((await stores.community.getPost(postId))!.comments.map((c) => [c.id, c.customerId, c.staffMemberId ?? null, c.replyToId ?? null])).toEqual([
+      [ask, ayse, null, null],
+      [reply, null, `sm_${run}`, ask],
+    ]);
+    expect(await stores.community.findComment(reply)).toEqual({ postId, comment: expect.objectContaining({ id: reply, replyToId: ask }) });
+    expect(await stores.community.findComment(`cmt_nope_${run}`)).toBeNull();
+
+    // Hidden ones count too; the café's replies are no one's.
+    await stores.community.setCommentHidden(other, `cmt_x_${run}`, at);
+    expect(await stores.community.countCommentsBy(cafeId, ayse, at)).toBeGreaterThanOrEqual(2);
+    expect(await stores.community.countCommentsBy(cafeId, ayse, new Date(at.getTime() + 60_000))).toBe(1);
+    expect(await stores.community.countCommentsBy(cafeId, ayse, new Date(at.getTime() + 180_000))).toBe(0);
+
+    await stores.community.setCommentHidden(postId, ask, at);
+    expect((await stores.community.getPost(postId))!.comments).toEqual([]);
+    expect((await stores.community.getPost(postId, { hiddenComments: true }))!.comments.map((c) => c.id)).toEqual([ask, reply]);
+    await stores.community.setCommentHidden(postId, ask, null);
+    await stores.community.deleteComment(postId, ask);
+    expect(await stores.community.findComment(reply)).toBeNull();
+  });
+
+  it("remembers when staff last looked at Topluluk", async () => {
+    expect(await stores.community.seenAt(cafeId)).toBeNull();
+    await stores.community.markSeen(cafeId, at);
+    await stores.community.markSeen(cafeId, new Date(at.getTime() + 60_000));
+    expect(await stores.community.seenAt(cafeId)).toEqual(new Date(at.getTime() + 60_000));
+  });
+
   it("keeps members' events, one report per member, and paused members", async () => {
     const event = {
       id: `post_m_${run}`, cafeId, kind: "event" as const, title: "Satranç", body: "", publishedAt: at, pinned: false,
@@ -1105,6 +1146,9 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     }]);
     const post = { id: `post_rm_${run}`, cafeId: gone, kind: "post" as const, title: null, body: "Merhaba", publishedAt: at, pinned: false, eventStartsAt: null, eventCapacity: null, authorId: `sm_only_${run}` };
     await stores.community.savePost(post);
+    await stores.community.addComment(post.id, { id: `cmt_rm_${run}`, customerId: ayse, body: "Merhaba", createdAt: at });
+    await stores.community.addComment(post.id, { id: `cmt_rm_r_${run}`, customerId: null, body: "Hoş geldin", createdAt: at, staffMemberId: `sm_only_${run}`, replyToId: `cmt_rm_${run}` });
+    await stores.community.markSeen(gone, at);
     await stores.reports.add({ id: `rep_rm_${run}`, cafeId: gone, targetType: "post", targetId: post.id, postId: post.id, reporterId: ayse, reason: "spam", note: null, status: "open", createdAt: at, resolvedAt: null, resolvedBy: null });
 
     const rowsOf = async (id: string) => {
@@ -1117,7 +1161,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       return counts;
     };
     expect(Object.keys(await rowsOf(gone)).sort()).toEqual(
-      ["Bill", "BillPayment", "CafeSettings", "CashMove", "CashSession", "CafePost", "ContentReport", "DebtCheck", "Loan", "Membership", "Order", "OrderCounter", "Payment", "StaffMember", "StockItem", "StockMove", "StockRecipe", "StockRecipeLine", "Supplier"].sort(),
+      ["Bill", "BillPayment", "CafeSettings", "CashMove", "CashSession", "CafePost", "CommunitySeen", "ContentReport", "DebtCheck", "Loan", "Membership", "Order", "OrderCounter", "Payment", "StaffMember", "StockItem", "StockMove", "StockRecipe", "StockRecipeLine", "Supplier"].sort(),
     );
     const otherBefore = await rowsOf(other);
 
@@ -1126,6 +1170,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.identity.getCafe(gone)).toBeNull();
     expect(await prisma.billLine.count({ where: { billId: `bil_rm_${run}` } })).toBe(0);
     expect(await prisma.orderLine.count({ where: { orderId: order.id } })).toBe(0);
+    expect(await prisma.postComment.count({ where: { postId: post.id } })).toBe(0);
     expect(await stores.staff.getAccount(only)).toBeNull();
     expect((await stores.staff.membershipsOf(both)).map((m) => m.cafeId)).toEqual([other]);
     expect(await rowsOf(other)).toEqual(otherBefore);

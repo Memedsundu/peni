@@ -105,6 +105,14 @@ const TEXT = {
   unhide: { tr: "Geri getir", en: "Bring back" },
   hidden: { tr: "Gizli", en: "Hidden" },
   hiddenHelp: { tr: "Gizli yorumları yalnız ekip görür.", en: "Only the team sees hidden comments." },
+  // The café answers a comment, in its own name; past events.
+  reply: { tr: "Yanıtla", en: "Reply" },
+  replyPlaceholder: { tr: "Kafe adına yanıt yaz", en: "Answer as the café" },
+  replySend: { tr: "Gönder", en: "Send" },
+  replyFromCafe: { tr: "Kafenin yanıtı", en: "The café's answer" },
+  replyRemove: { tr: "Yanıtı kaldır", en: "Remove the answer" },
+  eventOverTag: { tr: "Geçti", en: "Over" },
+  went: { tr: "{n} kişi katıldı", en: "{n} went" },
   by: { tr: "{name} paylaştı", en: "Posted by {name}" },
   photo: { tr: "Fotoğraf", en: "Photo" },
 

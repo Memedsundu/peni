@@ -157,9 +157,13 @@ describe("Bugün and its alerts (plan piece 22)", () => {
       ["cardDue", "critical", 1, 170_000],
       ["debtsOverdue", "critical", 1, 385_000],
       ["stockOut", "critical", 1, null],
+      // The demo's comment two neighbours reported, its comments of the last days and Zeynep's chess table.
+      ["reportsOpen", "critical", 1, null],
       ["payClose", "critical", 1, null],
       ["payLeft", "warning", 1, 500_000],
       ["hoursMissing", "warning", 8, null],
+      ["commentsNew", "warning", 7, null],
+      ["memberEvents", "warning", 1, null],
       ["draftsOpen", "warning", 1, null],
       ["stockLow", "warning", 3, null],
       ["tasksLate", "warning", 3, null],
@@ -211,8 +215,8 @@ describe("Bugün and its alerts (plan piece 22)", () => {
     ]);
     expect(sent.map((m) => m.to).sort()).toEqual([DEMO_STAFF.leyla.email, DEMO_STAFF.murat.email].sort());
     const mail = sent.find((m) => m.to === DEMO_STAFF.murat.email)!;
-    expect(mail.subject).toBe("Bugün 11 konu · Moda Kahvesi");
-    expect(mail.text).toContain("Günaydın Murat, bugün 11 konu var:");
+    expect(mail.subject).toBe("Bugün 14 konu · Moda Kahvesi");
+    expect(mail.text).toContain("Günaydın Murat, bugün 14 konu var:");
     expect(mail.text).toContain("• İş kartı ekstresi: ₺1.700 (Son ödeme günü 6 Ekim geçti.)");
     expect(mail.text).toContain("https://peni.test/panel/bugun?kafe=moda");
     expect(mail.html).toContain("Bugün'e git");

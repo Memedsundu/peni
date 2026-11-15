@@ -2,16 +2,17 @@
 
 import type { CafeDetailDTO, PostDTO, ReportInput } from "@peni/api";
 import { goods } from "@peni/brand/format";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../kasa/api";
 import { Button, Coin, Notice, Photo, Sheet } from "../kasa/ui";
 import { EmailSignIn, Shell, useLang, useSignedIn } from "../p/claim";
 import { errorText, fill, text, type Lang, type T } from "../p/text";
 
 /**
- * The café's page (DS25): its photo and name, the viewer's peni here, what's on the askı,
- * then the feed (plan piece 14). Anyone can read it; members like, comment, open events and
- * report what other members wrote (piece 15).
+ * The café's page (DS25): its name, the viewer's peni here, what's on the askı, then the feed
+ * (plan piece 14). Anyone can read it; members like, comment, open events and report what
+ * other members wrote (piece 15). The top is kept short, so the feed starts on the first
+ * screen of a phone.
  */
 export function CafePage({ slug }: { slug: string }) {
   const [lang, toggleLang] = useLang();
@@ -22,22 +23,46 @@ export function CafePage({ slug }: { slug: string }) {
   const [signingIn, setSigningIn] = useState(false);
   /** null: closed; "new": opening one; a post: editing it. */
   const [eventSheet, setEventSheet] = useState<"new" | PostDTO | null>(null);
-  const [reporting, setReporting] = useState<ReportTarget | null>(null);
+  const [reporting, setReporting] = useState<(ReportTarget & { already: boolean }) | null>(null);
+  /** Taps already on their way to the café, so a second tap doesn't undo the first. */
+  const sending = useRef(new Set<string>());
 
   const load = useCallback(() => api.cafes.get(slug).then(setCafe, (e: unknown) => setError(errorText(e, lang))), [slug, lang]);
   useEffect(() => {
     if (signedIn !== null) void load();
   }, [signedIn, load]);
 
-  /** Runs an action on the feed, then shows the café as it is now. */
-  const act = async (call: () => Promise<unknown>) => {
+  /** Runs an action on the feed, then shows the café as it is now. Answers whether it went through. */
+  const act = async (call: () => Promise<unknown>): Promise<boolean> => {
     setError(null);
+    let ok = true;
     try {
       await call();
     } catch (e) {
       setError(errorText(e, lang));
+      ok = false;
     }
     await load();
+    return ok;
+  };
+
+  /**
+   * A like or a "Katıl": shows it at once and tells the café after, so the tap never waits on
+   * the network. If the café says no, the post goes back to how it really is, with why.
+   */
+  const quick = async (key: string, postId: string, change: (p: PostDTO) => PostDTO, call: () => Promise<unknown>) => {
+    if (sending.current.has(key)) return;
+    sending.current.add(key);
+    setError(null);
+    setCafe((c) => (c ? { ...c, posts: c.posts.map((p) => (p.id === postId ? change(p) : p)) } : c));
+    try {
+      await call();
+    } catch (e) {
+      setError(errorText(e, lang));
+      await load();
+    } finally {
+      sending.current.delete(key);
+    }
   };
 
   if (!cafe) {
@@ -53,105 +78,118 @@ export function CafePage({ slug }: { slug: string }) {
   const askiItems = cafe.menu.filter((m) => m.askida && m.available);
   const waiting = goods(cafe.askida.balancePeni, askiItems);
   const ask = member ? null : signedIn ? "join" : "signIn";
+  const needMember = () => (signedIn ? void act(() => api.cafes.join(cafe.slug)) : setSigningIn(true));
+
+  const actions: PostActions = {
+    like: (p) =>
+      member
+        ? void quick(`like:${p.id}`, p.id, (x) => ({ ...x, reactedByMe: !x.reactedByMe, reactionCount: x.reactionCount + (x.reactedByMe ? -1 : 1) }), () => api.cafes.react(cafe.slug, p.id))
+        : needMember(),
+    rsvp: (p) =>
+      member
+        ? void quick(`rsvp:${p.id}`, p.id, (x) => ({ ...x, rsvpedByMe: !x.rsvpedByMe, rsvpCount: x.rsvpCount + (x.rsvpedByMe ? -1 : 1) }), () => api.cafes.rsvp(cafe.slug, p.id))
+        : needMember(),
+    comment: (p, body) => act(() => api.cafes.comment(cafe.slug, p.id, body)),
+    deleteComment: (p, commentId) =>
+      void quick(
+        `delete:${commentId}`,
+        p.id,
+        (x) => {
+          const gone = x.comments.find((c) => c.id === commentId);
+          return { ...x, comments: x.comments.filter((c) => c.id !== commentId), commentCount: x.commentCount - (gone ? 1 + gone.replies.length : 0) };
+        },
+        () => api.cafes.deleteComment(cafe.slug, p.id, commentId),
+      ),
+    cancelEvent: (p) => act(() => api.cafes.cancelEvent(cafe.slug, p.id)),
+    edit: setEventSheet,
+    report: (target, already) => setReporting({ ...target, already }),
+    needMember,
+  };
 
   return (
     <Shell lang={lang} onLang={toggleLang} hue={cafe.hue}>
       <section className="flex flex-col gap-4">
-        {cafe.coverImageUrl ? (
-          <Photo src={cafe.coverImageUrl} alt={cafe.name} label={t("photoN").replace("{n}", "")} className="aspect-[4/3] w-full rounded-3xl" />
-        ) : (
-          // No cover yet: the café's initial, as on its posts, rather than an empty grey box.
-          <span aria-hidden="true" className="flex aspect-[5/2] w-full items-center justify-center rounded-3xl bg-tile">
-            <Initial name={cafe.name} cafe className="size-20 text-4xl" />
-          </span>
-        )}
-        <div className="flex flex-col gap-1">
-          <h1 className="font-serif text-5xl leading-[1.05]">{cafe.name}</h1>
-          {(cafe.district || cafe.address) && <p className="text-muted">{[cafe.address, cafe.district].filter(Boolean).join(" · ")}</p>}
+        {cafe.coverImageUrl && <Photo src={cafe.coverImageUrl} alt={cafe.name} label={t("photoN").replace("{n}", "")} className="aspect-[2/1] w-full rounded-3xl" />}
+        <div className="flex items-center gap-4">
+          {/* No cover yet: the café's initial, as on its posts. */}
+          {!cafe.coverImageUrl && <Initial name={cafe.name} cafe className="size-14 text-3xl" />}
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <h1 className="font-serif text-4xl leading-[1.05]">{cafe.name}</h1>
+            {(cafe.district || cafe.address) && <p className="text-sm text-muted">{[cafe.address, cafe.district].filter(Boolean).join(" · ")}</p>}
+          </div>
         </div>
+
+        {member ? (
+          <div className="flex flex-col gap-3 rounded-3xl bg-panel p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-muted">{t("yourPeni")}</span>
+              <span className="tabular inline-flex items-center gap-2 font-serif text-4xl leading-none text-[var(--cafe)]">
+                <Coin size={28} />
+                <span className="whitespace-nowrap">
+                  {cafe.membership!.balancePeni} <span className="text-xl">penny</span>
+                </span>
+              </span>
+            </div>
+            {cafe.pennyOn ? (
+              <div className="grid grid-cols-2 gap-2">
+                <a href={`/harca?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-11 items-center justify-center rounded-full border border-line bg-paper text-sm font-semibold">
+                  {t("payWithPeni")}
+                </a>
+                <a href={`/ismarla?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-11 items-center justify-center rounded-full border border-line bg-paper text-sm font-semibold">
+                  {t("treatSomeoneHere")}
+                </a>
+              </div>
+            ) : (
+              // The plan has no pennies now: the balance stays, but can't be spent or given here.
+              <p className="text-sm leading-normal text-muted">{t("pennyOff")}</p>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-3 rounded-3xl bg-panel p-4">
+            <p className="min-w-0 flex-1 text-sm leading-normal">{ask === "join" ? t("joinHelp") : t("signInToJoin")}</p>
+            <Button kind="primary" size="sm" className="shrink-0 border-[var(--cafe)] bg-[var(--cafe)]" onClick={() => (ask === "join" ? void act(() => api.cafes.join(cafe.slug)) : setSigningIn(true))}>
+              {ask === "join" ? t("joinCafe") : t("signIn")}
+            </Button>
+          </div>
+        )}
+
+        {cafe.askida.enabled && (
+          <a href={`/aski?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-between border-y border-line">
+            <span>{waiting ? fill(t("askidaLink"), { goods: waiting }) : t("askidaLinkEmpty")}</span>
+            <span aria-hidden="true" className="text-muted">
+              →
+            </span>
+          </a>
+        )}
+        {paused && <Notice>{t("pausedNotice")}</Notice>}
       </section>
 
-      {member ? (
-        <section className="flex flex-col gap-4 rounded-3xl bg-panel p-5">
-          <div className="flex items-center justify-between">
-            <span className="text-muted">{t("yourPeni")}</span>
-            <span className="tabular inline-flex items-center gap-3 font-serif text-5xl leading-none text-[var(--cafe)]">
-              <Coin size={40} />
-              <span className="whitespace-nowrap">
-                {cafe.membership!.balancePeni} <span className="text-2xl">penny</span>
+      <section aria-labelledby="feed" className="flex flex-col gap-4">
+        <div className="flex min-h-11 items-center justify-between gap-3">
+          <h2 id="feed" className="text-sm text-muted">
+            {t("feed")}
+          </h2>
+          {canWrite && (
+            <Button kind="quiet" size="sm" onClick={() => setEventSheet("new")}>
+              <span aria-hidden="true" className="text-lg leading-none">
+                +
               </span>
-            </span>
-          </div>
-          {cafe.pennyOn ? (
-            <div className="grid grid-cols-2 gap-2">
-              <a href={`/harca?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-center rounded-full border border-line bg-paper font-semibold">
-                {t("payWithPeni")}
-              </a>
-              <a href={`/ismarla?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-12 items-center justify-center rounded-full border border-line bg-paper font-semibold">
-                {t("treatSomeoneHere")}
-              </a>
-            </div>
-          ) : (
-            // The plan has no pennies now: the balance stays, but can't be spent or given here.
-            <p className="text-sm leading-normal text-muted">{t("pennyOff")}</p>
+              {t("openEvent")}
+            </Button>
           )}
-        </section>
-      ) : (
-        <section className="flex flex-col gap-3 rounded-3xl bg-panel p-5">
-          <p className="leading-normal">{ask === "join" ? t("joinHelp") : t("signInToJoin")}</p>
-          <Button
-            kind="primary"
-            size="lg"
-            className="border-[var(--cafe)] bg-[var(--cafe)]"
-            onClick={() => (ask === "join" ? void act(() => api.cafes.join(cafe.slug)) : setSigningIn(true))}
-          >
-            {ask === "join" ? t("joinCafe") : t("signIn")}
-          </Button>
-        </section>
-      )}
-
-      {cafe.askida.enabled && (
-        <a href={`/aski?kafe=${encodeURIComponent(cafe.slug)}`} className="flex min-h-14 items-center justify-between border-y border-line text-lg">
-          <span>{waiting ? fill(t("askidaLink"), { goods: waiting }) : t("askidaLinkEmpty")}</span>
-          <span aria-hidden="true" className="text-muted">
-            →
-          </span>
-        </a>
-      )}
-
-      {paused && <Notice>{t("pausedNotice")}</Notice>}
-      {canWrite && (
-        <section className="flex flex-col gap-3">
-          <Button kind="secondary" size="md" className="w-full" onClick={() => setEventSheet("new")}>
-            <span aria-hidden="true" className="text-xl leading-none">
-              +
-            </span>
-            {t("openEvent")}
-          </Button>
-          <p className="text-center text-sm leading-normal text-muted">{t("openEventHelp")}</p>
-        </section>
-      )}
-
-      {error && <Notice tone="red">{error}</Notice>}
-      <section aria-label={t("fromCafe")} className="flex flex-col gap-4">
+        </div>
         {cafe.posts.length === 0 && <p className="py-6 text-center text-muted">{t("noFeed")}</p>}
         {cafe.posts.map((p) => (
-          <Post
-            key={p.id}
-            t={t}
-            lang={lang}
-            slug={cafe.slug}
-            cafeName={cafe.name}
-            post={p}
-            member={member}
-            paused={paused}
-            act={act}
-            onEdit={() => setEventSheet(p)}
-            onReport={setReporting}
-            onNeedMember={() => (signedIn ? void act(() => api.cafes.join(cafe.slug)) : setSigningIn(true))}
-          />
+          <Post key={p.id} t={t} lang={lang} cafeName={cafe.name} post={p} member={member} paused={paused} actions={actions} />
         ))}
       </section>
+
+      {/* Where the tap was, not at the top of a long feed. */}
+      {error && (
+        <button type="button" role="alert" onClick={() => setError(null)} className="fixed inset-x-4 bottom-4 z-30 mx-auto max-w-md cursor-pointer rounded-2xl bg-red px-4 py-3 text-left text-sm font-medium text-paper shadow-xl">
+          {error}
+        </button>
+      )}
 
       {eventSheet && (
         <EventSheet
@@ -172,6 +210,7 @@ export function CafePage({ slug }: { slug: string }) {
           lang={lang}
           slug={cafe.slug}
           target={reporting}
+          already={reporting.already}
           onClose={() => {
             setReporting(null);
             void load();
@@ -199,40 +238,32 @@ export function CafePage({ slug }: { slug: string }) {
 
 type ReportTarget = Pick<ReportInput, "targetType" | "targetId">;
 
-function Post({
-  t,
-  lang,
-  slug,
-  cafeName,
-  post,
-  member,
-  paused,
-  act,
-  onEdit,
-  onReport,
-  onNeedMember,
-}: {
-  t: T;
-  lang: Lang;
-  slug: string;
-  cafeName: string;
-  post: PostDTO;
-  member: boolean;
-  paused: boolean;
-  act: (call: () => Promise<unknown>) => Promise<void>;
-  onEdit: () => void;
-  onReport: (target: ReportTarget) => void;
-  onNeedMember: () => void;
-}) {
+/** What a post's buttons do; the page decides how (and asks a guest to sign in first). */
+type PostActions = {
+  like: (post: PostDTO) => void;
+  rsvp: (post: PostDTO) => void;
+  /** Answers whether the comment went through. */
+  comment: (post: PostDTO, body: string) => Promise<boolean>;
+  deleteComment: (post: PostDTO, commentId: string) => void;
+  cancelEvent: (post: PostDTO) => Promise<boolean>;
+  edit: (post: PostDTO) => void;
+  report: (target: ReportTarget, already: boolean) => void;
+  needMember: () => void;
+};
+
+/** How many comments a post opens with; the rest are one tap away. */
+const COMMENTS_SHOWN = 3;
+
+function Post({ t, lang, cafeName, post, member, paused, actions }: { t: T; lang: Lang; cafeName: string; post: PostDTO; member: boolean; paused: boolean; actions: PostActions }) {
   const [comment, setComment] = useState("");
+  const [writing, setWriting] = useState(false);
+  const [allComments, setAllComments] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  /** The "⋯" sheet: my event's options, or one of my comments. */
+  const [menu, setMenu] = useState<{ kind: "event" } | { kind: "cancel" } | { kind: "comment"; id: string; body: string } | null>(null);
   const canWrite = member && !paused;
-  const run = async (call: () => Promise<unknown>) => {
-    setBusy(true);
-    await act(call);
-    setBusy(false);
-  };
+  const event = post.kind === "event";
+  const question = post.kind === "question";
   const date = (iso: string, withWeekday = false) =>
     new Date(iso).toLocaleString(lang === "tr" ? "tr-TR" : "en-GB", {
       ...(withWeekday ? { weekday: "long" } : {}),
@@ -241,132 +272,150 @@ function Post({
       hour: "2-digit",
       minute: "2-digit",
     });
-  const label = post.kind === "event" ? t("eventLabel") : post.kind === "question" ? t("questionOfDay") : null;
+  const label = event ? t("eventLabel") : question ? t("questionOfDay") : null;
+  const full = event && !!post.eventCapacity && post.rsvpCount >= post.eventCapacity && !post.rsvpedByMe;
+  // The day's question is there to be answered, so its box is open; other posts keep theirs behind the comment button.
+  const boxOpen = canWrite && (writing || (question && !post.answeredTodayByMe));
+  const shown = allComments ? post.comments : post.comments.slice(-COMMENTS_SHOWN);
+  const earlier = post.comments.length - shown.length;
+  const pill = "rounded-full px-2.5 py-0.5 text-xs font-medium";
 
   return (
-    <article className="flex flex-col gap-4 rounded-3xl border border-line p-4">
+    <article className="flex flex-col gap-3 rounded-3xl border border-line p-4">
       {/* Who it's from comes first, as on every social feed: it's what tells one post from the next. */}
-      <p className="flex items-center gap-3 font-semibold">
-        <Initial name={post.host ? post.host.name : cafeName} cafe={!post.host} className="size-9 text-lg" />
-        {post.host ? post.host.name : cafeName}
-      </p>
-      <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
-        {post.pinned && <span className="rounded-full bg-[var(--cafe)] px-3 py-1 font-medium text-paper">{t("pinnedPost")}</span>}
-        {label && <span className="rounded-full bg-panel px-3 py-1">{label}</span>}
-        {post.host?.mine && <span>{t("hostedByYou")}</span>}
-        <span>{date(post.publishedAt)}</span>
+      <div className="flex items-center gap-3">
+        <Initial name={post.host ? post.host.name : cafeName} cafe={!post.host} className="size-10 text-xl" />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="truncate font-semibold">{post.host ? post.host.name : cafeName}</p>
+          <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+            {post.pinned && <span className={`${pill} bg-[var(--cafe)] text-paper`}>{t("pinnedPost")}</span>}
+            {label && <span className={`${pill} bg-panel`}>{label}</span>}
+            {event && post.eventOver && <span className={`${pill} border border-line`}>{t("eventOver")}</span>}
+            <span>{post.host?.mine ? t("hostedByYou") : date(post.publishedAt)}</span>
+          </p>
+        </div>
+        {post.host?.mine && !post.eventOver && <MoreButton label={t("options")} onClick={() => setMenu({ kind: "event" })} />}
         {post.host && !post.host.mine && canWrite && (
-          <ReportButton t={t} done={post.reportedByMe} onClick={() => onReport({ targetType: "post", targetId: post.id })} className="ml-auto" />
+          <MoreButton label={post.reportedByMe ? t("reported") : t("report")} onClick={() => actions.report({ targetType: "post", targetId: post.id }, post.reportedByMe)} />
         )}
-      </p>
-      {post.title && <h2 className="font-serif text-3xl leading-tight">{post.title}</h2>}
-      {post.kind === "event" && post.eventStartsAt && <p className="text-lg">{date(post.eventStartsAt, true)}</p>}
+      </div>
+      {post.title && <h3 className="font-serif text-3xl leading-tight">{post.title}</h3>}
+      {event && post.eventStartsAt && <p className={`text-lg ${post.eventOver ? "text-muted" : ""}`}>{date(post.eventStartsAt, true)}</p>}
 
-      {post.imageUrls.length === 1 && <img src={post.imageUrls[0]} alt={t("photoN").replace("{n}", "1")} className="max-h-[560px] w-full rounded-3xl object-cover" />}
+      {post.imageUrls.length === 1 && <img src={post.imageUrls[0]} alt={t("photoN").replace("{n}", "1")} className="max-h-[560px] w-full rounded-2xl object-cover" />}
       {post.imageUrls.length > 1 && (
-        <div className="-mx-6 flex snap-x snap-mandatory gap-2 overflow-x-auto px-6 pb-1">
+        <div className="-mx-4 flex snap-x snap-mandatory gap-2 overflow-x-auto px-4 pb-1">
           {post.imageUrls.map((url, i) => (
-            <img key={url} src={url} alt={t("photoN").replace("{n}", String(i + 1))} className="aspect-[4/5] w-[85%] shrink-0 snap-center rounded-3xl object-cover" />
+            <img key={url} src={url} alt={t("photoN").replace("{n}", String(i + 1))} className="aspect-[4/5] w-[85%] shrink-0 snap-center rounded-2xl object-cover" />
           ))}
         </div>
       )}
       {post.body && <p className="whitespace-pre-line text-[17px] leading-relaxed">{post.body}</p>}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           aria-pressed={post.reactedByMe}
           aria-label={post.reactedByMe ? t("unlike") : t("like")}
-          disabled={busy || paused}
-          onClick={() => (member ? void run(() => api.cafes.react(slug, post.id)) : onNeedMember())}
-          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 ${post.reactedByMe ? "border-heart text-heart" : "border-line"}`}
+          disabled={paused}
+          onClick={() => actions.like(post)}
+          className={`flex min-h-11 cursor-pointer items-center gap-2 rounded-full border px-4 disabled:cursor-not-allowed disabled:opacity-40 ${post.reactedByMe ? "border-heart text-heart" : "border-line"}`}
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill={post.reactedByMe ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
             <path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z" />
           </svg>
           <span className="tabular">{post.reactionCount}</span>
         </button>
-        {post.kind === "event" && post.host?.mine && (
+        <button
+          type="button"
+          aria-expanded={canWrite ? boxOpen : undefined}
+          aria-label={`${question ? t("writeAnswer") : t("writeComment")} · ${fill(t("commentsN"), { n: post.commentCount })}`}
+          disabled={paused}
+          onClick={() => (canWrite ? setWriting((w) => !w) : actions.needMember())}
+          className="flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-line px-4 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4.2A8 8 0 1 1 20 12z" />
+          </svg>
+          <span className="tabular">{post.commentCount}</span>
+        </button>
+        {event && !post.eventOver && post.host?.mine && (
           <span className="inline-flex min-h-11 items-center rounded-full bg-[var(--cafe)] px-4 text-sm font-semibold text-paper">{t("goingYes")} ✓</span>
         )}
-        {post.kind === "event" && !post.host?.mine && (
-          <Button
-            kind={post.rsvpedByMe ? "primary" : "quiet"}
-            size="sm"
-            disabled={busy || paused}
-            onClick={() => (member ? void run(() => api.cafes.rsvp(slug, post.id)) : onNeedMember())}
-            className={post.rsvpedByMe ? "border-[var(--cafe)] bg-[var(--cafe)]" : ""}
-          >
-            {post.rsvpedByMe ? `${t("goingYes")} ✓` : t("join")}
+        {event && !post.eventOver && !post.host?.mine && (
+          <Button kind={post.rsvpedByMe ? "primary" : "quiet"} size="sm" disabled={paused || full} onClick={() => actions.rsvp(post)} className={post.rsvpedByMe ? "border-[var(--cafe)] bg-[var(--cafe)]" : ""}>
+            {post.rsvpedByMe ? `${t("goingYes")} ✓` : full ? t("eventFull") : t("join")}
           </Button>
         )}
-        <span className="ml-auto text-sm text-muted">
-          {post.kind !== "event"
-            ? fill(t("commentsN"), { n: post.commentCount })
-            : post.eventCapacity
-              ? fill(t("goingOfN"), { n: post.rsvpCount, max: post.eventCapacity })
-              : fill(t("goingN"), { n: post.rsvpCount })}
-        </span>
+        {event && (
+          <span className="ml-auto text-sm text-muted">
+            {post.eventOver
+              ? fill(t("wentN"), { n: post.rsvpCount })
+              : post.eventCapacity
+                ? fill(t("goingOfN"), { n: post.rsvpCount, max: post.eventCapacity })
+                : fill(t("goingN"), { n: post.rsvpCount })}
+          </span>
+        )}
       </div>
 
-      {post.host?.mine && (
-        <div className="flex gap-2">
-          <Button kind="quiet" size="sm" disabled={busy || paused} onClick={onEdit}>
-            {t("editEvent")}
-          </Button>
-          <Button kind="quiet" size="sm" disabled={busy} onClick={() => setCancelling(true)}>
-            {t("cancelEvent")}
-          </Button>
+      {post.comments.length > 0 && (
+        <div className="flex flex-col gap-2 border-l-2 border-line pl-4">
+          {earlier > 0 && (
+            <button type="button" onClick={() => setAllComments(true)} className="flex min-h-11 cursor-pointer items-center self-start text-sm font-semibold underline underline-offset-4">
+              {fill(t("earlierComments"), { n: earlier })}
+            </button>
+          )}
+          <ul className="flex flex-col gap-3">
+            {shown.map((c) => (
+              <li key={c.id} className="flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 leading-normal">
+                    <strong className="font-semibold">{c.authorName}</strong> {c.body}
+                  </p>
+                  {c.mine && <MoreButton label={t("options")} onClick={() => setMenu({ kind: "comment", id: c.id, body: c.body })} className="-my-2.5" />}
+                  {!c.mine && canWrite && (
+                    <MoreButton label={c.reportedByMe ? t("reported") : t("report")} onClick={() => actions.report({ targetType: "comment", targetId: c.id }, c.reportedByMe)} className="-my-2.5" />
+                  )}
+                </div>
+                {/* The café's answer sits under the comment it answers. */}
+                {c.replies.map((r) => (
+                  <p key={r.id} className="ml-3 flex items-start gap-2 leading-normal">
+                    <Initial name={cafeName} cafe className="mt-0.5 size-6 text-sm" />
+                    <span className="min-w-0">
+                      <strong className="font-semibold">{cafeName}</strong> {r.body}
+                    </span>
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
-      {cancelling && (
-        <Sheet title={t("cancelEventTitle")} onClose={() => setCancelling(false)} labelClose={t("close")}>
-          <p className="leading-normal text-muted">{t("cancelEventBody")}</p>
-          <div className="grid grid-cols-2 gap-2">
-            <Button kind="quiet" onClick={() => setCancelling(false)}>
-              {t("keepEvent")}
-            </Button>
-            <Button kind="danger" disabled={busy} onClick={() => void run(() => api.cafes.cancelEvent(slug, post.id)).then(() => setCancelling(false))}>
-              {t("cancelEventYes")}
-            </Button>
-          </div>
-        </Sheet>
-      )}
-
-      {post.comments.length > 0 && (
-        <ul className="flex flex-col gap-3 border-l-2 border-line pl-4">
-          {post.comments.map((c) => (
-            <li key={c.id} className="flex items-start justify-between gap-3">
-              <span>
-                <strong className="font-semibold">{c.authorName}</strong> {c.body}
-              </span>
-              {c.mine && (
-                <Button kind="bare" size="sm" className="-my-2 shrink-0 px-2 underline underline-offset-4" disabled={busy} onClick={() => void run(() => api.cafes.deleteComment(slug, post.id, c.id))}>
-                  {t("deleteComment")}
-                </Button>
-              )}
-              {!c.mine && canWrite && <ReportButton t={t} done={c.reportedByMe} onClick={() => onReport({ targetType: "comment", targetId: c.id })} className="-my-2" />}
-            </li>
-          ))}
-        </ul>
-      )}
-      {post.kind === "question" && post.answeredTodayByMe && <p className="text-sm text-muted">{t("answeredToday")}</p>}
-      {canWrite && (
+      {question && post.answeredTodayByMe && <p className="text-sm text-muted">{t("answeredToday")}</p>}
+      {boxOpen && (
         <form
           className="flex items-center gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             const body = comment.trim();
-            if (!body) return;
-            void run(() => api.cafes.comment(slug, post.id, body)).then(() => setComment(""));
+            if (!body || busy) return;
+            setBusy(true);
+            void actions.comment(post, body).then((ok) => {
+              setBusy(false);
+              if (!ok) return;
+              setComment("");
+              setWriting(false);
+              setAllComments(true);
+            });
           }}
         >
           <input
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             maxLength={500}
-            placeholder={post.kind === "question" ? t("writeAnswer") : t("writeComment")}
-            aria-label={post.kind === "question" ? t("writeAnswer") : t("writeComment")}
+            autoFocus={writing}
+            placeholder={question ? t("writeAnswer") : t("writeComment")}
+            aria-label={question ? t("writeAnswer") : t("writeComment")}
             className="min-h-12 min-w-0 flex-1 rounded-full border border-line bg-paper px-5 text-base outline-none focus:border-ink"
           />
           <Button kind="secondary" type="submit" disabled={busy || !comment.trim()}>
@@ -374,23 +423,73 @@ function Post({
           </Button>
         </form>
       )}
+
+      {menu?.kind === "event" && (
+        <Sheet title={t("editEventTitle")} onClose={() => setMenu(null)} labelClose={t("close")}>
+          <Button
+            kind="quiet"
+            disabled={paused}
+            onClick={() => {
+              setMenu(null);
+              actions.edit(post);
+            }}
+          >
+            {t("editEvent")}
+          </Button>
+          <Button kind="quiet" onClick={() => setMenu({ kind: "cancel" })}>
+            {t("cancelEvent")}
+          </Button>
+        </Sheet>
+      )}
+      {menu?.kind === "cancel" && (
+        <Sheet title={t("cancelEventTitle")} onClose={() => setMenu(null)} labelClose={t("close")}>
+          <p className="leading-normal text-muted">{t("cancelEventBody")}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button kind="quiet" onClick={() => setMenu(null)}>
+              {t("keepEvent")}
+            </Button>
+            <Button
+              kind="danger"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void actions.cancelEvent(post).then(() => {
+                  setBusy(false);
+                  setMenu(null);
+                });
+              }}
+            >
+              {t("cancelEventYes")}
+            </Button>
+          </div>
+        </Sheet>
+      )}
+      {menu?.kind === "comment" && (
+        <Sheet title={t("yourComment")} onClose={() => setMenu(null)} labelClose={t("close")}>
+          <blockquote className="border-l-2 border-line pl-3 leading-normal">{menu.body}</blockquote>
+          <Button
+            kind="danger"
+            onClick={() => {
+              actions.deleteComment(post, menu.id);
+              setMenu(null);
+            }}
+          >
+            {t("deleteComment")}
+          </Button>
+        </Sheet>
+      )}
     </article>
   );
 }
 
-/** A small flag: reports a member's comment or event, once. */
-function ReportButton({ t, done, onClick, className = "" }: { t: T; done: boolean; onClick: () => void; className?: string }) {
+/** Three quiet dots: what you can do with a comment or an event (report it, or take your own back). */
+function MoreButton({ label, onClick, className = "" }: { label: string; onClick: () => void; className?: string }) {
   return (
-    <button
-      type="button"
-      disabled={done}
-      onClick={onClick}
-      aria-label={done ? t("reported") : t("report")}
-      title={done ? t("reported") : t("report")}
-      className={`flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted hover:text-ink disabled:cursor-default disabled:text-red ${className}`}
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill={done ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 21V4M5 4h11l-2 4 2 4H5" />
+    <button type="button" onClick={onClick} aria-label={label} title={label} className={`flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted hover:text-ink ${className}`}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <circle cx="5" cy="12" r="1.6" />
+        <circle cx="12" cy="12" r="1.6" />
+        <circle cx="19" cy="12" r="1.6" />
       </svg>
     </button>
   );
@@ -446,6 +545,7 @@ function EventSheet({
 
   return (
     <Sheet title={editing ? t("editEventTitle") : t("openEvent")} onClose={onClose} labelClose={t("close")}>
+      {!editing && <p className="text-sm leading-normal text-muted">{t("openEventHelp")}</p>}
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -482,11 +582,12 @@ function EventSheet({
 }
 
 /** Why a member reports something: four plain reasons and room for a note. */
-function ReportSheet({ t, lang, slug, target, onClose }: { t: T; lang: Lang; slug: string; target: ReportTarget; onClose: () => void }) {
+function ReportSheet({ t, lang, slug, target, already, onClose }: { t: T; lang: Lang; slug: string; target: ReportTarget; already: boolean; onClose: () => void }) {
   const [reason, setReason] = useState<ReportInput["reason"] | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState(false);
+  // Reported once already: nothing more to ask.
+  const [sent, setSent] = useState(already);
   const [error, setError] = useState<string | null>(null);
   const reasons = [
     ["spam", t("reasonSpam")],
@@ -500,7 +601,7 @@ function ReportSheet({ t, lang, slug, target, onClose }: { t: T; lang: Lang; slu
     setBusy(true);
     setError(null);
     try {
-      await api.cafes.report(slug, { ...target, reason, note: note.trim() || undefined });
+      await api.cafes.report(slug, { targetType: target.targetType, targetId: target.targetId, reason, note: note.trim() || undefined });
       setSent(true);
     } catch (e) {
       setError(errorText(e, lang));
@@ -512,7 +613,7 @@ function ReportSheet({ t, lang, slug, target, onClose }: { t: T; lang: Lang; slu
     <Sheet title={sent ? t("report") : t("reportTitle")} onClose={onClose} labelClose={t("close")}>
       {sent ? (
         <>
-          <p className="text-lg leading-normal">{t("reportThanks")}</p>
+          <p className="text-lg leading-normal">{already ? t("reported") : t("reportThanks")}</p>
           <Button kind="primary" onClick={onClose}>
             {t("close")}
           </Button>

@@ -23,6 +23,7 @@ import {
 } from "@peni/core";
 import type { EmailMessage, EmailSender } from "./customer-auth";
 import type { DebtService } from "./debts";
+import type { CommunityAttention } from "./feed";
 import type { PayService } from "./pay";
 import type { StaffContext } from "./staff";
 import type { StockService } from "./stock";
@@ -39,10 +40,13 @@ const ORDER: AlertDTO["type"][] = [
   "cardDue",
   "debtsOverdue",
   "stockOut",
+  "reportsOpen",
   "payClose",
   "payLeft",
   "hoursMissing",
   "debtsSoon",
+  "commentsNew",
+  "memberEvents",
   "draftsOpen",
   "stockLow",
   "tasksLate",
@@ -72,6 +76,8 @@ export interface AlertDeps {
     cafeId: string,
     permissions: ReadonlySet<Permission>,
   ) => Promise<{ count: number; names: string[]; short: { day: string; balanceKurus: number } | null }>;
+  /** Topluluk: reports waiting, and members' comments and events since staff last looked. */
+  community?: (cafeId: string, permissions: ReadonlySet<Permission>) => Promise<CommunityAttention>;
   now: () => Date;
 }
 
@@ -178,6 +184,17 @@ export class AlertService {
       const count = await this.d.drafts.countOpen(cafeId);
       if (count)
         add({ type: "draftsOpen", level: "warning", count, amountKurus: null, names: await this.d.drafts.openTitles(cafeId, NAMES), href: "/panel/taslaklar" });
+    }
+
+    // Every plan has Topluluk, so these reach a café on the free plan too.
+    if (this.d.community && (permissions.has("posts.write") || permissions.has("posts.moderate"))) {
+      const c = await this.d.community(cafeId, permissions);
+      if (c.reports && permissions.has("posts.moderate"))
+        add({ type: "reportsOpen", level: "critical", count: c.reports, amountKurus: null, href: "/panel/topluluk" });
+      if (c.comments.count)
+        add({ type: "commentsNew", level: "warning", count: c.comments.count, amountKurus: null, names: c.comments.names, href: "/panel/topluluk" });
+      if (c.events.count)
+        add({ type: "memberEvents", level: "warning", count: c.events.count, amountKurus: null, names: c.events.names, href: "/panel/topluluk" });
     }
 
     if (this.d.watch && permissions.has("reports.view")) {
@@ -331,9 +348,11 @@ export class AlertService {
     return results;
   }
 
-  /** Only roles that see some alert get the email. */
+  /** Only roles that see some alert get the email; on the free plan that's those who look after Topluluk. */
   private mayEmail(permissions: ReadonlySet<Permission>): boolean {
-    return (["stock.view", "debts.view", "pay.hours", "pay.close", "pay.payouts", "tasks.edit"] as Permission[]).some((p) => permissions.has(p));
+    return (["stock.view", "debts.view", "pay.hours", "pay.close", "pay.payouts", "tasks.edit", "posts.write", "posts.moderate"] as Permission[]).some((p) =>
+      permissions.has(p),
+    );
   }
 
   private async dayOf(cafeId: string): Promise<string> {

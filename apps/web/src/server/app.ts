@@ -27,6 +27,9 @@ import type {
 } from "@peni/api";
 import {
   InMemoryCommunityStore,
+  COMMENTS_PER_HOUR,
+  COMMENTS_PER_MINUTE,
+  eventOver,
   InMemoryImageStore,
   InMemoryReportStore,
   InMemoryStockStore,
@@ -136,7 +139,7 @@ import { StockService } from "./stock";
 import { BillService } from "./bills";
 import { DebtService } from "./debts";
 import { MoneyService } from "./money";
-import { bare, eventCapacity, eventTime, FeedService } from "./feed";
+import { bare, eventCapacity, eventTime, FeedService, threads } from "./feed";
 import { StaffService, type StaffContext } from "./staff";
 import { RecipeDraftService } from "./recipe-drafts";
 
@@ -452,6 +455,7 @@ export class PeniApp {
       letter: (cafeId) => this.letters.latest(cafeId),
       setup: { menu: this.menu, stock: stores.stock, bills: stores.bills, matches: stores.assistant },
       watch: (cafeId, permissions) => this.watch.attention(cafeId, permissions),
+      community: (cafeId, permissions) => this.feed.attention(cafeId, permissions),
       now: () => this.now(),
     });
     this.monthPackage = new MonthPackageService(stores.bills, stores.assistant, stores.payments, this.money, this.directory, () => this.now());
@@ -1091,6 +1095,7 @@ export class PeniApp {
   async rsvp(customer: CustomerRecord, slug: string, postId: string) {
     const post = await this.requirePost(slug, postId, customer);
     if (post.kind !== "event") throw new AppError("VALIDATION", "Only events take RSVPs");
+    if (eventOver(post, this.now())) throw new AppError("EVENT_OVER", "This event is over", 409);
     if (post.rsvps.includes(customer.id)) await this.community.removeRsvp(postId, customer.id);
     else {
       if (post.eventCapacity && post.rsvps.length >= post.eventCapacity) throw new AppError("EVENT_FULL", "Event is full", 409);
@@ -1099,9 +1104,25 @@ export class PeniApp {
     return { ok: true as const };
   }
 
+  /**
+   * A member's comment. At most COMMENTS_PER_MINUTE a minute and COMMENTS_PER_HOUR an hour at
+   * one café, and not the same words twice on one post within the hour, so one person can't
+   * flood the feed.
+   */
   async comment(customer: CustomerRecord, slug: string, postId: string, body: string) {
-    await this.requirePost(slug, postId, customer);
-    await this.community.addComment(postId, { id: `cmt_${crypto.randomUUID()}`, customerId: customer.id, body, createdAt: this.now() });
+    const post = await this.requirePost(slug, postId, customer);
+    const now = this.now();
+    const hourAgo = new Date(now.getTime() - HOUR_MS);
+    const said = body.trim().toLocaleLowerCase("tr");
+    // Hidden ones too: the café hiding a comment is no reason to let it be posted again.
+    const all = (await this.community.getPost(postId, { hiddenComments: true }))?.comments ?? post.comments;
+    const repeat = all.some((c) => c.customerId === customer.id && c.createdAt >= hourAgo && c.body.trim().toLocaleLowerCase("tr") === said);
+    if (repeat) throw new AppError("COMMENT_REPEAT", "You wrote this a moment ago", 409);
+    const tooFast =
+      (await this.community.countCommentsBy(post.cafeId, customer.id, new Date(now.getTime() - 60_000))) >= COMMENTS_PER_MINUTE ||
+      (await this.community.countCommentsBy(post.cafeId, customer.id, hourAgo)) >= COMMENTS_PER_HOUR;
+    if (tooFast) throw new AppError("COMMENT_TOO_FAST", "Too many comments; try again in a minute", 429);
+    await this.community.addComment(postId, { id: `cmt_${crypto.randomUUID()}`, customerId: customer.id, body, createdAt: now });
     return { ok: true as const };
   }
 
@@ -1159,6 +1180,7 @@ export class PeniApp {
     input: { title?: string; body?: string; startsAt?: string; capacity?: number | null },
   ): Promise<{ ok: true }> {
     const post = await this.hostedEvent(slug, postId, customer);
+    if (eventOver(post, this.now())) throw new AppError("EVENT_OVER", "This event is over", 409);
     await this.community.savePost({
       ...bare(post),
       title: input.title ?? post.title,
@@ -1172,6 +1194,8 @@ export class PeniApp {
   /** The host calls their event off: gone from the feed, and any reports on it are closed. */
   async cancelEvent(customer: CustomerRecord, slug: string, postId: string): Promise<{ ok: true }> {
     const post = await this.hostedEvent(slug, postId, customer, false);
+    // Once it's over it stays as it was; the café can still take it down.
+    if (eventOver(post, this.now())) throw new AppError("EVENT_OVER", "This event is over", 409);
     await this.community.savePost({ ...bare(post), hiddenAt: this.now() });
     await this.reports.resolve("post", post.id, "dismissed", customer.id, this.now());
     return { ok: true };
@@ -1294,39 +1318,45 @@ export class PeniApp {
   }
 
   private async postsFor(cafeId: string, customer: CustomerRecord | null, timeZone: string): Promise<PostDTO[]> {
-    const today = startOfLocalDay(this.now(), timeZone);
+    const now = this.now();
+    const today = startOfLocalDay(now, timeZone);
     const viewer = customer?.id ?? null;
     const posts = await this.community.listPosts(cafeId);
     const reported = viewer ? await this.reports.reportedBy(cafeId, viewer) : new Set<string>();
     const people = new Map(
       (
         await this.identity.getCustomers([
-          ...new Set(posts.flatMap((p) => [...p.rsvps, ...p.comments.map((c) => c.customerId), ...(p.hostCustomerId ? [p.hostCustomerId] : [])])),
+          ...new Set(posts.flatMap((p) => [...p.rsvps, ...p.comments.map((c) => c.customerId), p.hostCustomerId]).filter((x): x is string => !!x)),
         ])
       ).map((c) => [c.id, c]),
     );
+    // An event that's over no longer stays on top; it sits by its date like any other post.
+    const pinned = (p: PostWithActivity) => p.pinned && !eventOver(p, now);
     return [...posts]
-      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.publishedAt.getTime() - a.publishedAt.getTime())
+      .sort((a, b) => Number(pinned(b)) - Number(pinned(a)) || b.publishedAt.getTime() - a.publishedAt.getTime())
       .map((p) => ({
         id: p.id,
         kind: p.kind,
         body: p.body,
         publishedAt: p.publishedAt.toISOString(),
-        pinned: p.pinned,
+        pinned: pinned(p),
         eventStartsAt: p.eventStartsAt?.toISOString() ?? null,
         eventCapacity: p.eventCapacity,
+        eventOver: eventOver(p, now),
         reactionCount: p.reactions.length,
+        // The store already left out hidden comments and the replies under them.
         commentCount: p.comments.length,
         rsvpCount: p.rsvps.length,
         reactedByMe: !!viewer && p.reactions.includes(viewer),
         rsvpedByMe: !!viewer && p.rsvps.includes(viewer),
-        comments: p.comments.map((c) => ({
+        comments: threads(p.comments).map(({ comment: c, replies }) => ({
           id: c.id,
-          authorName: publicName(people.get(c.customerId)),
+          authorName: publicName(c.customerId ? people.get(c.customerId) : undefined),
           body: c.body,
           createdAt: c.createdAt.toISOString(),
-          mine: c.customerId === viewer,
+          mine: !!viewer && c.customerId === viewer,
           reportedByMe: reported.has(`comment:${c.id}`),
+          replies: replies.map((r) => ({ id: r.id, body: r.body, createdAt: r.createdAt.toISOString() })),
         })),
         imageUrls: p.imageUrls ?? [],
         title: p.title,
