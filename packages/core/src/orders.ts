@@ -112,7 +112,11 @@ export interface OrderStore {
   nextNumber(cafeId: string, businessDay: string): Promise<number>;
   /** Creates the order or replaces it, lines included. */
   saveOrder(order: Order): Promise<void>;
-  /** Creates many new orders at once, lines included: moving a café in from Shelby (N13). Ids already there are an error. */
+  /**
+   * Creates many new orders at once, lines included: moving a café in from Shelby (N13). Ids
+   * already there are an error. Each day's counter moves up to its highest number, so the
+   * till's next order that day takes the number after it.
+   */
   addOrders(orders: Order[]): Promise<void>;
   getOrder(cafeId: string, id: string): Promise<Order | null>;
   findByCreateKey(cafeId: string, createKey: string): Promise<Order | null>;
@@ -144,7 +148,11 @@ export class InMemoryOrderStore implements OrderStore {
   async addOrders(orders: Order[]) {
     const taken = orders.find((o) => this.orders.has(o.id));
     if (taken) throw new Error(`Order ${taken.id} is already there`);
-    for (const o of orders) this.orders.set(o.id, clone(o));
+    for (const o of orders) {
+      this.orders.set(o.id, clone(o));
+      const key = `${o.cafeId}:${o.businessDay}`;
+      this.counters.set(key, Math.max(this.counters.get(key) ?? 0, o.number));
+    }
   }
 
   async getOrder(cafeId: string, id: string) {

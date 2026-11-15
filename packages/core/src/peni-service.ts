@@ -202,6 +202,7 @@ export class PeniService {
       }
       if (state === "cancelled") throw new PeniError("CLAIM_CANCELLED", "This sale was refunded");
       if (state === "expired") throw new PeniError("CLAIM_EXPIRED", "This code closed at the end of the day");
+      await this.requirePenny(claim.cafeId);
 
       await this.ledger.post({
         cafeId: claim.cafeId,
@@ -389,7 +390,7 @@ export class PeniService {
     if (from.cafeId !== to.cafeId) {
       throw new PeniError("CROSS_CAFE", "Gifts only work between members of the same café");
     }
-    const settings = await this.directory.getSettings(from.cafeId);
+    const settings = await this.requirePenny(from.cafeId);
 
     return this.ledger.atomically(async () => {
       const key = `gift:${input.idempotencyKey}`;
@@ -891,6 +892,13 @@ export class PeniService {
     if (!gift) throw new PeniError("NOT_FOUND", `Gift ${id} not found`);
     if (gift.status !== "pending") throw new PeniError("GIFT_NOT_PENDING", `Gift is already ${gift.status}`);
     return gift;
+  }
+
+  /** Pennies switched off (N11, and Shelby's preview copy, N13): nothing is earned, given or taken. */
+  private async requirePenny(cafeId: string): Promise<CafePeniSettings> {
+    const settings = await this.directory.getSettings(cafeId);
+    if (!settings.peniEnabled) throw new PeniError("PENNY_OFF", "Pennies are off at this café");
+    return settings;
   }
 
   private async requireAskida(cafeId: string): Promise<CafePeniSettings> {

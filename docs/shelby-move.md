@@ -64,7 +64,9 @@ Add `--discard-penny-records` to delete them anyway. What it can see: every reco
 
 What it can't see: changes to moved records that keep no time of change. A menu item's price, name or KDV, a stock item's name or minimum, a supplier's details, a person's role, PIN or password, the café's settings and page. Those are lost at a refresh without a warning.
 
-**Pennies can't be undone.** The peni ledger is append-only: the database refuses to delete any of it. If anyone earns or spends a penny, gives to the askı or sends a gift at the copy, the café can't be replaced any more, even with `--discard-penny-records`, and switch night can't replace it either. So don't use the till, the penny screen or the askı for real at the copy.
+**Pennies and the askı are off in the copy.** The peni ledger is append-only: the database refuses to delete any of it. If anyone earned or spent a penny, gave to the askı or sent a gift at the copy, the café could never be replaced again, not even with `--discard-penny-records`, and switch night couldn't replace it either. So a move with `--rehearsal` (and its dry run) saves the café with pennies and the askı switched off, and the report says "Pennies and the askı are off in this copy". With them off, nothing at the copy reaches the ledger: a paid till order gives no penny code, an ödeme kodu pays nothing, the penny screen answers "Bu kafede penny şu an kapalı", "Askıya nakit", "Askıdan ver" and "Askıya bırak" are refused, and customers can't take a code, send a gift or give to the askı. No screen in Penny switches them back on today (only the demo's sample data and this move write them); don't switch them on in the database for the copy, for the reason above. The real move on switch night, without `--rehearsal`, saves them on.
+
+**The team can try Penny at the copy**, the panel and the till: sign in with their Shelby email and password, open the drawer, sell. A sale on a day that already has orders from Shelby takes the next number after Shelby's last one that day. Everything they enter is a record made in Penny: the next refresh lists it and needs `--discard-penny-records` to go ahead, which deletes it. That's expected for practice sales; read the list before adding the flag.
 
 ## When Shelby's drawer is open
 
@@ -79,7 +81,7 @@ The real move needs Shelby's drawer closed (the freeze refuses otherwise), and P
 | Categories, products | Menü. Inactive products stay, unavailable. |
 | Stock items | Stok, in kg, l or adet (g and ml are converted; pcs, slice and anything else are adet). Today's amounts are counted in as the start; below zero starts at zero, and above Penny's most (1,000,000) starts at the most. Shelby Sokak has two items at 9,999,992 and 9,999,996 adet, a stand-in for "plenty". |
 | Product ingredients | Recipes. A product sold straight from stock ("direct") is a recipe of one. |
-| Orders paid, voided, refunded | Orders and till payments, numbered per day. Shelby's total is kept even when a line was lost to a deleted product. Pending orders were never paid and stay. |
+| Orders paid, voided, refunded | Orders and till payments, numbered per day; each day's counter is left at its last number, so Penny's till carries on after it. Shelby's total is kept even when a line was lost to a deleted product. Pending orders were never paid and stay. |
 | Expenses, deliveries | Bills, with a delivery's lines as stock lines. Shelby's weekly wage bills are left out: Peni keeps that pay as hours and payouts. |
 | Expense payments | Bill payments: cash, card, bank, check, the café's card (credit) or a loan. Older bills marked paid without a payment get one on their own date. |
 | Checks | Checks, cashed or not. |

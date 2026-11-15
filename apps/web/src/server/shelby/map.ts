@@ -70,6 +70,12 @@ export interface MoveOptions {
    * Null moves everything.
    */
   from?: Date | null;
+  /**
+   * A copy taken while Shelby still works (`--rehearsal`; the preview copy, N13): pennies and
+   * the askı start off, so nothing at the copy reaches the peni ledger, which is never deleted
+   * and would stop the copy from being replaced. The real move keeps Penny's defaults.
+   */
+  preview?: boolean;
 }
 
 export interface PeniRecords {
@@ -115,6 +121,8 @@ export interface MoveReport {
   moved: { what: string; count: number }[];
   notMoved: { what: string; count: number; why: string }[];
   warnings: string[];
+  /** Pennies and the askı are off in this copy (`MoveOptions.preview`). */
+  preview: boolean;
 }
 
 export interface Mapped {
@@ -196,7 +204,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     plan: "isletme",
     trialEndsAt: null,
   };
-  const settings: CafePeniSettings = { ...defaultSettings(cafeId), timeZone: tz };
+  const settings: CafePeniSettings = { ...defaultSettings(cafeId), timeZone: tz, ...(opts.preview ? { peniEnabled: false, askidaEnabled: false } : {}) };
 
   // ── Team: the same email and password; Shelby's admin is the owner.
   const accounts: StaffAccount[] = [];
@@ -1019,7 +1027,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     ["Tasks", taskItems.length],
     ["Tasks done or skipped", taskChecks.length],
   ].map(([what, count]) => ({ what: what as string, count: count as number }));
-  return { records, report: { shelbyCafe: snap.cafe.name, from: fromDay, moved, notMoved, warnings } };
+  return { records, report: { shelbyCafe: snap.cafe.name, from: fromDay, moved, notMoved, warnings, preview: !!opts.preview } };
 }
 
 /** What Shelby's drawer movements were, for a Kasa move's reason when it had no note. */

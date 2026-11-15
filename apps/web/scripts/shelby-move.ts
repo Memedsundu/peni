@@ -5,7 +5,8 @@
 //
 // Options: --cafe <Shelby café id> (when Shelby has several), --slug <Peni slug> (shelby),
 // --all (also the previous owner's records), --report <file.md>, --now <ISO time>,
-// --rehearsal (lets --write run while Shelby isn't frozen: for a copy, never for the real move),
+// --rehearsal (lets --write run while Shelby isn't frozen: for a copy, never for the real move;
+//   the copy has pennies and the askı off),
 // --replace (Penny has the café already: delete it and move again; the preview copy, N13),
 // --discard-penny-records (with --replace: even when people made records in Penny's copy).
 // Shelby is only read. Exits 1 when a total doesn't match.
@@ -44,7 +45,8 @@ async function main(): Promise<number> {
     throw new Error("Shelby still takes money: freeze it first (pnpm --filter @peni/web shelby-freeze --on), or add --rehearsal when this is a copy");
   }
   const from = flag("all") ? null : defaultFrom(snap);
-  const { records, report } = mapShelby(snap, { cafeId: `cafe_${slug}`, slug, now, from });
+  // A copy while Shelby works has pennies and the askı off (N13); so does its dry run.
+  const { records, report } = mapShelby(snap, { cafeId: `cafe_${slug}`, slug, now, from, preview: flag("rehearsal") });
 
   const stores = write ? createPrismaStores(createPrismaClient(peniUrl!)) : inMemoryStores();
   console.log(write ? "Writing into Peni…" : "Dry run: writing into memory…");

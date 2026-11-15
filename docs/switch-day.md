@@ -42,7 +42,7 @@ After the last customer:
    SHELBY_DATABASE_URL=<production> DATABASE_URL=<Peni production> pnpm --filter @peni/web shelby-move --cafe cmm9b62yt000004l252c4nooo --write --replace --report switch.md
    ```
 
-   It refuses to run while Shelby isn't frozen. `--replace` deletes the preview copy (and its staff accounts that aren't at another café) and moves in its place, in one transaction. If it stops because people made records in the preview copy, read the list: they're from before the switch and Shelby has the real ones, so add `--discard-penny-records` once you're sure. If it says the café has peni movements, stop: the ledger is never deleted, so the café can't be replaced, and Shelby carries on until that's sorted out.
+   It refuses to run while Shelby isn't frozen. Without `--rehearsal`, pennies and the askı are on, as in any café (the copy had them off). `--replace` deletes the preview copy (and its staff accounts that aren't at another café) and moves in its place, in one transaction. If it stops because people made records in the preview copy, read the list: they're from before the switch and Shelby has the real ones, so add `--discard-penny-records` once you're sure. If it says the café has peni movements, stop: the ledger is never deleted, so the café can't be replaced, and Shelby carries on until that's sorted out.
 5. **Check.** The command ends with "Every total matches." and exits 0. Then sign in to Peni's panel as the owner and look at Nakit ve banka (the drawer, the reserve and the bank as Shelby showed them), Borçlar and Puantaj.
 6. **Open Peni.** Set up the till computer (open `/kasa`, sign in once as the owner), and leave it on the Kasa screen. Point Shelby's address at Peni if you want old bookmarks to land there.
 

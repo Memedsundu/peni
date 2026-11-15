@@ -1031,6 +1031,10 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     await stores.orders.addOrders(orders);
     expect(await stores.orders.getOrder(cafeId, orders[2]!.id)).toEqual(orders[2]);
     await expect(stores.orders.addOrders([orders[0]!])).rejects.toThrow();
+    // The day's counter is at the highest number added: the till carries on after it, and a lower one never pulls it back.
+    expect(await stores.orders.nextNumber(cafeId, day)).toBe(104);
+    await stores.orders.addOrders([{ ...orders[0]!, id: `ord_bulk_low_${run}`, number: 50, createKey: `bulk_low_${run}` }]);
+    expect(await stores.orders.nextNumber(cafeId, day)).toBe(105);
 
     const payments = orders.map((o) => ({
       id: `pay_bulk_${o.id}`, cafeId, orderId: o.id, kind: "sale" as const, method: "cash" as const, status: "approved" as const, amountKurus: o.totalKurus,
@@ -1113,7 +1117,7 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
       return counts;
     };
     expect(Object.keys(await rowsOf(gone)).sort()).toEqual(
-      ["Bill", "BillPayment", "CafeSettings", "CashMove", "CashSession", "CafePost", "ContentReport", "DebtCheck", "Loan", "Membership", "Order", "Payment", "StaffMember", "StockItem", "StockMove", "StockRecipe", "StockRecipeLine", "Supplier"].sort(),
+      ["Bill", "BillPayment", "CafeSettings", "CashMove", "CashSession", "CafePost", "ContentReport", "DebtCheck", "Loan", "Membership", "Order", "OrderCounter", "Payment", "StaffMember", "StockItem", "StockMove", "StockRecipe", "StockRecipeLine", "Supplier"].sort(),
     );
     const otherBefore = await rowsOf(other);
 

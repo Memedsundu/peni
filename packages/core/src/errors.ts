@@ -9,6 +9,7 @@ export type PeniErrorCode =
   | "GIFT_INVALID"
   | "GIFT_LIMIT"
   | "GIFT_NOT_PENDING"
+  | "PENNY_OFF"
   | "ASKIDA_DISABLED"
   | "ASKIDA_EMPTY"
   | "ASKIDA_LIMIT"

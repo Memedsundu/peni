@@ -50,6 +50,11 @@ export class PrismaOrderStore implements OrderStore {
       const chunk = orders.slice(i, i + CHUNK);
       await db.order.createMany({ data: chunk.map(({ lines: _, ...o }) => o) });
       await db.orderLine.createMany({ data: chunk.flatMap((o) => o.lines.map((l, position) => ({ orderId: o.id, position, ...l }))) });
+      // Each day's counter at its highest number, in one statement, so the till carries on after it.
+      await db.$executeRaw`
+        INSERT INTO "OrderCounter" ("cafeId", "businessDay", "last")
+        SELECT "cafeId", "businessDay", MAX("number") FROM "Order" WHERE id = ANY(${chunk.map((o) => o.id)}::text[]) GROUP BY "cafeId", "businessDay"
+        ON CONFLICT ("cafeId", "businessDay") DO UPDATE SET "last" = GREATEST("OrderCounter"."last", EXCLUDED."last")`;
     }
   }
 

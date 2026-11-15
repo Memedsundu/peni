@@ -692,6 +692,48 @@ describe("Shelby → Penny (plan piece 33)", { timeout: 30_000 }, () => {
   });
 });
 
+describe("The preview copy: the team tries Penny while Shelby works (N13)", { timeout: 30_000 }, () => {
+  it("starts with pennies and the askı off; the real move keeps them on", () => {
+    expect(mapped.records.settings).toMatchObject({ peniEnabled: true, askidaEnabled: true });
+    expect(mapped.report.preview).toBe(false);
+    const copy = mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: NOW, preview: true });
+    expect(copy.records.settings).toMatchObject({ peniEnabled: false, askidaEnabled: false });
+    expect(reportMarkdown(copy.report, [], { when: NOW, mode: "Copy" })).toContain("**Pennies and the askı are off in this copy**");
+    expect(reportMarkdown(mapped.report, [], { when: NOW, mode: "Moved" })).not.toContain("are off in this copy");
+  });
+
+  it("lets the till sell on a day with moved orders, with the next number, and nothing reaches the peni ledger", async () => {
+    // Two sales in Shelby this morning, before the copy was taken.
+    for (const [id, time] of [
+      [97, "2026-10-19T05:00:00Z"],
+      [98, "2026-10-19T05:30:00Z"],
+    ] as const) {
+      snap.orders.push({ ...snap.orders[0]!, id, orderNumber: `ORD-20261019-00${id}`, status: "paid", paymentMethod: "cash", total: 120, createdAt: at(time), paidAt: at(time), updatedAt: at(time) });
+    }
+    const copy = mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: NOW, preview: true });
+    expect(copy.records.orders.filter((o) => o.businessDay === "2026-10-19").map((o) => o.number)).toEqual([1, 2]);
+    await writeShelby(stores, copy.records);
+    expect((await checkMove(snap, stores, "cafe_shelby")).filter((x) => !x.ok)).toEqual([]);
+
+    const app = new PeniApp({ demo: false, bcryptRounds: 4, clock: () => NOW }, stores);
+    const owner = await app.staff.at((await app.staff.signIn("mehmet@shelby.test", PASSWORD)).token, "shelby");
+    await app.cash.open(owner, { key: "open", countKurus: (await stores.cash.lastClosed("cafe_shelby"))!.closing!.countKurus });
+    const order = await app.till.create(owner, { createKey: "till-1", lines: [{ productId: "shelby_p10", quantity: 1 }] });
+    expect(order).toMatchObject({ number: 3, businessDay: "2026-10-19" });
+    const paid = await app.till.pay(owner, order.id, { method: "cash", payKey: "pay-1", tenderedKurus: 20_000 });
+    expect(paid.payment.status).toBe("approved");
+    expect((await app.till.get(owner, order.id)).status).toBe("paid");
+    // No penny code, and the ledger stays empty: the copy can always be replaced.
+    expect(await stores.claims.getClaimByOrder("cafe_shelby", order.id)).toBeNull();
+    const refused = (p: Promise<unknown>) => p.then(() => "ok", (e: { code?: string }) => e.code);
+    expect(await refused(app.tillDonation(owner, { peni: 5, idempotencyKey: "aski-nakit" }))).toBe("ASKIDA_DISABLED");
+    expect(await refused(app.counter.give(owner, { amountKurus: 10_000, key: "penny-1" }))).toBe("PENNY_OFF");
+    expect(await refused(app.till.create(owner, { createKey: "till-2", lines: [{ productId: "askida:shelby_p10", quantity: 1 }] }))).toBe("PRODUCT_NOT_ELIGIBLE");
+    expect(await stores.ledger.query({ cafeId: "cafe_shelby" })).toEqual([]);
+    expect(await pennyMade(stores, "cafe_shelby")).toEqual(expect.arrayContaining([{ what: "till orders", count: 1 }]));
+  });
+});
+
 describe("The preview copy: replacing the café with a fresh move (N13)", { timeout: 30_000 }, () => {
   const LATER = at("2026-10-21T06:00:00Z");
   const again = () => mapShelby(snap, { cafeId: "cafe_shelby", slug: "shelby", now: LATER }).records;

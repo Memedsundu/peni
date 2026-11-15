@@ -46,8 +46,15 @@ describe("taking a claim (plan piece 10)", () => {
       await directory.saveMembership({ id, cafeId: id === "other" ? "c2" : CAFE, customerId: `cust_${id}`, joinedAt: at, blocked: false });
     }
     await claims.saveClaim(claim("a", "0427", { peni: 12 }));
-    return { service, claims, setNow: (d: Date) => (now = d) };
+    return { service, claims, directory, setNow: (d: Date) => (now = d) };
   };
+
+  it("gives nothing while the café's pennies are off", async () => {
+    const { service, directory } = await setup();
+    directory.settings.set(CAFE, { ...defaultSettings(CAFE), peniEnabled: false });
+    await expect(service.takeClaim("a", "ayse")).rejects.toMatchObject({ code: "PENNY_OFF" });
+    expect(await service.walletBalance("ayse")).toBe(0);
+  });
 
   it("credits the claim's peni once, to whoever took it first", async () => {
     const { service, claims } = await setup();
