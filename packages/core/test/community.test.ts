@@ -54,6 +54,28 @@ describe("the community store", () => {
     store.forgetCafe("moda");
     expect(await store.seenAt("moda")).toBeNull();
   });
+
+  it("reads the feed a page at a time, by time then id, without skipping or repeating posts published together", async () => {
+    const store = new InMemoryCommunityStore();
+    // p3, p4 and p5 go out at the same instant; p6 is pinned; p7 is taken down; k1 is another café's.
+    for (const [id, minutes] of [["p1", 1], ["p2", 2], ["p3", 3], ["p4", 3], ["p5", 3], ["p6", 4], ["p7", 5]] as const) {
+      await store.savePost(post(id, "moda", { publishedAt: later(minutes * 60_000), pinned: id === "p6", hiddenAt: id === "p7" ? at : null }));
+    }
+    await store.savePost(post("k1", "kuzguncuk", { publishedAt: later(10 * 60_000) }));
+
+    const seen: string[] = [];
+    let before: { publishedAt: Date; id: string } | null = null;
+    for (;;) {
+      const page = await store.pagePosts("moda", { before, limit: 2, skip: ["p6"] });
+      seen.push(...page.map((p) => p.id));
+      if (page.length < 2) break;
+      before = { publishedAt: page.at(-1)!.publishedAt, id: page.at(-1)!.id };
+    }
+    expect(seen).toEqual(["p5", "p4", "p3", "p2", "p1"]);
+    expect((await store.listPinned("moda")).map((p) => p.id)).toEqual(["p6"]);
+    expect(await store.countPosts("moda")).toBe(6);
+    expect(await store.pagePosts("moda", { limit: 0 })).toEqual([]);
+  });
 });
 
 describe("eventOver", () => {

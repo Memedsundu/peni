@@ -213,6 +213,36 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect((await stores.community.listPosts(cafeId))[0]!.rsvps).toEqual([ayse]);
   });
 
+  it("reads the feed a page at a time, by time then id, without skipping or repeating posts published together", async () => {
+    // A café of its own, so the other tests' posts don't land on these pages.
+    const pageCafe = `cafe_page_${run}`;
+    await stores.identity.saveCafe({
+      id: pageCafe, slug: `sayfa-${run}`, name: "Sayfa", address: null, district: null, city: null, coverImageUrl: null,
+      referenceProductIds: [], hue: null, plan: "penny", trialEndsAt: null,
+    });
+    const id = (n: string) => `post_pg${n}_${run}`;
+    const base = { cafeId: pageCafe, kind: "post" as const, title: null, body: "Merhaba", pinned: false, eventStartsAt: null, eventCapacity: null };
+    // 3, 4 and 5 go out at the same instant; 6 is pinned; 7 is taken down.
+    for (const [n, minutes] of [["1", 1], ["2", 2], ["3", 3], ["4", 3], ["5", 3], ["6", 4], ["7", 5]] as const) {
+      await stores.community.savePost({ ...base, id: id(n), publishedAt: new Date(at.getTime() + minutes * 60_000), pinned: n === "6", hiddenAt: n === "7" ? at : null });
+    }
+    for (let i = 0; i < 3; i++) await stores.community.addComment(id("3"), { id: `cmt_pg${i}_${run}`, customerId: ayse, body: `${i}`, createdAt: new Date(at.getTime() + i) });
+
+    const seen: string[] = [];
+    let before: { publishedAt: Date; id: string } | null = null;
+    for (;;) {
+      const page = await stores.community.pagePosts(pageCafe, { before, limit: 2, skip: [id("6")] });
+      seen.push(...page.map((p) => p.id));
+      if (page.length < 2) break;
+      before = { publishedAt: page.at(-1)!.publishedAt, id: page.at(-1)!.id };
+    }
+    expect(seen).toEqual([id("5"), id("4"), id("3"), id("2"), id("1")]);
+    expect((await stores.community.pagePosts(pageCafe, { limit: 10, skip: [id("6")] })).find((p) => p.id === id("3"))!.comments).toHaveLength(3);
+    expect((await stores.community.listPinned(pageCafe)).map((p) => p.id)).toEqual([id("6")]);
+    expect(await stores.community.countPosts(pageCafe)).toBe(6);
+    expect(await stores.community.pagePosts(pageCafe, { limit: 0 })).toEqual([]);
+  });
+
   it("keeps photos, hidden comments for moderators only, and posts taken down", async () => {
     const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
     await stores.images.save({ id: `img_${run}`, cafeId, contentType: "image/png", bytes: png, uploadedBy: "staff_x", createdAt: at });

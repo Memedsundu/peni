@@ -47,6 +47,7 @@ const TEXT = {
 
   // The posts
   noPosts: { tr: "Henüz paylaşım yok. İlkini yaz.", en: "No posts yet. Write the first one." },
+  olderPostsN: { tr: "Daha eski {n} paylaşımı göster", en: "Show {n} older posts" },
   pinned: { tr: "Sabit", en: "Pinned" },
   event: { tr: "Etkinlik", en: "Event" },
   question: { tr: "Günün sorusu", en: "Question of the day" },

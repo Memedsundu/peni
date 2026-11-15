@@ -693,6 +693,11 @@ export interface PostDTO {
   reactionCount: number;
   /** Members' comments and the café's replies, as many as the viewer can see. */
   commentCount: number;
+  /**
+   * How many earlier comments a feed page left out: it carries a post's newest comments only.
+   * `cafes.post` answers with all of them. 0 when they are all here.
+   */
+  earlierComments: number;
   rsvpCount: number;
   reactedByMe: boolean;
   rsvpedByMe: boolean;
@@ -729,7 +734,10 @@ export interface StaffFeedDTO {
   canWrite: boolean;
   /** "posts.moderate": hide comments, take down members' events, handle reports and pause members. */
   canModerate: boolean;
+  /** The newest posts, pinned ones first; as many as `?limit=` asks for (30 unless said). */
   posts: StaffPostDTO[];
+  /** How many older posts are not in `posts`. */
+  olderPosts: number;
   /** Open reports, one per reported thing, oldest first. Empty without "posts.moderate". */
   reports: StaffReportDTO[];
   /** Members paused in the community. Empty without "posts.moderate". */
@@ -797,8 +805,21 @@ export interface CafeDetailDTO extends CafeSummaryDTO {
   maxRedeemSharePercent: number;
   menu: MenuItemDTO[];
   askida: AskidaDTO;
+  /**
+   * The feed's first page: what the café pinned, then its newest posts. Asked for with
+   * `?post=<id>`, it is that one post alone, with every comment (the page a shared link opens).
+   */
   posts: PostDTO[];
+  /** Hand it to `cafes.posts` as `before` for the next page of older posts; null when there are none. */
+  olderPosts: string | null;
   membership: MembershipDTO | null;
+}
+
+/** `GET /cafes/:slug/posts?before=`: the next page of older posts. */
+export interface PostsPageDTO {
+  posts: PostDTO[];
+  /** For the page after this one; null at the end. */
+  olderPosts: string | null;
 }
 
 export interface GiftDTO {

@@ -2,10 +2,10 @@ import type { CafeDetailDTO, PostDTO, ReportInput } from "@peni/api";
 import { fill } from "@peni/api/customer-text";
 import { goods } from "@peni/brand/format";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useEffect, useState } from "react";
-import { Image, Linking, Pressable, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Image, Linking, Pressable, ScrollView, Share, TextInput, useWindowDimensions, View } from "react-native";
 import Svg, { Path } from "react-native-svg";
-import { api, imageUri, newKey } from "../../lib/api";
+import { api, API_URL, imageUri, newKey, PUBLIC_URL } from "../../lib/api";
 import { dayLabel, when } from "../../lib/dates";
 import { useSession } from "../../lib/session";
 import { FONTS } from "../../lib/theme";
@@ -17,7 +17,7 @@ type ReportTarget = Pick<ReportInput, "targetType" | "targetId">;
 /**
  * A café's page (DS25): its photo and name, the viewer's peni here, what's on the askı, then
  * the feed (plan piece 14). Anyone can read it; members like, comment, open events and report
- * what other members wrote (piece 15).
+ * what other members wrote (piece 15). The feed comes a page at a time, as on the website.
  */
 export default function CafePage() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
@@ -30,21 +30,68 @@ export default function CafePage() {
   const [eventSheet, setEventSheet] = useState<"new" | PostDTO | null>(null);
   const [reporting, setReporting] = useState<ReportTarget | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  /** The feed as far as it has been read: the first page, then each older page asked for. */
+  const [posts, setPosts] = useState<PostDTO[]>([]);
+  const [older, setOlder] = useState<string | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  /** Whether older pages have been read: a fresh first page then goes on top of them, not instead of them. */
+  const deep = useRef(false);
 
-  const load = useCallback(() => api.cafes.get(slug).then(setCafe, (e: unknown) => setMessage(error(e))), [slug, error]);
+  const load = useCallback(
+    () =>
+      api.cafes.get(slug).then(
+        (c) => {
+          setCafe(c);
+          if (deep.current) {
+            const fresh = new Set(c.posts.map((p) => p.id));
+            setPosts((was) => [...c.posts, ...was.filter((p) => !fresh.has(p.id))]);
+          } else {
+            setPosts(c.posts);
+            setOlder(c.olderPosts);
+          }
+        },
+        (e: unknown) => setMessage(error(e)),
+      ),
+    [slug, error],
+  );
   useEffect(() => {
     void load();
   }, [load, me]);
 
-  /** Runs an action on the feed, then shows the café as it is now. */
-  const act = async (call: () => Promise<unknown>) => {
+  /** One post as the café has it now, with every comment; gone from the feed if it was taken down. */
+  const refresh = (id: string) =>
+    api.cafes.post(slug, id).then(
+      (fresh) => setPosts((was) => was.map((p) => (p.id === id ? fresh : p))),
+      () => setPosts((was) => was.filter((p) => p.id !== id)),
+    );
+
+  /** Runs an action on the feed, then shows things as they are now: that post, or the whole café. */
+  const act = async (call: () => Promise<unknown>, id?: string) => {
     setMessage(null);
     try {
       await call();
     } catch (e) {
       setMessage(error(e));
     }
-    await load();
+    await (id ? refresh(id) : load());
+  };
+
+  const loadOlder = async () => {
+    if (!older || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await api.cafes.posts(slug, older);
+      deep.current = true;
+      setPosts((was) => {
+        const have = new Set(was.map((p) => p.id));
+        return [...was, ...page.posts.filter((p) => !have.has(p.id))];
+      });
+      setOlder(page.olderPosts);
+    } catch (e) {
+      setMessage(error(e));
+    } finally {
+      setLoadingOlder(false);
+    }
   };
 
   if (!cafe) return <Screen>{message ? <Notice tone="red">{message}</Notice> : <Loading />}</Screen>;
@@ -101,14 +148,31 @@ export default function CafePage() {
 
       {message && <Notice tone="red">{message}</Notice>}
       <View style={{ gap: 16 }} accessibilityLabel={t("fromCafe")}>
-        {cafe.posts.length === 0 && (
+        {posts.length === 0 && (
           <Txt muted center style={{ paddingVertical: 24 }}>
             {t("noFeed")}
           </Txt>
         )}
-        {cafe.posts.map((p) => (
-          <Post key={p.id} slug={cafe.slug} cafeName={cafe.name} post={p} member={member} paused={paused} act={act} onEdit={() => setEventSheet(p)} onReport={setReporting} onNeedMember={join} />
+        {posts.map((p) => (
+          <Post
+            key={p.id}
+            slug={cafe.slug}
+            cafeName={cafe.name}
+            post={p}
+            member={member}
+            paused={paused}
+            act={(call) => act(call, p.id)}
+            onWhole={() => refresh(p.id)}
+            onEdit={() => setEventSheet(p)}
+            onReport={setReporting}
+            onNeedMember={join}
+          />
         ))}
+        {older && (
+          <Btn kind="quiet" busy={loadingOlder} onPress={() => void loadOlder()}>
+            {t("olderPosts")}
+          </Btn>
+        )}
       </View>
 
       {eventSheet && (
@@ -209,6 +273,7 @@ function Post({
   member,
   paused,
   act,
+  onWhole,
   onEdit,
   onReport,
   onNeedMember,
@@ -219,6 +284,8 @@ function Post({
   member: boolean;
   paused: boolean;
   act: (call: () => Promise<unknown>) => Promise<void>;
+  /** Brings the post with every comment, for the earlier ones its page of the feed left out. */
+  onWhole: () => Promise<void>;
   onEdit: () => void;
   onReport: (target: ReportTarget) => void;
   onNeedMember: () => void;
@@ -228,7 +295,13 @@ function Post({
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const canWrite = member && !paused;
+  const showEarlier = async () => {
+    setLoadingEarlier(true);
+    await onWhole();
+    setLoadingEarlier(false);
+  };
   const run = async (call: () => Promise<unknown>) => {
     setBusy(true);
     await act(call);
@@ -238,6 +311,16 @@ function Post({
   const sendComment = () => {
     const body = comment.trim();
     if (body) void run(() => api.cafes.comment(slug, post.id, body)).then(() => setComment(""));
+  };
+  const share = async () => {
+    // The link's path from the client, at the public web address people can open.
+    const url = `${PUBLIC_URL.replace(/\/$/, "")}${api.cafes.shareUrl(slug, post.id).slice(API_URL.replace(/\/$/, "").length)}`;
+    const title = post.title ?? cafeName;
+    try {
+      await Share.share({ title, message: `${title}\n${url}`, url });
+    } catch {
+      // closed the share sheet, or none on this device
+    }
   };
 
   return (
@@ -277,6 +360,18 @@ function Post({
           {when(post.eventStartsAt, lang, true)}
         </Txt>
       ) : null}
+      {post.kind === "event" && (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
+          <Attendees people={post.attendees} />
+          <Txt size={14} muted>
+            {post.eventOver
+              ? fill(t("wentN"), { n: post.rsvpCount })
+              : post.eventCapacity
+                ? fill(t("goingOfN"), { n: post.rsvpCount, max: post.eventCapacity })
+                : fill(t("goingN"), { n: post.rsvpCount })}
+          </Txt>
+        </View>
+      )}
 
       <Photos urls={post.imageUrls} />
       {post.body ? <Txt style={{ lineHeight: 26 }}>{post.body}</Txt> : null}
@@ -310,16 +405,23 @@ function Post({
             {post.rsvpedByMe ? `${t("goingYes")} ✓` : t("join")}
           </Btn>
         )}
-        <View style={{ marginLeft: "auto" }}>
-          <Txt size={14} muted>
-            {post.kind !== "event"
-              ? fill(t("commentsN"), { n: post.commentCount })
-              : post.eventOver
-                ? fill(t("wentN"), { n: post.rsvpCount })
-                : post.eventCapacity
-                ? fill(t("goingOfN"), { n: post.rsvpCount, max: post.eventCapacity })
-                : fill(t("goingN"), { n: post.rsvpCount })}
-          </Txt>
+        <View style={{ marginLeft: "auto", flexDirection: "row", alignItems: "center", gap: 4 }}>
+          {post.kind !== "event" && (
+            <Txt size={14} muted>
+              {fill(t("commentsN"), { n: post.commentCount })}
+            </Txt>
+          )}
+          <Pressable
+            onPress={() => void share()}
+            accessibilityRole="button"
+            accessibilityLabel={t("sharePost")}
+            hitSlop={4}
+            style={({ pressed }) => [{ width: 44, height: 44, alignItems: "center", justifyContent: "center" }, pressed && { opacity: 0.6 }]}
+          >
+            <Svg width={20} height={20} viewBox="0 0 24 24">
+              <Path d="M12 15V4M8 7.5L12 4l4 3.5M6 12v6.5A1.5 1.5 0 0 0 7.5 20h9a1.5 1.5 0 0 0 1.5-1.5V12" fill="none" stroke={c.muted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+            </Svg>
+          </Pressable>
         </View>
       </View>
 
@@ -356,6 +458,12 @@ function Post({
 
       {post.comments.length > 0 && (
         <View style={{ gap: 10, borderLeftWidth: 2, borderColor: c.line, paddingLeft: 16 }}>
+          {/* The feed brings a post's newest comments; the earlier ones come on asking. */}
+          {post.earlierComments > 0 && (
+            <Btn kind="bare" size="sm" busy={loadingEarlier} onPress={() => void showEarlier()} style={{ alignSelf: "flex-start", paddingHorizontal: 0 }}>
+              {fill(t("earlierComments"), { n: post.earlierComments })}
+            </Btn>
+          )}
           {post.comments.map((cm) => (
             <View key={cm.id} style={{ gap: 8 }}>
               <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
@@ -407,6 +515,38 @@ function Post({
           <Btn kind="secondary" size="sm" disabled={busy || !comment.trim()} onPress={sendComment}>
             {t("sendComment")}
           </Btn>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const FACES = 6;
+
+/**
+ * Who's coming: small circles with initials, in the order they said so. A hidden profile is a
+ * plain dot; the viewer's own is filled in the café's colour. At most six, then "+N".
+ */
+function Attendees({ people }: { people: PostDTO["attendees"] }) {
+  const { t } = useSession();
+  const c = useScreenColors();
+  if (people.length === 0) return null;
+  const more = people.length - FACES;
+  const circle = { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: c.paper } as const;
+  return (
+    <View accessible accessibilityRole="image" accessibilityLabel={t("whoIsGoing")} style={{ flexDirection: "row", alignItems: "center" }}>
+      {people.slice(0, FACES).map((a, i) => (
+        <View key={i} style={[circle, { marginLeft: i === 0 ? 0 : -6, backgroundColor: a.me ? c.cafe : c.tile }]}>
+          <Txt size={11} weight="semibold" color={a.me ? c.paper : c.ink}>
+            {a.initials ?? "·"}
+          </Txt>
+        </View>
+      ))}
+      {more > 0 && (
+        <View style={[circle, { marginLeft: -6, width: undefined, minWidth: 28, paddingHorizontal: 4, backgroundColor: c.panel }]}>
+          <Txt size={11} weight="semibold" color={c.muted}>
+            {fill(t("moreGoing"), { n: more })}
+          </Txt>
         </View>
       )}
     </View>

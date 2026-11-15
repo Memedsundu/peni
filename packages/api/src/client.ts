@@ -1,5 +1,7 @@
 import type {
   AuthProvidersDTO,
+  PostDTO,
+  PostsPageDTO,
   ClaimDTO,
   PeniCheckDTO,
   TillAskidaDTO,
@@ -251,7 +253,13 @@ export function createPeniClient(options: PeniClientOptions) {
     },
     cafes: {
       list: () => call<{ cafes: CafeSummaryDTO[] }>("GET", "/cafes"),
-      get: (cafeSlug: string) => call<CafeDetailDTO>("GET", `/cafes/${slug(cafeSlug)}`),
+      /** The café with its feed's first page; with `post`, with that one post alone and all its comments. */
+      get: (cafeSlug: string, opts: { post?: string } = {}) =>
+        call<CafeDetailDTO>("GET", `/cafes/${slug(cafeSlug)}${opts.post ? `?post=${encodeURIComponent(opts.post)}` : ""}`),
+      /** The next page of older posts; `before` is the `olderPosts` of the page before. */
+      posts: (cafeSlug: string, before: string) => call<PostsPageDTO>("GET", `/cafes/${slug(cafeSlug)}/posts?before=${encodeURIComponent(before)}`),
+      /** One post with every comment, for "Önceki yorumları göster". */
+      post: (cafeSlug: string, postId: string) => call<PostDTO>("GET", `/cafes/${slug(cafeSlug)}/posts/${slug(postId)}`),
       join: (cafeSlug: string) => call<CafeDetailDTO>("POST", `/cafes/${slug(cafeSlug)}/join`, {}),
       react: (cafeSlug: string, postId: string) =>
         call<{ ok: true }>("POST", `/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/react`, {}),
@@ -285,6 +293,8 @@ export function createPeniClient(options: PeniClientOptions) {
       /** Public `text/calendar` link for a Peni masası; open it with `Linking`. [G22] */
       icsUrl: (cafeSlug: string, postId: string) =>
         `${base}/api/v1/cafes/${slug(cafeSlug)}/posts/${slug(postId)}/ics`,
+      /** The web address to share: the café's page, or one post's own page. */
+      shareUrl: (cafeSlug: string, postId?: string) => `${base}/kafe/${slug(cafeSlug)}${postId ? `/g/${slug(postId)}` : ""}`,
     },
     wallet: {
       get: () => call<FullWalletDTO>("GET", "/me/wallet"),
@@ -649,7 +659,8 @@ export function createPeniClient(options: PeniClientOptions) {
       },
       /** Topluluk (plan piece 14): every change answers with the whole feed. */
       feed: {
-        get: (cafeSlug: string) => call<StaffFeedDTO>("GET", `/staff/${slug(cafeSlug)}/feed`, undefined, true),
+        /** The newest 30 posts unless `limit` asks for more ("Daha eskileri göster"). */
+        get: (cafeSlug: string, limit?: number) => call<StaffFeedDTO>("GET", `/staff/${slug(cafeSlug)}/feed${limit ? `?limit=${limit}` : ""}`, undefined, true),
         create: (cafeSlug: string, input: CreatePostInput) => call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed`, input, true),
         update: (cafeSlug: string, postId: string, input: UpdatePostInput) =>
           call<StaffFeedDTO>("POST", `/staff/${slug(cafeSlug)}/feed/${slug(postId)}`, input, true),

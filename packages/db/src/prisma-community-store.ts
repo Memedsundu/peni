@@ -1,4 +1,4 @@
-import type { CommunityStore, ListOptions, Post, PostComment, PostWithActivity } from "@peni/core";
+import type { CommunityStore, ListOptions, PageOptions, Post, PostComment, PostWithActivity } from "@peni/core";
 import type { Db } from "./db";
 
 const activity = (opts: ListOptions) =>
@@ -49,6 +49,37 @@ export class PrismaCommunityStore implements CommunityStore {
       orderBy: { publishedAt: "desc" },
     });
     return rows.map(toDomain);
+  }
+
+  async pagePosts(cafeId: string, page: PageOptions): Promise<PostWithActivity[]> {
+    if (page.limit <= 0) return [];
+    const before = page.before;
+    const rows = await this.db().cafePost.findMany({
+      where: {
+        cafeId,
+        hiddenAt: null,
+        ...(page.skip?.length ? { id: { notIn: page.skip } } : {}),
+        // Older than the cursor, or published at the same instant with a smaller id.
+        ...(before ? { OR: [{ publishedAt: { lt: before.publishedAt } }, { publishedAt: before.publishedAt, id: { lt: before.id } }] } : {}),
+      },
+      include: activity(page),
+      orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
+      take: page.limit,
+    });
+    return rows.map(toDomain);
+  }
+
+  async listPinned(cafeId: string, opts: ListOptions = {}): Promise<PostWithActivity[]> {
+    const rows = await this.db().cafePost.findMany({
+      where: { cafeId, hiddenAt: null, pinned: true },
+      include: activity(opts),
+      orderBy: [{ publishedAt: "desc" }, { id: "desc" }],
+    });
+    return rows.map(toDomain);
+  }
+
+  async countPosts(cafeId: string): Promise<number> {
+    return this.db().cafePost.count({ where: { cafeId, hiddenAt: null } });
   }
 
   async toggleReaction(postId: string, customerId: string, at: Date): Promise<boolean> {

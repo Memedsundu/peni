@@ -68,12 +68,46 @@ export const COMMENTS_PER_HOUR = 30;
 /** Moderators see hidden comments too, and find taken-down posts that were reported; everyone else never does. */
 export type ListOptions = { hiddenComments?: boolean; hiddenPosts?: boolean };
 
+/** A page of the customers' feed holds this many posts besides the pinned ones on top. */
+export const FEED_PAGE = 10;
+/** A post on a feed page carries this many of its newest members' comments; the rest come on asking. */
+export const COMMENTS_IN_FEED = 20;
+
+/**
+ * Where a page of the feed ended. Posts go newest first by time, then by id, so two posts
+ * published at the same instant still have a fixed order and none is skipped or repeated.
+ */
+export interface FeedCursor {
+  publishedAt: Date;
+  id: string;
+}
+
+export interface PageOptions {
+  /** Only posts after this one in feed order; from the newest when left out. */
+  before?: FeedCursor | null;
+  limit: number;
+  /** Post ids to leave out: the pinned ones already shown on top. */
+  skip?: string[];
+  hiddenComments?: boolean;
+}
+
+/** Feed order: newest first, then by id, so posts published at the same instant keep one order. */
+export function feedOrder(a: Pick<Post, "publishedAt" | "id">, b: Pick<Post, "publishedAt" | "id">): number {
+  return b.publishedAt.getTime() - a.publishedAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+}
+
 export interface CommunityStore {
   savePost(post: Post): Promise<void>;
   /** Posts taken down aren't found, unless `hiddenPosts`. */
   getPost(id: string, opts?: ListOptions): Promise<PostWithActivity | null>;
   /** All of a café's posts still up, newest first. */
   listPosts(cafeId: string, opts?: ListOptions): Promise<PostWithActivity[]>;
+  /** One page of a café's posts still up, in feed order, without reading the rest. */
+  pagePosts(cafeId: string, page: PageOptions): Promise<PostWithActivity[]>;
+  /** A café's pinned posts still up, in feed order. There are only ever a few. */
+  listPinned(cafeId: string, opts?: ListOptions): Promise<PostWithActivity[]>;
+  /** How many posts a café has still up. */
+  countPosts(cafeId: string): Promise<number>;
   /** Returns whether the customer now reacts to the post. */
   toggleReaction(postId: string, customerId: string, at: Date): Promise<boolean>;
   addRsvp(postId: string, customerId: string, at: Date): Promise<void>;
@@ -125,6 +159,28 @@ export class InMemoryCommunityStore implements CommunityStore {
       .filter((p) => p.cafeId === cafeId && !p.hiddenAt)
       .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
       .map((p) => copy(p, opts));
+  }
+
+  async pagePosts(cafeId: string, page: PageOptions) {
+    const skip = new Set(page.skip ?? []);
+    const before = page.before;
+    return [...this.posts.values()]
+      .filter((p) => p.cafeId === cafeId && !p.hiddenAt && !skip.has(p.id))
+      .filter((p) => !before || feedOrder(before, p) < 0)
+      .sort(feedOrder)
+      .slice(0, Math.max(0, page.limit))
+      .map((p) => copy(p, page));
+  }
+
+  async listPinned(cafeId: string, opts: ListOptions = {}) {
+    return [...this.posts.values()]
+      .filter((p) => p.cafeId === cafeId && !p.hiddenAt && p.pinned)
+      .sort(feedOrder)
+      .map((p) => copy(p, opts));
+  }
+
+  async countPosts(cafeId: string) {
+    return [...this.posts.values()].filter((p) => p.cafeId === cafeId && !p.hiddenAt).length;
   }
 
   async toggleReaction(postId: string, customerId: string) {
