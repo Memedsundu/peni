@@ -1,3 +1,5 @@
+import { forgetIn } from "./removal";
+
 /** The café feed: posts, questions and events, with comments, reactions and RSVPs. */
 
 export type PostKind = "post" | "question" | "event";
@@ -67,6 +69,11 @@ export const MAX_POST_IMAGES = 6;
 
 export class InMemoryCommunityStore implements CommunityStore {
   private readonly posts = new Map<string, PostWithActivity>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.posts, cafeId);
+  }
 
   async savePost(post: Post) {
     const existing = this.posts.get(post.id);

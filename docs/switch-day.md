@@ -2,6 +2,8 @@
 
 Plan piece 35. Shelby Cafe moves to Peni in one go, after closing time: Shelby stops taking money, its records move, the totals are checked, and the next morning the café opens on Peni. If a total doesn't match, Peni doesn't open and Shelby carries on as before.
 
+Until then Penny's production database may already hold a **preview copy** of the café, refreshed from Shelby now and then ([shelby-move.md](shelby-move.md#the-preview-copy)). Switch night replaces it with the final move, so the move there uses `--replace`.
+
 The commands are in `apps/web` (`pnpm --filter @peni/web …`). `shelby-move` is explained in [shelby-move.md](shelby-move.md); what has to be ready before the public opening is in [launch.md](launch.md).
 
 ## In the week before
@@ -10,9 +12,12 @@ The commands are in `apps/web` (`pnpm --filter @peni/web …`). `shelby-move` is
 2. **Rehearse on real data.** Make a Neon branch of Shelby's production database, and a throwaway Peni database. Run:
 
    ```sh
-   SHELBY_DATABASE_URL=<branch> pnpm --filter @peni/web shelby-move --report dry.md
-   SHELBY_DATABASE_URL=<branch> DATABASE_URL=<throwaway> pnpm --filter @peni/web shelby-move --write --rehearsal --report rehearsal.md
+   SHELBY_DATABASE_URL=<branch> pnpm --filter @peni/web shelby-move --cafe cmm9b62yt000004l252c4nooo --report dry.md
+   SHELBY_DATABASE_URL=<branch> DATABASE_URL=<throwaway> pnpm --filter @peni/web shelby-move --cafe cmm9b62yt000004l252c4nooo --write --rehearsal --report rehearsal.md
+   SHELBY_DATABASE_URL=<branch> DATABASE_URL=<throwaway> pnpm --filter @peni/web shelby-move --cafe cmm9b62yt000004l252c4nooo --write --rehearsal --replace --report replace.md
    ```
+
+   The last one replaces the copy it just made, as switch night will replace the preview copy.
 
    Every total should say ✓. Read "Not moved" and "To look at". Start Peni on the throwaway database and sign in with your Shelby email and password: Bugün, Faturalar, Borçlar, Nakit ve banka, Stok, Vardiyalar, Puantaj and Görevler should read as Shelby does. Repeat with a fresh branch until nothing surprises you.
 3. **The team.** Everyone's Shelby email and password work in Peni. Show them the till (`/kasa`) and the panel on the throwaway copy. Each person signs in with their password and sets their own till PIN.
@@ -34,10 +39,10 @@ After the last customer:
 4. **Move.**
 
    ```sh
-   SHELBY_DATABASE_URL=<production> DATABASE_URL=<Peni production> pnpm --filter @peni/web shelby-move --write --report switch.md
+   SHELBY_DATABASE_URL=<production> DATABASE_URL=<Peni production> pnpm --filter @peni/web shelby-move --cafe cmm9b62yt000004l252c4nooo --write --replace --report switch.md
    ```
 
-   It refuses to run while Shelby isn't frozen, and only writes into an empty café.
+   It refuses to run while Shelby isn't frozen. Without `--rehearsal`, pennies and the askı are on, as in any café (the copy had them off). `--replace` deletes the preview copy (and its staff accounts that aren't at another café) and moves in its place, in one transaction. If it stops because people made records in the preview copy, read the list: they're from before the switch and Shelby has the real ones, so add `--discard-penny-records` once you're sure. If it says the café has peni movements, stop: the ledger is never deleted, so the café can't be replaced, and Shelby carries on until that's sorted out.
 5. **Check.** The command ends with "Every total matches." and exits 0. Then sign in to Peni's panel as the owner and look at Nakit ve banka (the drawer, the reserve and the bank as Shelby showed them), Borçlar and Puantaj.
 6. **Open Peni.** Set up the till computer (open `/kasa`, sign in once as the owner), and leave it on the Kasa screen. Point Shelby's address at Peni if you want old bookmarks to land there.
 
@@ -45,7 +50,7 @@ Shelby stays frozen from then on, as the read-only record of everything before t
 
 ## If something doesn't match
 
-- **Before Peni opened:** don't open it. Let Shelby take money again with `shelby-freeze --off`, and the café opens on Shelby in the morning. Make a fresh Peni database (the move only writes into an empty café), fix the cause, rehearse again, and pick another night.
+- **Before Peni opened:** don't open it. Let Shelby take money again with `shelby-freeze --off`, and the café opens on Shelby in the morning. What's in Penny is a copy like the preview, and the next move replaces it with `--replace`. Fix the cause, rehearse again, and pick another night.
 - **After Peni opened:** Peni's records since the switch don't go back to Shelby. Note the difference, correct it in Peni (a bill, a correction in Nakit ve banka, a stock count) and say so in the month's close.
 
 ## The morning after

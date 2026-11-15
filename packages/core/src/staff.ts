@@ -11,6 +11,7 @@
  */
 
 import { planAllows, type CafePlan } from "./plans";
+import { forgetIn, type RemovedCafe } from "./removal";
 
 export const STAFF_ROLES = ["owner", "manager", "chef", "barista"] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
@@ -619,6 +620,21 @@ export class InMemoryStaffStore implements StaffStore {
   private readonly failures = new Map<string, Date[]>();
   private readonly overrides = new Map<string, RoleOverride[]>();
   private readonly devices = new Map<string, { device: TillDevice; tokenHash: string }>();
+
+  /** For removing the café (N13): its team, till computers and roles; an account with no other café goes too. */
+  forgetCafe(cafeId: string): RemovedCafe {
+    const people = [...this.members.values()].filter((m) => m.cafeId === cafeId).map((m) => m.accountId);
+    forgetIn(this.members, cafeId);
+    forgetIn(this.sessions, cafeId);
+    this.overrides.delete(cafeId);
+    for (const [id, d] of this.devices) if (d.device.cafeId === cafeId) this.devices.delete(id);
+    const gone = people.filter((a) => ![...this.members.values()].some((m) => m.accountId === a));
+    for (const accountId of gone) {
+      this.accounts.delete(accountId);
+      for (const [hash, s] of this.sessions) if (s.accountId === accountId) this.sessions.delete(hash);
+    }
+    return { accountsRemoved: gone.length, accountsKept: people.length - gone.length };
+  }
 
   async getAccount(id: string) {
     const a = this.accounts.get(id);

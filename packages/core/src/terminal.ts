@@ -3,6 +3,7 @@ import type { Kurus } from "./money";
 import { saleKdv } from "./menu";
 import { lineTotal, type Order } from "./orders";
 import { amountPaid, type Payment } from "./payments";
+import { forgetIn } from "./removal";
 
 /**
  * The yazarkasa (N12). In Turkey every sale is registered on the café's fiscal device (ÖKC),
@@ -400,6 +401,12 @@ export interface TerminalStore {
 export class InMemoryTerminalStore implements TerminalStore {
   private readonly bridges = new Map<string, TillBridge>();
   private readonly jobs = new Map<string, TerminalJob>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.bridges, cafeId);
+    forgetIn(this.jobs, cafeId);
+  }
 
   async saveBridge(bridge: TillBridge) {
     this.bridges.set(bridge.id, structuredClone(bridge));

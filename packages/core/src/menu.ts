@@ -1,4 +1,5 @@
 import type { Kurus } from "./money";
+import { forgetIn, forgetKeys } from "./removal";
 
 /**
  * Menü (plan piece 5): what a café sells. Categories hold products; the till, the
@@ -104,6 +105,12 @@ export function sameMenuName(a: string, b: string): boolean {
 export class InMemoryMenuStore implements MenuStore {
   private readonly categories = new Map<string, MenuCategory>();
   private readonly products = new Map<string, MenuItem>(); // `${cafeId}:${productId}`
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.categories, cafeId);
+    forgetKeys(this.products, `${cafeId}:`);
+  }
 
   async listCategories(cafeId: string) {
     return [...this.categories.values()]

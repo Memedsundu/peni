@@ -1,3 +1,5 @@
+import { forgetIn } from "./removal";
+
 /**
  * Photos a café uploads (plan piece 14: the feed; menu photos can use them too). The
  * browser shrinks a photo before it's sent, so each one stays small enough to keep in
@@ -25,6 +27,12 @@ export interface ImageStore {
 
 export class InMemoryImageStore implements ImageStore {
   private readonly images = new Map<string, StoredImage>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.images, cafeId);
+  }
+
   async save(image: StoredImage) {
     this.images.set(image.id, { ...image, bytes: image.bytes.slice() });
   }

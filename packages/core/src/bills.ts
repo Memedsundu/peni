@@ -1,6 +1,7 @@
 import type { MoneyAccount } from "./books";
 import type { Kurus } from "./money";
 import { MILLI } from "./stock";
+import { forgetIn, forgetInList } from "./removal";
 
 /**
  * Faturalar and Tedarikçiler (plan piece 18). Every bill or receipt the café gets is one
@@ -249,6 +250,13 @@ export class InMemoryBillStore implements BillStore {
   private readonly suppliers = new Map<string, Supplier>();
   private readonly bills = new Map<string, Bill>();
   private readonly payments: BillPayment[] = [];
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.suppliers, cafeId);
+    forgetIn(this.bills, cafeId);
+    forgetInList(this.payments, cafeId);
+  }
 
   async listSuppliers(cafeId: string, opts: { includeArchived?: boolean } = {}) {
     return [...this.suppliers.values()]

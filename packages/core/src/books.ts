@@ -1,4 +1,5 @@
 import type { Kurus } from "./money";
+import { forgetIn, forgetInList } from "./removal";
 
 /**
  * Nakit ve banka and Ay kapanışı (plan piece 20).
@@ -187,6 +188,13 @@ export class InMemoryBooksStore implements BooksStore {
   private readonly starts = new Map<string, MoneyStart>();
   private readonly movements: MoneyMovement[] = [];
   private readonly closes = new Map<string, MonthClose>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.starts, cafeId);
+    forgetInList(this.movements, cafeId);
+    forgetIn(this.closes, cafeId);
+  }
 
   async getStart(cafeId: string) {
     const s = this.starts.get(cafeId);

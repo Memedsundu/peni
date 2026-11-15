@@ -1,4 +1,5 @@
 import type { StaffRole } from "./staff";
+import { forgetIn, forgetKeys } from "./removal";
 
 /**
  * Görevler and Uyarılar (plan piece 22).
@@ -136,6 +137,15 @@ export class InMemoryTaskStore implements TaskStore {
   private readonly checks = new Map<string, TaskCheck>();
   private readonly digests = new Map<string, AlertDigest>();
   private readonly muted = new Set<string>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.lists, cafeId);
+    forgetIn(this.items, cafeId);
+    forgetIn(this.checks, cafeId);
+    forgetIn(this.digests, cafeId);
+    forgetKeys(this.muted, `${cafeId}|`);
+  }
 
   async listLists(cafeId: string, opts: { includeArchived?: boolean } = {}) {
     return [...this.lists.values()]

@@ -2,6 +2,7 @@ import type { BillCategory, BillKdv } from "./bills";
 import type { CheckOutcome, StatementProposal, ZReportProposal } from "./checks";
 import { sniffImageType, type ImageType } from "./images";
 import { MILLI, STOCK_MAX_MILLI, type NewStockItem, type StockKind, type StockUnit } from "./stock";
+import { forgetIn, forgetInList } from "./removal";
 
 /**
  * The assistant's ground (plan piece 24): the documents a café hands it, the drafts it
@@ -489,6 +490,18 @@ export class InMemoryAssistantStore implements AssistantStore {
   private readonly sellers = new Map<string, SupplierMatch>();
   private readonly inboxes = new Map<string, CafeInbox>();
   private readonly emails: InboundEmail[] = [];
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.documents, cafeId);
+    forgetIn(this.drafts, cafeId);
+    forgetIn(this.jobs, cafeId);
+    forgetInList(this.events, cafeId);
+    forgetIn(this.matches, cafeId);
+    forgetIn(this.sellers, cafeId);
+    forgetIn(this.inboxes, cafeId);
+    forgetInList(this.emails, cafeId);
+  }
 
   async saveDocument(doc: StoredDocument) {
     this.documents.set(doc.id, { ...doc, bytes: doc.bytes.slice() });

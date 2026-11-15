@@ -1017,4 +1017,123 @@ describe.skipIf(!url)("Prisma stores against Postgres", () => {
     expect(await stores.recipeDrafts.countRecipeDraftsSince(cafeId, at)).toBe(2);
     expect(await stores.recipeDrafts.countRecipeDraftsSince(cafeId, new Date(at.getTime() + 1))).toBe(1);
   });
+
+  it("adds many new orders and payments at once, for a café moved in from Shelby (N13)", async () => {
+    const day = "2026-10-18";
+    const base = {
+      cafeId, businessDay: day, status: "paid" as const, discountPercent: 0, createdByMemberId: "sm_x",
+      paidAt: at, paidByMemberId: "sm_x", paymentMethod: "cash" as const, tenderedKurus: null, changeKurus: null,
+      voidedAt: null, voidedByMemberId: null, voidReason: null, refundedAt: null, refundedByMemberId: null, refundReason: null,
+      refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null, createdAt: at, discountKurus: 0,
+    };
+    const line = (productId: string, unitPriceKurus: number, quantity: number) => ({ productId, name: productId, unitPriceKurus, quantity, discountPercent: 0, kdvPercent: 10 });
+    const orders = [1, 2, 3].map((n) => ({ ...base, id: `ord_bulk${n}_${run}`, number: 100 + n, createKey: `bulk${n}_${run}`, lines: [line("cay", 3_000, n), line("simit", 2_500, 1)], subtotalKurus: 3_000 * n + 2_500, totalKurus: 3_000 * n + 2_500 }));
+    await stores.orders.addOrders(orders);
+    expect(await stores.orders.getOrder(cafeId, orders[2]!.id)).toEqual(orders[2]);
+    await expect(stores.orders.addOrders([orders[0]!])).rejects.toThrow();
+    // The day's counter is at the highest number added: the till carries on after it, and a lower one never pulls it back.
+    expect(await stores.orders.nextNumber(cafeId, day)).toBe(104);
+    await stores.orders.addOrders([{ ...orders[0]!, id: `ord_bulk_low_${run}`, number: 50, createKey: `bulk_low_${run}` }]);
+    expect(await stores.orders.nextNumber(cafeId, day)).toBe(105);
+
+    const payments = orders.map((o) => ({
+      id: `pay_bulk_${o.id}`, cafeId, orderId: o.id, kind: "sale" as const, method: "cash" as const, status: "approved" as const, amountKurus: o.totalKurus,
+      tenderedKurus: null, changeKurus: null, terminal: "manual", deviceId: null, cashSessionId: null, key: `bulk:${o.id}`, reason: null,
+      startedAt: at, startedByMemberId: "sm_x", settledAt: at, settledByMemberId: "sm_x", reference: null, receiptNo: null, failure: null, terminalData: null,
+    }));
+    await stores.payments.addPayments(payments);
+    expect(await stores.payments.listPayments(cafeId, orders.map((o) => o.id))).toEqual(payments);
+    await expect(stores.payments.addPayments([{ ...payments[0]!, id: `pay_bulk_again_${run}` }])).rejects.toThrow();
+  });
+
+  it("removes a café and everything in it; an account only there goes, one at another café stays; never a café with peni history (N13)", async () => {
+    const gone = `cafe_rm_${run}`;
+    const other = `cafe_other_${run}`;
+    const cafe = (id: string) => ({ id, slug: id, name: id, address: null, district: null, city: null, coverImageUrl: null, referenceProductIds: [], hue: null, plan: "isletme" as const, trialEndsAt: null });
+    for (const id of [gone, other]) await stores.identity.saveCafe(cafe(id));
+    await stores.menu.saveCategory({ id: `cat_other_${run}`, cafeId: other, name: "Sıcak", sortOrder: 0 });
+
+    // Staff: one only here, one here and at the other café.
+    const both = `acc_both_${run}`;
+    const only = `acc_only_${run}`;
+    for (const id of [both, only]) await stores.staff.saveAccount({ id, email: `${id}@test.peni`, name: id, passwordHash: "x", customerId: null, disabledAt: null });
+    const member = { role: "barista" as const, createdAt: at, removedAt: null, ...NO_PIN };
+    await stores.staff.saveMember({ ...member, id: `sm_both_${run}`, cafeId: gone, accountId: both });
+    await stores.staff.saveMember({ ...member, id: `sm_only_${run}`, cafeId: gone, accountId: only });
+    await stores.staff.saveMember({ ...member, id: `sm_both_other_${run}`, cafeId: other, accountId: both });
+    await stores.directory.saveSettings(defaultSettings(gone));
+    await stores.directory.saveMembership({ id: `m_rm_${run}`, cafeId: gone, customerId: ayse, joinedAt: at, blocked: false });
+
+    // Each link that stops a cascade: recipe and bill lines on a stock item, a bill on a supplier, a check and a loan on a bill payment.
+    const item = { id: `stk_rm_${run}`, cafeId: gone, name: "Süt", kind: "ingredient" as const, unit: "l" as const, qtyMilli: 0, minMilli: 0, costKurus: null, archivedAt: null, createdAt: at };
+    await stores.stock.saveItem(item);
+    await stores.stock.applyBatch({ cafeId: gone, batchKey: `start_rm_${run}`, reason: "start", at, changes: [{ id: `mv_rm_${run}`, itemId: item.id, changeMilli: 5_000 }] });
+    await stores.stock.saveRecipe({ cafeId: gone, productId: "latte", mode: "recipe", lines: [{ itemId: item.id, qtyMilli: 200 }] });
+    await stores.bills.saveSupplier({ id: `sup_rm_${run}`, cafeId: gone, name: "Sütçü", phone: null, email: null, taxNo: null, iban: null, note: null, archivedAt: null, createdAt: at });
+    await stores.bills.saveBill({
+      id: `bil_rm_${run}`, cafeId: gone, supplierId: `sup_rm_${run}`, number: null, date: "2026-10-10", dueDate: null, note: null,
+      lines: [{ itemId: item.id, name: "Süt", category: "ingredients", qtyMilli: 10_000, totalKurus: 40_000 }],
+      totalKurus: 40_000, kdv: [], documentId: null, paidKurus: 40_000, paidAt: at, payments: [], version: 1, voidedAt: null, voidedById: null, voidReason: null,
+      createdById: "stf_x", createdAt: at, updatedAt: at, createKey: `rm_${run}`,
+    });
+    for (const [id, method] of [[`bpy_rm1_${run}`, "check"], [`bpy_rm2_${run}`, "loan"]] as const) {
+      await stores.bills.addPayment({ id, cafeId: gone, billId: `bil_rm_${run}`, amountKurus: 20_000, method, paidOn: "2026-10-10", account: null, memberId: "stf_x", createdAt: at });
+    }
+    await stores.debts.saveCheck({
+      id: `chk_rm_${run}`, cafeId: gone, number: "1", bankName: null, payee: "Sütçü", supplierId: null, amountKurus: 20_000,
+      writtenOn: "2026-10-10", dueDate: "2026-11-10", note: null, billPaymentId: `bpy_rm1_${run}`, cashedOn: null, cashedById: null, createdById: "stf_x", createdAt: at,
+    });
+    await stores.debts.saveLoan({
+      id: `lon_rm_${run}`, cafeId: gone, lenderKey: "name:ali", lenderMemberId: null, lenderName: "Ali", amountKurus: 20_000,
+      borrowedOn: "2026-10-10", dueDate: null, note: null, billPaymentId: `bpy_rm2_${run}`, createdById: "stf_x", createdAt: at,
+    });
+    // The till, the drawer and the feed.
+    const session = { id: `cash_rm_${run}`, cafeId: gone, opening: { expectedKurus: null, countKurus: 10_000, differenceKurus: 0, counts: null, note: null, at, byMemberId: `sm_only_${run}` }, closing: null, openKey: `rm_${run}`, closeKey: null };
+    await stores.cash.saveSession(session);
+    await stores.cash.saveMove({ id: `cmv_rm_${run}`, cafeId: gone, sessionId: session.id, kind: "out", amountKurus: 500, reason: "Süt", at, byMemberId: `sm_only_${run}`, key: `rm_${run}` });
+    const order = {
+      id: `ord_rm_${run}`, cafeId: gone, businessDay: "2026-10-16", number: 1, createKey: `rm_${run}`, status: "paid" as const, discountPercent: 0, createdByMemberId: `sm_only_${run}`, createdAt: at,
+      lines: [{ productId: "latte", name: "Latte", unitPriceKurus: 12_000, quantity: 1, discountPercent: 0, kdvPercent: 10 }], subtotalKurus: 12_000, discountKurus: 0, totalKurus: 12_000,
+      paidAt: at, paidByMemberId: `sm_only_${run}`, paymentMethod: "cash" as const, tenderedKurus: null, changeKurus: null, voidedAt: null, voidedByMemberId: null, voidReason: null,
+      refundedAt: null, refundedByMemberId: null, refundReason: null, refundKurus: null, deletedAt: null, deletedByMemberId: null, deleteReason: null,
+    };
+    await stores.orders.addOrders([order]);
+    await stores.payments.addPayments([{
+      id: `pay_rm_${run}`, cafeId: gone, orderId: order.id, kind: "sale", method: "cash", status: "approved", amountKurus: 12_000, tenderedKurus: null, changeKurus: null,
+      terminal: "manual", deviceId: null, cashSessionId: session.id, key: `rm_${run}`, reason: null, startedAt: at, startedByMemberId: `sm_only_${run}`, settledAt: at,
+      settledByMemberId: `sm_only_${run}`, reference: null, receiptNo: null, failure: null, terminalData: null,
+    }]);
+    const post = { id: `post_rm_${run}`, cafeId: gone, kind: "post" as const, title: null, body: "Merhaba", publishedAt: at, pinned: false, eventStartsAt: null, eventCapacity: null, authorId: `sm_only_${run}` };
+    await stores.community.savePost(post);
+    await stores.reports.add({ id: `rep_rm_${run}`, cafeId: gone, targetType: "post", targetId: post.id, postId: post.id, reporterId: ayse, reason: "spam", note: null, status: "open", createdAt: at, resolvedAt: null, resolvedBy: null });
+
+    const rowsOf = async (id: string) => {
+      const tables = await prisma.$queryRaw<{ table_name: string }[]>`SELECT table_name FROM information_schema.columns WHERE table_schema = 'public' AND column_name = 'cafeId'`;
+      const counts: Record<string, number> = {};
+      for (const { table_name } of tables) {
+        const [row] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n FROM "${table_name}" WHERE "cafeId" = $1`, id);
+        if (row!.n > 0n) counts[table_name] = Number(row!.n);
+      }
+      return counts;
+    };
+    expect(Object.keys(await rowsOf(gone)).sort()).toEqual(
+      ["Bill", "BillPayment", "CafeSettings", "CashMove", "CashSession", "CafePost", "ContentReport", "DebtCheck", "Loan", "Membership", "Order", "OrderCounter", "Payment", "StaffMember", "StockItem", "StockMove", "StockRecipe", "StockRecipeLine", "Supplier"].sort(),
+    );
+    const otherBefore = await rowsOf(other);
+
+    expect(await stores.removal.removeCafe(gone)).toEqual({ accountsRemoved: 1, accountsKept: 1 });
+    expect(await rowsOf(gone)).toEqual({});
+    expect(await stores.identity.getCafe(gone)).toBeNull();
+    expect(await prisma.billLine.count({ where: { billId: `bil_rm_${run}` } })).toBe(0);
+    expect(await prisma.orderLine.count({ where: { orderId: order.id } })).toBe(0);
+    expect(await stores.staff.getAccount(only)).toBeNull();
+    expect((await stores.staff.membershipsOf(both)).map((m) => m.cafeId)).toEqual([other]);
+    expect(await rowsOf(other)).toEqual(otherBefore);
+    expect(await stores.removal.removeCafe(gone)).toEqual({ accountsRemoved: 0, accountsKept: 0 });
+
+    // The café the tests above filled has pennies in its ledger: refused, and nothing deleted.
+    const filled = await rowsOf(cafeId);
+    await expect(stores.removal.removeCafe(cafeId)).rejects.toThrow(/peni history/);
+    expect(await rowsOf(cafeId)).toEqual(filled);
+  });
 });

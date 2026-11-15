@@ -1,6 +1,7 @@
 import type { AnyClose, MoneyAccount } from "./books";
 import type { Kurus } from "./money";
 import type { StaffRole } from "./staff";
+import { forgetIn } from "./removal";
 
 /**
  * Vardiyalar and Puantaj ve maaş (plan piece 21).
@@ -272,6 +273,16 @@ export class InMemoryShiftStore implements ShiftStore {
   private readonly rates = new Map<string, PayRate>();
   private readonly payouts = new Map<string, PayPayout>();
   private readonly closes = new Map<string, PayClose>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.shifts, cafeId);
+    forgetIn(this.weeks, cafeId);
+    forgetIn(this.days, cafeId);
+    forgetIn(this.rates, cafeId);
+    forgetIn(this.payouts, cafeId);
+    forgetIn(this.closes, cafeId);
+  }
 
   async listShifts(cafeId: string, from: string, through: string) {
     return [...this.shifts.values()]

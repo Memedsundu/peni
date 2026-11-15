@@ -28,6 +28,7 @@ const STATUS: Record<string, number> = {
   NOTHING_TO_SPEND: 409,
   ASKIDA_EMPTY: 409,
   ASKIDA_DISABLED: 409,
+  PENNY_OFF: 409,
   PRODUCT_NOT_ELIGIBLE: 409,
 };
 

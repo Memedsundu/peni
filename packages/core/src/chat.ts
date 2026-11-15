@@ -1,6 +1,7 @@
 import { addMonths, monthDays } from "./books";
 import { daysBetween, previousRange, REPORT_MAX_DAYS, validDay } from "./figures";
 import { plusDays, weekStartOf } from "./shifts";
+import { forgetIn, forgetInList } from "./removal";
 
 /**
  * The assistant's chat (plan piece 29): questions about the café's numbers, answered from
@@ -209,6 +210,12 @@ export interface ChatStore {
 export class InMemoryChatStore implements ChatStore {
   private readonly chats = new Map<string, Chat>();
   private readonly saved: SavedReport[] = [];
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.chats, cafeId);
+    forgetInList(this.saved, cafeId);
+  }
 
   async getChat(cafeId: string, id: string) {
     const c = this.chats.get(id);

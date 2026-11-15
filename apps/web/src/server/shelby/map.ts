@@ -1,4 +1,5 @@
 import {
+  STOCK_MAX_MILLI,
   defaultSettings,
   lenderKey,
   localDateKey,
@@ -16,6 +17,7 @@ import {
   type CardPayment,
   type CardSettings,
   type CashCount,
+  type CashMove,
   type CashSession,
   type Check,
   type Loan,
@@ -68,6 +70,12 @@ export interface MoveOptions {
    * Null moves everything.
    */
   from?: Date | null;
+  /**
+   * A copy taken while Shelby still works (`--rehearsal`; the preview copy, N13): pennies and
+   * the askı start off, so nothing at the copy reaches the peni ledger, which is never deleted
+   * and would stop the copy from being replaced. The real move keeps Penny's defaults.
+   */
+  preview?: boolean;
 }
 
 export interface PeniRecords {
@@ -84,6 +92,8 @@ export interface PeniRecords {
   orders: Order[];
   payments: Payment[];
   cashSessions: CashSession[];
+  /** Cash put in or taken out of a drawer still open in Shelby, other than sales. */
+  cashMoves: CashMove[];
   suppliers: Supplier[];
   bills: Bill[];
   billPayments: BillPayment[];
@@ -111,6 +121,8 @@ export interface MoveReport {
   moved: { what: string; count: number }[];
   notMoved: { what: string; count: number; why: string }[];
   warnings: string[];
+  /** Pennies and the askı are off in this copy (`MoveOptions.preview`). */
+  preview: boolean;
 }
 
 export interface Mapped {
@@ -133,6 +145,12 @@ export function unitOf(unit: string): { unit: StockUnit; factor: number } {
 
 /** An amount in Shelby's unit, in thousandths of Peni's. */
 export const milliOf = (qty: number, unit: string): number => Math.round(qty * unitOf(unit).factor * 1000);
+
+/**
+ * An amount Penny can start a stock item at: never below zero, never above Penny's most
+ * (a million kg, l or adet). Shelby has no most, and some cafés type 9999999 for "plenty".
+ */
+export const startMilli = (qty: number, unit: string): number => Math.min(STOCK_MAX_MILLI, Math.max(0, milliOf(qty, unit)));
 
 /** Shelby's week starts are a Sunday at 00:00Z meaning the Monday after (newer) or the Monday itself (older). */
 export function mondayOf(weekStart: Date): string {
@@ -186,7 +204,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     plan: "isletme",
     trialEndsAt: null,
   };
-  const settings: CafePeniSettings = { ...defaultSettings(cafeId), timeZone: tz };
+  const settings: CafePeniSettings = { ...defaultSettings(cafeId), timeZone: tz, ...(opts.preview ? { peniEnabled: false, askidaEnabled: false } : {}) };
 
   // ── Team: the same email and password; Shelby's admin is the owner.
   const accounts: StaffAccount[] = [];
@@ -259,7 +277,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
       kind: s.kind === "supply" ? "supply" : "ingredient",
       unit,
       qtyMilli: 0,
-      minMilli: Math.max(0, milliOf(s.minStock, s.unit)),
+      minMilli: startMilli(s.minStock, s.unit),
       costKurus: s.costPerUnit > 0 ? kurus(s.costPerUnit / factor) : null,
       archivedAt: null,
       createdAt: s.createdAt,
@@ -269,6 +287,13 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
   if (units.length) warnings.push(`Stock counted in ${units.map((u) => `"${u}"`).join(", ")} in Shelby is counted in adet in Penny.`);
   const below = snap.stockItems.filter((s) => s.currentStock < 0);
   if (below.length) warnings.push(`${below.length} stock item(s) were below zero in Shelby (${below.map((s) => s.name).join(", ")}); they start at zero.`);
+  const above = snap.stockItems.filter((s) => milliOf(s.currentStock, s.unit) > STOCK_MAX_MILLI);
+  if (above.length) {
+    const most = STOCK_MAX_MILLI / 1000;
+    warnings.push(
+      `${above.length} stock item(s) had more than Penny's most (${most}) in Shelby (${above.map((s) => `${s.name}: ${s.currentStock} ${s.unit}`).join(", ")}), most likely a stand-in for "plenty"; they start at ${most}.`,
+    );
+  }
   const stockStart: StockBatch | null = snap.stockItems.length
     ? {
         cafeId,
@@ -280,7 +305,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
         changes: snap.stockItems.map((s) => ({
           id: `shelby_start_${s.id}`,
           itemId: `shelby_s${s.id}`,
-          countedMilli: Math.max(0, milliOf(s.currentStock, s.unit)),
+          countedMilli: startMilli(s.currentStock, s.unit),
         })),
       }
     : null;
@@ -342,6 +367,28 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     closeKey: s.closeRequestKey ? `shelby:${s.closeRequestKey}` : null,
   }));
   if (cashSessions.some((s) => !s.closing)) warnings.push("Shelby's drawer was still open: close it in Shelby (Kasa kapat) before the final move.");
+  // A drawer still open (a preview copy while the café works, N13): what went in or out of it
+  // since it was opened, other than sales and refunds (they come with the orders) and the
+  // opening count, so Penny's drawer holds what Shelby's does. A closed drawer is its count.
+  const cashMoves: CashMove[] = [];
+  for (const s of sessions.filter((x) => !x.closedAt)) {
+    for (const m of snap.moneyMovements) {
+      if (m.sessionId !== s.id || m.account !== "drawer" || m.kind === "initial_balance" || /^(order_|cash_count:)/.test(m.sourceKey)) continue;
+      const amountKurus = kurus(m.amount);
+      if (!amountKurus) continue;
+      cashMoves.push({
+        id: `shelby_cm_${m.id}`,
+        cafeId,
+        sessionId: `shelby_cs_${s.id}`,
+        kind: amountKurus > 0 ? "in" : "out",
+        amountKurus: Math.abs(amountKurus),
+        reason: (m.note || DRAWER_KIND[m.kind] || m.kind).slice(0, 200),
+        at: m.createdAt,
+        byMemberId: who(m.actorId),
+        key: `shelby:${m.operationKey}`,
+      });
+    }
+  }
   const sessionAt = (at: Date) => {
     const s = sessions.find((x) => x.openedAt <= at && (!x.closedAt || at <= x.closedAt));
     return s ? `shelby_cs_${s.id}` : null;
@@ -935,6 +982,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     orders,
     payments,
     cashSessions,
+    cashMoves,
     suppliers,
     bills,
     billPayments,
@@ -963,6 +1011,7 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     ["Orders", orders.length],
     ["Till payments and refunds", payments.length],
     ["Kasa sessions", cashSessions.length],
+    ["Cash in and out of the open drawer", cashMoves.length],
     ["Suppliers", suppliers.length],
     ["Bills", bills.length],
     ["Bill payments", billPayments.length],
@@ -978,8 +1027,18 @@ export function mapShelby(snap: ShelbySnapshot, opts: MoveOptions): Mapped {
     ["Tasks", taskItems.length],
     ["Tasks done or skipped", taskChecks.length],
   ].map(([what, count]) => ({ what: what as string, count: count as number }));
-  return { records, report: { shelbyCafe: snap.cafe.name, from: fromDay, moved, notMoved, warnings } };
+  return { records, report: { shelbyCafe: snap.cafe.name, from: fromDay, moved, notMoved, warnings, preview: !!opts.preview } };
 }
+
+/** What Shelby's drawer movements were, for a Kasa move's reason when it had no note. */
+const DRAWER_KIND: Record<string, string> = {
+  transfer: "Transfer (Shelby)",
+  expense_payment: "Gider ödemesi (Shelby)",
+  debt_repayment: "Borç ödemesi (Shelby)",
+  credit_card_payment: "Kredi kartı ödemesi (Shelby)",
+  check_payment: "Çek ödemesi (Shelby)",
+  correction: "Düzeltme (Shelby)",
+};
 
 const ROLE_NAME: Record<StaffRole, string> = { owner: "Sahip", manager: "Müdür", chef: "Mutfak", barista: "Barista" };
 

@@ -63,6 +63,16 @@ describe("spending peni on an order", () => {
 });
 
 describe("gifts (ısmarlama)", () => {
+  it("sends none while the café's pennies are off", async () => {
+    const t = setup();
+    await t.member("ayse");
+    await t.member("mehmet");
+    await t.fund("ayse", 100);
+    t.directory.settings.set(CAFE, { ...(await t.directory.getSettings(CAFE)), peniEnabled: false });
+    await expect(t.service.sendGift({ fromMembershipId: "ayse", toMembershipId: "mehmet", peni: 60, idempotencyKey: "g_off" })).rejects.toMatchObject({ code: "PENNY_OFF" });
+    expect(await t.service.walletBalance("ayse")).toBe(100);
+  });
+
   it("holds the peni in escrow until the friend accepts", async () => {
     const t = setup();
     await t.member("ayse");

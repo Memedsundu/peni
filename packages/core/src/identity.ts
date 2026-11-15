@@ -112,6 +112,20 @@ export class InMemoryIdentityStore implements IdentityStore {
   private readonly logins: CustomerLogin[] = [];
   private readonly emailCodes = new Map<string, EmailCode>();
 
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    this.cafes.delete(cafeId);
+  }
+
+  /** The café's members' codes, when it's removed (in Postgres they're on the membership). */
+  forgetMemberCodes(membershipIds: string[]): void {
+    for (const id of membershipIds) {
+      const code = this.codes.get(id);
+      this.codes.delete(id);
+      if (code !== undefined) this.byCode.delete(code);
+    }
+  }
+
   async listCafes() {
     return [...this.cafes.values()].map(copyCafe);
   }

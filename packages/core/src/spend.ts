@@ -1,6 +1,7 @@
 import type { Kurus, Peni } from "./money";
 import { applyBps, kurusToPeniFloor } from "./money";
 import type { CafePeniSettings } from "./settings";
+import { forgetIn } from "./removal";
 
 /**
  * Spending peni at the till (plan piece 11). The customer opens their ödeme kodu: a
@@ -41,6 +42,11 @@ export interface SpendCodeStore {
 
 export class InMemorySpendCodeStore implements SpendCodeStore {
   private readonly codes = new Map<string, SpendCode>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.codes, cafeId);
+  }
 
   async saveSpendCode(code: SpendCode) {
     const clash = [...this.codes.values()].some((c) => c.cafeId === code.cafeId && c.code === code.code && c.membershipId !== code.membershipId);

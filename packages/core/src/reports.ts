@@ -1,3 +1,5 @@
+import { forgetInList } from "./removal";
+
 /**
  * Members report what other members wrote: a comment, or an event they opened (plan piece 15).
  * The café's own posts aren't reported; they're the café's to answer for.
@@ -45,6 +47,11 @@ export interface ReportStore {
 
 export class InMemoryReportStore implements ReportStore {
   private readonly reports: ContentReport[] = [];
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetInList(this.reports, cafeId);
+  }
 
   async add(report: ContentReport) {
     const dup = this.reports.some((r) => r.targetType === report.targetType && r.targetId === report.targetId && r.reporterId === report.reporterId);

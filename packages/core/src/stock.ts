@@ -1,4 +1,5 @@
 import type { Kurus } from "./money";
+import { forgetIn, forgetInList } from "./removal";
 
 /**
  * Stok (plan piece 17): what a café has (ingredients and supplies), how much, and what
@@ -203,6 +204,13 @@ export class InMemoryStockStore implements StockStore {
   private readonly items = new Map<string, StockItem>();
   private readonly moves: StockMove[] = [];
   private readonly recipes = new Map<string, Recipe>(); // `${cafeId}:${productId}`
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.items, cafeId);
+    forgetInList(this.moves, cafeId);
+    forgetIn(this.recipes, cafeId);
+  }
 
   async listItems(cafeId: string, opts: { includeArchived?: boolean } = {}) {
     return [...this.items.values()]

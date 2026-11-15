@@ -14,6 +14,12 @@ export function reportMarkdown(report: MoveReport, rows: CheckRow[], meta: { whe
     "",
     bad.length ? `**${bad.length} total(s) don't match.** They're marked ✗ below.` : "**Every total matches.**",
     "",
+    ...(report.preview
+      ? [
+          "**Pennies and the askı are off in this copy**, so nothing done at it reaches the peni ledger, which is never deleted: the copy can always be replaced. The real move, on switch night, leaves them on.",
+          "",
+        ]
+      : []),
     "## Moved",
     "",
     ...report.moved.map((m) => `- ${m.what}: ${m.count}`),

@@ -1,5 +1,6 @@
 import type { Peni } from "./money";
 import { defaultSettings, type CafePeniSettings } from "./settings";
+import { forgetIn } from "./removal";
 
 /** A customer's relationship with one café. Peni balances live per membership. */
 export interface Membership {
@@ -67,6 +68,13 @@ export class InMemoryDirectory implements PeniDirectory {
   readonly memberships = new Map<string, Membership>();
   readonly settings = new Map<string, CafePeniSettings>();
   readonly gifts = new Map<string, Gift>();
+
+  /** For removing the café (N13). */
+  forgetCafe(cafeId: string): void {
+    forgetIn(this.memberships, cafeId);
+    forgetIn(this.settings, cafeId);
+    forgetIn(this.gifts, cafeId);
+  }
 
   async getMembership(id: string) {
     const m = this.memberships.get(id);
