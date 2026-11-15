@@ -235,7 +235,11 @@ describe("the till", () => {
     const device = (await app.staff.registerDevice(owner, "Kasa")).token;
     const leylaId = (await app.staff.till(device)).staff.find((s) => s.name === "Leyla Kara")!.memberId;
     expect(await code(app.staff.pinSignIn(device, leylaId, "2580"))).toBe("NO_PIN");
+    // Hesabım and Bugün's reminder go by this: no PIN yet, then one.
+    const token = await signIn("leyla");
+    expect((await app.staff.me(token)).cafes.find((c) => c.slug === "moda")!.hasPin).toBe(false);
     await app.staff.setPin(owner, "4826");
+    expect((await app.staff.me(token)).cafes.find((c) => c.slug === "moda")!.hasPin).toBe(true);
     const pin = await app.staff.pinSignIn(device, leylaId, "4826");
     expect(pin.cafes.map((c) => c.slug)).toEqual(["moda"]);
     expect((await app.staff.at(pin.token, "moda", "till.correct")).role).toBe("owner");
